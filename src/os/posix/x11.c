@@ -386,7 +386,17 @@ int X11_EventText(XKeyEvent* ev, XIC ic, char* out, int n)
 		}
 		if(cp < 0x20 || cp == 0x7f)
 			continue; // control characters are keys, not text
-		k = OsPosix_UnicodeToSjis(cp, sj);
+		if(gOsTextGbk)
+		{
+			uint16_t code = OS_CodePointToGbk(cp);
+			k = code > 0xff ? 2 : code != 0;
+			if(k == 2)
+				sj[0] = (char)(code >> 8);
+			if(k)
+				sj[k - 1] = (char)code;
+		}
+		else
+			k = OsPosix_UnicodeToSjis(cp, sj);
 		if(k > 0)
 		{
 			memcpy(out + o, sj, (size_t)k);

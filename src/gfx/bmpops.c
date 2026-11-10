@@ -265,8 +265,8 @@ int BmpOp_GatherAdd(int dst, int src, uint32_t cx, uint32_t cy, uint32_t level)
 }
 
 /* "91 1D" of 1.494 on: src into dst through colour mode 0 (Blit_Copy), 1
- * (Blit_FilterKind3), 2 (Blit_FilterKind2), 3 (Blit_TintKeepAlpha) or 4
- * (Blit_AddColour) with the colour and level.  0 ok, 1 / 2 no destination
+ * (Blit_FilterKind3), 2 (Blit_FilterKind2), 3 (Blit_TintKeepAlpha), 4
+ * (Blit_AddColour) or 5 (Blit_SubtractColour).  0 ok, 1 / 2 no destination
  * / source, 6 unknown mode. */
 int BmpOp_ColourMode(int dst, int src, int mode, uint32_t colour, int level)
 {
@@ -282,6 +282,7 @@ int BmpOp_ColourMode(int dst, int src, int mode, uint32_t colour, int level)
 		case 2: Blit_FilterKind2(&d, &s, colour, level); break;
 		case 3: Blit_TintKeepAlpha(&d, &s, colour, level); break;
 		case 4: Blit_AddColour(&d, &s, colour, level); break;
+		case 5: Blit_SubtractColour(&d, &s, colour, level); break;
 		default: return 6;
 	}
 	return 0;

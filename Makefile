@@ -5,6 +5,8 @@
 #
 #   make                 native Linux build        -> bin/bgi
 #   make win             MinGW cross build          -> bin/bgi.exe
+#   make android-core    Android ARM64 core archive -> bin/android/arm64-v8a/libopenbgi-core.a
+#   make android-native  Android NativeActivity library -> bin/android/arm64-v8a/libopenbgi.so
 #   make wasm            Emscripten build           -> bin/wasm/openbgi.html (+ .js, .wasm; docs/wasm.md)
 #   make CC=clang        any other C99 compiler
 #   make tools           the command-line tools -> bin/bpasm, bin/bgiscn, bin/bgidump, bin/bgipack
@@ -37,8 +39,8 @@ CFLAGS  += $(CSTD) $(WARN) $(OPT) $(INC) -D_POSIX_C_SOURCE=200809L
 LDFLAGS +=
 
 # ---- platform -------------------------------------------------------------
-# PLATFORM is "posix", "win32" or "wasm"; "make win" selects the MinGW
-# toolchain, "make wasm" Emscripten (emcc on the PATH, e.g. from emsdk).
+# "make win" selects MinGW, "make wasm" Emscripten, and "make android-core"
+# the Android NDK cross compiler.
 PLATFORM ?= posix
 ifeq ($(PLATFORM),wasm)
   CC      := emcc
@@ -83,6 +85,35 @@ else ifeq ($(PLATFORM),win32)
   LDLIBS  += -lgdi32 -luser32 -lwinmm -limm32 -lcomctl32 -lole32 -loleaut32 -lshell32 -ladvapi32 -lcomdlg32 -luuid -lstrmiids
   CFLAGS  += -DBGI_WIN32
   LDFLAGS += -mwindows
+else ifneq ($(filter android-core android-native,$(PLATFORM)),)
+  ifeq ($(strip $(ANDROID_NDK_HOME)),)
+    $(error Set ANDROID_NDK_HOME to the Android NDK directory)
+  endif
+  ANDROID_API ?= 28
+  ANDROID_HOST_TAG ?= linux-x86_64
+  ANDROID_LLVM := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(ANDROID_HOST_TAG)/bin
+  CC := $(ANDROID_LLVM)/aarch64-linux-android$(ANDROID_API)-clang
+  AR := $(ANDROID_LLVM)/llvm-ar
+  CFLAGS += -DBGI_ANDROID -D_GNU_SOURCE -fPIC -Wno-unknown-warning-option
+  VORBIS := none
+  TARGET := bin/android/arm64-v8a/libopenbgi-core.a
+  ifeq ($(PLATFORM),android-native)
+    ifeq ($(and $(strip $(FREETYPE_INCLUDE)),$(strip $(FREETYPE_LIB))),)
+      $(error Set FREETYPE_INCLUDE and FREETYPE_LIB to the ARM64 FreeType headers and static library)
+    endif
+    ifeq ($(strip $(ANDROID_VORBIS_PREFIX)),)
+      $(error Set ANDROID_VORBIS_PREFIX to the installation directory of ARM64 Ogg and Vorbis static libraries)
+    endif
+    ANDROID_POSIX := audio files font machine native paths process registry thread time
+    OS_SRC := $(wildcard src/os/android/*.c) $(addprefix src/os/posix/,$(addsuffix .c,$(ANDROID_POSIX)))
+    CFLAGS += -I$(FREETYPE_INCLUDE)
+    LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lm
+    ANDROID_VORBIS_ARCHIVES := $(addprefix $(ANDROID_VORBIS_PREFIX)/lib/,libvorbisfile.a libvorbis.a libogg.a)
+    VORBIS := vorbisfile
+    VORBIS_CFLAGS := -I$(ANDROID_VORBIS_PREFIX)/include
+    VORBIS_LIBS := $(ANDROID_VORBIS_ARCHIVES) -lm
+    TARGET := bin/android/arm64-v8a/libopenbgi.so
+  endif
 else
   EXE     :=
   OS_SRC  := $(wildcard src/os/posix/*.c)
@@ -115,8 +146,10 @@ ifeq ($(VORBIS),auto)
   endif
 endif
 ifeq ($(VORBIS),vorbisfile)
-  CFLAGS += -DBGI_HAVE_VORBISFILE $(shell $(PKG_CONFIG) --cflags vorbisfile 2>/dev/null)
-  LDLIBS += $(shell $(PKG_CONFIG) --libs vorbisfile 2>/dev/null || echo -lvorbisfile -lvorbis -logg)
+  VORBIS_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags vorbisfile 2>/dev/null)
+  VORBIS_LIBS ?= $(shell $(PKG_CONFIG) --libs vorbisfile 2>/dev/null || echo -lvorbisfile -lvorbis -logg)
+  CFLAGS += -DBGI_HAVE_VORBISFILE $(VORBIS_CFLAGS)
+  LDLIBS += $(VORBIS_LIBS)
 endif
 ifeq ($(VORBIS),stb)
   CFLAGS += -DBGI_USE_STB_VORBIS
@@ -149,7 +182,7 @@ LIB_OBJ := $(filter-out obj/$(PLATFORM)/sys/main.o,$(OBJ)) # the engine without 
 
 TARGET ?= bin/bgi$(EXE)
 
-.PHONY: all win wasm wasm-sim tools check check-win check-wasm wasm-test test clean msg
+.PHONY: all win android-core android-native wasm wasm-sim tools check check-win check-wasm wasm-test test clean msg
 
 all: $(TARGET)
 
@@ -173,15 +206,32 @@ bin/bgipack$(EXE): tools/bgipack.c $(LIB_OBJ) | bin
 win:
 	$(MAKE) PLATFORM=win32
 
+android-core:
+	$(MAKE) PLATFORM=android-core
+
+android-native:
+	$(MAKE) PLATFORM=android-native
+
 wasm:
 	$(MAKE) PLATFORM=wasm
 
 wasm-sim:
 	$(MAKE) PLATFORM=wasmsim
 
+ifeq ($(PLATFORM),android-core)
+$(TARGET): $(LIB_OBJ) | bin
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $(LIB_OBJ)
+else ifeq ($(PLATFORM),android-native)
+$(filter obj/android-native/snd/bw/%,$(OBJ)): $(ANDROID_VORBIS_ARCHIVES)
+$(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) | bin
+	@mkdir -p $(dir $@)
+	$(CC) $(LDFLAGS) -shared -Wl,--no-undefined -Wl,-soname,libopenbgi.so -Wl,-z,max-page-size=16384 -o $@ $(LIB_OBJ) $(LDLIBS)
+else
 $(TARGET): $(OBJ) | bin
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
+endif
 
 obj/$(PLATFORM)/%.o: src/%.c | inc/bgi/msg.h
 	@mkdir -p $(dir $@)

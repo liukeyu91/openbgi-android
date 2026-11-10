@@ -42,6 +42,10 @@ void OS_ShellNotifyAssocChanged(void)
 // the shell folders under $HOME: the desktop, the programs menu and the documents; anything else is the home itself
 int OS_SpecialFolder(int csidl, char* buf, size_t n)
 {
+#ifdef BGI_ANDROID
+	BGI_UNUSED(csidl);
+	snprintf(buf, n, "%s", gPosixConfigDir);
+#else
 	const char* home = getenv("HOME");
 	if(!home)
 		home = ".";
@@ -52,6 +56,7 @@ int OS_SpecialFolder(int csidl, char* buf, size_t n)
 		case 5: snprintf(buf, n, "%s/Documents", home); break;                 // CSIDL_PERSONAL
 		default: snprintf(buf, n, "%s", home); break;
 	}
+#endif
 	return 1;
 }
 

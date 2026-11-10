@@ -476,9 +476,9 @@ int WaitTextOut_DrawChar(WaitTextOut_t* w, const char* p)
 		advance = 2 * gap - g.left + g.right + 1;
 	}
 	else
-	{ // fixed pitch: a half cell for a single-byte character
+	{
 		gap = 0;
-		advance = dbcs ? glyphW : glyphW / 2;
+		advance = Font_GlyphCellW(&g, glyphW, dbcs);
 	}
 
 	if(w->phase == 0)

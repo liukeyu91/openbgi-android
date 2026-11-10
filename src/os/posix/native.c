@@ -77,13 +77,23 @@ void OS_NativeAbsolute(const char* path, char* out, size_t n)
 
 int OS_WorkerLimit(void)
 {
+#ifdef BGI_ANDROID
+	return 1;
+#else
 	long n = sysconf(_SC_NPROCESSORS_ONLN);
 	return n < 1 ? 1 : n > 64 ? 64
 							  : (int)n;
+#endif
 }
 
 int OS_RunWorkers(int n, int (*fn)(int index, void* ctx), void* ctx)
 {
+#ifdef BGI_ANDROID
+	int i, failed = 0;
+	for(i = 0; i < n; i++)
+		failed += fn(i, ctx) != 0;
+	return failed;
+#else
 	pid_t* pids;
 	int i, failed = 0;
 	if(n <= 1)
@@ -113,6 +123,7 @@ int OS_RunWorkers(int n, int (*fn)(int index, void* ctx), void* ctx)
 	}
 	free(pids);
 	return failed;
+#endif
 }
 
 void OS_NativeArgs(int* argc, char*** argv) // main's arguments are native already

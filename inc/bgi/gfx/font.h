@@ -142,6 +142,9 @@ int FontCache_OpenExtra(FontCache_t* c, int* handle, const char* name, int size,
  * ARGB32 gets colour + coverage alpha, RGB16 the scaled colour, RGB32 a
  * 0/1 mask */
 void Font_PaintGlyph(Bmp_t* cell, Glyph_t* g, int code, FontRaster_t* font, uint32_t colour);
+
+// Fixed horizontal cell width, including room for wide Latin glyphs in GBK text.
+int Font_GlyphCellW(const Glyph_t* g, int fullWidth, int wide);
 int Font_GapFor(const Glyph_t* g, int size);    // proportional gap (the bitmap manager's text, the plain output)
 int Font_GapFor2(const Glyph_t* g, int size);   // proportional gap (the rich layout and Text_Measure)
 int Font_Percent(int a, int pct);               // a * pct / 100

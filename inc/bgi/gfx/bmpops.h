@@ -87,8 +87,8 @@ int BmpOp_VecSine(int slot, int periodX, int phaseX, int ampX, int periodY, int 
 int BmpOp_Resample(int dst, int src, int32_t sx16, int32_t sy16, int smooth);
 /* 1.494 on ("91 1D"): `src` into `dst` through colour mode
  * 0 copy, 1 blend toward src XOR colour, 2 luminance tint, 3 blend toward
- * the colour, 4 add the colour (`level` 0 .. 0x100); 0 ok, 1 no destination,
- * 2 no source, 6 bad mode */
+ * the colour, 4 add the colour, 5 subtract the colour (`level` 0 .. 0x100);
+ * 0 ok, 1 no destination, 2 no source, 6 bad mode */
 int BmpOp_ColourMode(int dst, int src, int mode, uint32_t colour, int level);
 /* 1.494 on ("91 1B"): Blit_GatherAdd of `src` into `dst`;
  * 0 ok, 1 no destination, 2 no source, 4 a rate above 1.0, 5 a level above 0x100 */

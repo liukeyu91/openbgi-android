@@ -261,6 +261,23 @@ WCHAR* Win32_ToWideDup(const char* s)
 	return w;
 }
 
+int Win32_TextToWide(const char* s, WCHAR* out, int cap)
+{
+	int n = 0;
+	if(!gOsTextGbk)
+		return Win32_ToWide(s, out, cap);
+	if(cap <= 0)
+		return 0;
+	while(s && *s && n < cap - 1)
+	{
+		int len = OS_GbkCharLen(s);
+		out[n++] = (WCHAR)OsCommon_CodePoint(s, len, NULL);
+		s += len;
+	}
+	out[n] = 0;
+	return n;
+}
+
 // ---- UTF-16 -> engine string -------------------------------------------------------------------
 
 // 1 when w[0], w[1] are a surrogate pair (one character in two units)
@@ -310,14 +327,14 @@ int Win32_FromWide(const WCHAR* w, char* out, int n)
 
 int Win32_TextFromWide(const WCHAR* w, char* out, int n)
 {
-	return FromWideCp(gOsTextUtf8 ? CP_UTF8 : WIN32_CP_SJIS, w, out, n);
+	return FromWideCp(gOsTextGbk ? 936 : gOsTextUtf8 ? CP_UTF8 : WIN32_CP_SJIS, w, out, n);
 }
 
 int Win32_TextBytes(const WCHAR* w, int units)
 {
 	if(units <= 0)
 		return 0;
-	return WideCharToMultiByte(gOsTextUtf8 ? CP_UTF8 : WIN32_CP_SJIS, 0, w, units, NULL, 0, NULL, NULL);
+	return WideCharToMultiByte(gOsTextGbk ? 936 : gOsTextUtf8 ? CP_UTF8 : WIN32_CP_SJIS, 0, w, units, NULL, 0, NULL, NULL);
 }
 
 int Win32_PathFromWide(const WCHAR* w, char* out, int n)

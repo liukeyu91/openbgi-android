@@ -98,7 +98,7 @@ int Text_MeasureInfo(int32_t out[3], const char* str, const FontInfo_t* fi, int 
 		}
 		else
 		{
-			int w = dbcs ? glyphW : glyphW / 2;
+			int w = Font_GlyphCellW(&g, glyphW, dbcs);
 			gap = 0;
 			total += w + pitch;
 		}
@@ -135,11 +135,11 @@ int Text_AbcWidths(int32_t* out, int32_t* outCount, const char* str, int font)
 		Glyph_t g;
 		uint32_t code;
 		int len = TextGetChar(&code, str);
-		int adv = TextIsWide(code, len) ? glyphW : glyphW / 2;
 		if(out)
 		{
-			int a, b;
+			int a, b, adv;
 			Text_PaintGlyph(&view, &g, (int)code, fi.font, 0xffffff);
+			adv = Font_GlyphCellW(&g, glyphW, TextIsWide(code, len));
 			a = g.left;
 			b = g.right >= g.left ? g.right - g.left + 1 : 0;
 			if(!b)

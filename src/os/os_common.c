@@ -17,6 +17,8 @@
 
 #include <stdio.h>
 
+#include "cp936.inc"
+
 // ---- Shift-JIS --------------------------------------------------------------------
 
 // 1 for the first byte of a two-byte Shift-JIS character (0x81 .. 0x9f, 0xe0 .. 0xfc)
@@ -27,12 +29,57 @@ int OsCommon_SjisIsLead(uint8_t c)
 
 // ---- the text encoding ("81 00") ------------------------------------------------------
 
-int gOsTextUtf8; // OS_SetTextEncoding: 1 when the script text is UTF-8
+int gOsTextUtf8;
+int gOsTextGbk;
 
-// "81 00" of 1.653 on: the script text is UTF-8 (1) or Shift-JIS (0); see os.h
-void OS_SetTextEncoding(int utf8)
+void OS_SetTextEncoding(int encoding)
 {
-	gOsTextUtf8 = utf8 != 0;
+	gOsTextUtf8 = encoding == OS_TEXT_UTF8;
+	gOsTextGbk = encoding == OS_TEXT_GBK;
+}
+
+static int GbkIndex(uint8_t lead, uint8_t trail)
+{
+	if(lead < 0x81 || lead > 0xfe || trail < 0x40 || trail > 0xfe || trail == 0x7f)
+		return -1;
+	return (lead - 0x81) * 190 + trail - 0x40 - (trail > 0x7f);
+}
+
+int OS_GbkCharLen(const char* s)
+{
+	uint8_t lead = (uint8_t)s[0];
+	return lead >= 0x81 && lead <= 0xfe && GbkIndex(lead, (uint8_t)s[1]) >= 0 ? 2 : 1;
+}
+
+uint32_t OS_GbkToCodePoint(uint16_t code)
+{
+	int index;
+	if(code < 0x80)
+		return code;
+	if(code == 0x80)
+		return 0x20ac;
+	index = GbkIndex((uint8_t)(code >> 8), (uint8_t)code);
+	return index >= 0 && kCp936[index] ? kCp936[index] : 0xfffd;
+}
+
+uint16_t OS_CodePointToGbk(uint32_t cp)
+{
+	size_t lo = 0, hi = BGI_COUNTOF(kCp936ByUnicode);
+	if(cp < 0x80)
+		return (uint16_t)cp;
+	if(cp == 0x20ac)
+		return 0x80;
+	while(lo < hi)
+	{
+		size_t mid = lo + (hi - lo) / 2;
+		if(OS_GbkToCodePoint(kCp936ByUnicode[mid]) < cp)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	if(lo < BGI_COUNTOF(kCp936ByUnicode) && OS_GbkToCodePoint(kCp936ByUnicode[lo]) == cp)
+		return kCp936ByUnicode[lo];
+	return 0;
 }
 
 /* a well-formed UTF-8 sequence at `s` (a lead byte with its continuation
@@ -82,6 +129,8 @@ uint32_t OsCommon_Utf8Decode(const uint8_t* u, int* outLen)
 uint32_t OsCommon_CodePoint(const char* s, int len, OsCommon_SjisLookup_t lookup)
 {
 	const uint8_t* u = (const uint8_t*)s;
+	if(gOsTextGbk)
+		return OS_GbkToCodePoint(len >= 2 ? (uint16_t)((u[0] << 8) | u[1]) : u[0]);
 	if(gOsTextUtf8)
 	{
 		int n;

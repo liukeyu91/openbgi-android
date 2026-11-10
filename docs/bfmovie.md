@@ -138,7 +138,9 @@ scripts expect of a machine that cannot play video.  The handlers are in
   (28 B + 151 G + 77 R) >> 9` indexes a table of `2 (((luma + 1) level
   colour_c) >> 16)` added to `src (256 - level) / 256`), 3 blend toward
   the colour by `level / 256` keeping the alpha (`Blit_TintKeepAlpha`), 4
-  add `colour level / 256` saturating (`Blit_AddColour`).  RGB32 or
+  add `colour level / 256` saturating (`Blit_AddColour`), 5 subtract the
+  same amount, clamping each channel at zero and keeping the source alpha
+  (`Blit_SubtractColour`).  Modes 4 and 5 affect the shared area.  RGB32 or
   ARGB32, the same on both sides; `level` 0 .. 0x100.  This is what the
   bust-shot control draws its characters through (mode 0 normally).
 * `91 1B` `dst, src, cx, cy, level →` (`BmpOp_GatherAdd`, the blitter

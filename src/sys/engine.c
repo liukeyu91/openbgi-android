@@ -32,6 +32,7 @@
 #include "bgi/error.h"
 #include "bgi/msg.h"
 #include "bgi/os.h"
+#include "bgi/strutil.h"
 
 int gLauncherMode;                       // "Execute as a launcher.": no sound, no saved window position
 int gNoMutex;                            // "Do not use mutex.": several instances may run
@@ -301,6 +302,7 @@ void Engine_Shutdown(void)
 //                      have no handler yet, and exit (after --engine=)
 //   --lang=en|ja       the language of the engine's messages (English by
 //                      default, "ja" the originals); BGI_LANG=ja the same
+//   --text-encoding=gbk use CP936 for a game's display text and text input
 //   --list=ARCHIVE     print the entries of an archive and what they are, and exit
 //   --extract=ARCHIVE  write the entries into a directory (--out=DIR, default
 //                      the archive's name without its extension) and exit:
@@ -383,6 +385,8 @@ static void Engine_ParseOptions(char* cmd)
 		}
 		else if(strcmp(opt, "--list-engines") == 0)
 			gOptList = 1;
+		else if(strcmp(opt, "--text-encoding=gbk") == 0)
+			Text_SetEncoding(TEXT_GBK);
 		else if(strcmp(opt, "--list-missing") == 0)
 			gOptListMissing = 1;
 		else if(strcmp(opt, "--debug") == 0 || strcmp(opt, "--debug=pause") == 0)
@@ -600,7 +604,7 @@ int Engine_Main(const char* cmdLine)
 			return 0;
 		}
 	}
-#if !defined(BGI_WASM) // no CPUID on a page: the processor checks are skipped there
+#if !defined(BGI_WASM) && !defined(BGI_ANDROID) // portable builds do not require the original x86 CPU
 	if(!Cpu_Detect())
 	{
 		OS_MessageBox(MSG_CPU_UNSUPPORTED, "Error!!", OS_MB_ICONHAND | OS_MB_SYSTEMMODAL);

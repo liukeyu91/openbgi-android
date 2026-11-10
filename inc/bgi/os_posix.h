@@ -33,6 +33,8 @@ struct OsFont;
 // draw `sjis` with its cell top-left at (x, y), blended with `rgb`, clipped to w x h; the pen position after it
 int OsPosix_FontDraw(struct OsFont* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* sjis, uint32_t rgb);
 int OsPosix_FontTextWidth(struct OsFont* f, const char* sjis, int bytes); // the advance in pixels of the first `bytes` bytes (< 0: all)
+int OsPosix_FontDrawEdit(struct OsFont* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* text, uint32_t rgb);
+int OsPosix_FontEditWidth(struct OsFont* f, const char* text, int bytes);
 int OsPosix_FontHeight(struct OsFont* f);                                 // the cell height in pixels
 struct OsFont* OsPosix_FontUi(int height);                                // the gothic face at that cell height; OS_FontClose() when done
 void OsPosix_FontShutdown(void);                                          // OS_Shutdown: release FreeType / fontconfig when no font is open

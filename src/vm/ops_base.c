@@ -585,7 +585,8 @@ static int Opcode_Getchar(Thread_t* t) // 6C: s → ch, dbcs, kinsoku
 {
 	char* s = (char*)PopPtr(t);
 	uint32_t ch;
-	int dbcs = SjisGetChar(&ch, s);
+	int dbcs;
+	TextGetCharMode(&ch, &dbcs, s, gTextGbk ? TEXT_GBK : TEXT_SJIS);
 	Thread_Push(t, ch);
 	Thread_Push(t, (uint32_t)dbcs);
 	Thread_Push(t, (uint32_t)IsKinsokuChar(ch));

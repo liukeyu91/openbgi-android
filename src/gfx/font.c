@@ -174,7 +174,7 @@ static void FontRaster_Render(FontRaster_t* f, Glyph_t* g, uint8_t* cell, int co
 	memset(f->ss, 0, (size_t)f->ssBytes);
 	OS_FontRender(f->os, str, len, f->ss, f->ssPitch, f->ssW, f->ssH);
 
-	if(code == 0x20 || code == (gTextUtf8 ? 0x3000 : 0x8140))
+	if(code == 0x20 || code == (gTextGbk ? 0xa1a1 : gTextUtf8 ? 0x3000 : 0x8140))
 	{ // spaces: blank cell, half advance
 		memset(cell, 0, (size_t)f->cellBytes);
 		g->left = 0;
@@ -538,6 +538,18 @@ void Font_PaintGlyph(Bmp_t* cell, Glyph_t* g, int code, FontRaster_t* font, uint
 		default:
 			break;
 	}
+}
+
+int Font_GlyphCellW(const Glyph_t* g, int fullWidth, int wide)
+{
+	int halfWidth = fullWidth / 2;
+	if(wide)
+		return fullWidth;
+	/* A GBK fallback font can have Latin ink wider than half an em.
+	 * Leave one blank column after that ink for outlined dialogue. */
+	if(gTextGbk && g->code >= '!' && g->code <= '~' && g->right >= halfWidth - 1)
+		return g->right + 2;
+	return halfWidth;
 }
 
 /* horizontal gap added on both sides of a proportionally drawn glyph,

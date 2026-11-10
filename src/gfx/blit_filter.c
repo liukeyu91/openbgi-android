@@ -162,7 +162,7 @@ void Blit_FilterKind3(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level)
 	}
 }
 
-/* The two remaining colour modes of "91 1D" (1.494 on): RGB32 or ARGB32
+/* The remaining colour modes of "91 1D": RGB32 or ARGB32
  * with the same mode on both sides, the alpha byte carried over
  * unchanged. */
 
@@ -190,28 +190,40 @@ void Blit_TintKeepAlpha(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level
 	}
 }
 
-// mode 4: s +sat (colour * level >> 8) per colour byte
-void Blit_AddColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level)
+// Modes 4 and 5 add or subtract the scaled colour over the shared area.
+static void OffsetColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level, int sign)
 {
 	int y, x, i;
-	int add[3];
+	int offset[3];
+	int w = dst->w < src->w ? dst->w : src->w;
+	int h = dst->h < src->h ? dst->h : src->h;
 	if(src->mode < PM_RGB32 || src->mode > PM_ARGB32 || dst->mode != src->mode)
 		return;
 	for(i = 0; i < 3; i++)
-		add[i] = (int)(((colour >> (8 * i)) & 0xff) * (unsigned)level) >> 8;
-	for(y = 0; y < src->h; y++)
+		offset[i] = sign * (int)((((colour >> (8 * i)) & 0xff) * (unsigned)level) >> 8);
+	for(y = 0; y < h; y++)
 	{
 		const uint32_t* s = (const uint32_t*)ROW(src, y);
 		uint32_t* d = (uint32_t*)ROW(dst, y);
-		for(x = 0; x < src->w; x++)
+		for(x = 0; x < w; x++)
 		{
 			uint32_t sv = s[x];
 			int out = (int)(sv & 0xff000000u);
 			for(i = 0; i < 3; i++)
-				out |= Sat8((int)((sv >> (8 * i)) & 0xff) + add[i]) << (8 * i);
+				out |= Sat8((int)((sv >> (8 * i)) & 0xff) + offset[i]) << (8 * i);
 			d[x] = (uint32_t)out;
 		}
 	}
+}
+
+void Blit_AddColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level)
+{
+	OffsetColour(dst, src, colour, level, 1);
+}
+
+void Blit_SubtractColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level)
+{
+	OffsetColour(dst, src, colour, level, -1);
 }
 
 // ---- gray conversions --------------------------------------------------------------------------

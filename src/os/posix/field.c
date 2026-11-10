@@ -7,10 +7,10 @@
  *           select-all state, and drawing into a 32-bit buffer
  *
  * The text entry over the picture (edit.c) and the dialogs (dialogs.c)
- * share it.  The text is Shift-JIS and the caret moves by whole
+ * share it. The text is CP932 or GBK and the caret moves by whole
  * characters.  Typed text comes through the X input method when there is
- * one, so Japanese can be entered with an IME; the conversion to
- * Shift-JIS is CP932 through iconv (sjis.c).  The selection is all or
+ * one. The conversion is CP932 through iconv (sjis.c), or CP936 in GBK
+ * mode. The selection is all or
  * nothing, as the original's EM_SETSEL 0, -1 after Tab / Enter leaves it.
  */
 #include "ui_internal.h"
@@ -18,6 +18,8 @@
 // byte length of the character starting at s[i]
 static int CharLen(const char* s, int i)
 {
+	if(gOsTextGbk)
+		return OS_GbkCharLen(s + i);
 	return OsCommon_SjisIsLead((uint8_t)s[i]) && s[i + 1] ? 2 : 1;
 }
 
@@ -47,7 +49,9 @@ void X11Field_SetText(X11Field_t* f, const char* text)
 			last = i;
 			i += CharLen(f->text, i);
 		}
-		if(f->text[last] && OsCommon_SjisIsLead((uint8_t)f->text[last]) && !f->text[last + 1])
+		uint8_t lead = (uint8_t)f->text[last];
+		int isLead = gOsTextGbk ? lead >= 0x81 && lead <= 0xfe : OsCommon_SjisIsLead(lead);
+		if(isLead && !f->text[last + 1])
 			f->text[last] = 0;
 	}
 	f->caret = (int)strlen(f->text);
@@ -198,7 +202,7 @@ void X11Field_Draw(const X11Field_t* f, uint32_t* pix, int pitch, int bufW, int 
 	struct OsFont* font, uint32_t rgb, int centred, int focused, int frame)
 {
 	int fontH = OsPosix_FontHeight(font);
-	int textW = OsPosix_FontTextWidth(font, f->text, -1);
+	int textW = OsPosix_FontEditWidth(font, f->text, -1);
 	int tx, ty = y + (h - fontH) / 2;
 	int inner = frame ? 3 : 0; // the box's border width
 	if(frame)
@@ -215,20 +219,20 @@ void X11Field_Draw(const X11Field_t* f, uint32_t* pix, int pitch, int bufW, int 
 	// keep the caret in view when the text is wider than the field
 	if(!centred && textW > w - 2 * inner - 4)
 	{
-		int caretX = OsPosix_FontTextWidth(font, f->text, f->caret);
+		int caretX = OsPosix_FontEditWidth(font, f->text, f->caret);
 		if(caretX > w - 2 * inner - 6)
 			tx -= caretX - (w - 2 * inner - 6);
 	}
 	if(focused && f->selAll && f->text[0])
 	{
 		Ui_FillRect(pix, pitch, bufW, bufH, tx, ty, textW, fontH, UI_SELECT_BG);
-		OsPosix_FontDraw(font, pix, pitch, bufW, bufH, tx, ty, f->text, UI_SELECT_TEXT);
+		OsPosix_FontDrawEdit(font, pix, pitch, bufW, bufH, tx, ty, f->text, UI_SELECT_TEXT);
 	}
 	else
-		OsPosix_FontDraw(font, pix, pitch, bufW, bufH, tx, ty, f->text, rgb);
+		OsPosix_FontDrawEdit(font, pix, pitch, bufW, bufH, tx, ty, f->text, rgb);
 	if(focused && !f->selAll)
 	{
-		int cx = tx + OsPosix_FontTextWidth(font, f->text, f->caret);
+		int cx = tx + OsPosix_FontEditWidth(font, f->text, f->caret);
 		Ui_FillRect(pix, pitch, bufW, bufH, cx, ty, 1, fontH, rgb);
 	}
 }

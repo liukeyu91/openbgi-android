@@ -144,12 +144,14 @@ size_t OS_SjisToUtf8(const char* sjis, char* out, size_t n);
 uint32_t OS_SjisToCodePoint(uint16_t sjis);
 // UTF-8 to Shift-JIS ("81 20" of 1.653 on); a character without a code becomes '?'; the length written
 size_t OS_Utf8ToSjis(const char* utf8, char* out, size_t n);
-/* "81 00" of 1.653 on: the script text is UTF-8 (1) rather than Shift-JIS
- * (0).  Text the engine hands this layer - window titles, message boxes,
- * the characters OS_FontRender draws - is then in that encoding; the
- * engine's own messages stay Shift-JIS, so the back ends take each
- * well-formed UTF-8 sequence as it is and convert the rest. */
-void OS_SetTextEncoding(int utf8);
+enum { OS_TEXT_SJIS, OS_TEXT_UTF8, OS_TEXT_GBK };
+/* Script text encoding. UTF-8 also affects titles and messages; GBK is
+ * used for game glyphs and edit fields. Paths and engine messages keep
+ * their CP932 conversion in GBK mode. */
+void OS_SetTextEncoding(int encoding);
+int OS_GbkCharLen(const char* s); // one byte, or two for a complete GBK pair
+uint32_t OS_GbkToCodePoint(uint16_t code); // U+FFFD for an unmapped code
+uint16_t OS_CodePointToGbk(uint32_t cp); // packed GBK code, zero if unrepresentable
 int OS_SetCurrentDir(const char* dir); // SetCurrentDirectory; 1 on success
 
 /* The engine refuses to start twice: a named mutex (CreateMutex) guards

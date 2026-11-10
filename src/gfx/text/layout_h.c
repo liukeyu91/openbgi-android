@@ -229,7 +229,7 @@ int Text_LayoutCoreH(RichState_t* rich, int32_t* outLines, const char* str, int 
 		}
 		else
 		{
-			width = dbcs ? cw : cw / 2;
+			width = Font_GlyphCellW(&g, cw, dbcs);
 			gap = 0;
 		}
 		// 1.494 on: the font's extra width, and half a glyph more in italics
@@ -392,7 +392,7 @@ static void RubyEmitH(RichChar_t* base, const RubyNode_t* entry, const FontInfo_
 	for(i = 0; i < n; i++)
 	{
 		int code = entry->readingCodes[i];
-		int w = code >= 0x100 ? glyphW : glyphW / 2;
+		int w;
 		Glyph_t g;
 		RichChar_t* node = Layout_NewNode(curDelay);
 
@@ -402,6 +402,7 @@ static void RubyEmitH(RichChar_t* base, const RubyNode_t* entry, const FontInfo_
 		node->srcOfs = base->srcOfs;
 		Bmp_Fill(&cell, NULL, 0);
 		Font_PaintGlyph(&cell, &g, code, rfi->font, colour);
+		w = Font_GlyphCellW(&g, glyphW, code >= 0x100);
 		Layout_GlyphBitmap(&node->glyph, w + sdxOn, size + sdyOn, &cell, &g, code, rfi->font, style, sdx, sdy, 0);
 		*link = node;
 		link = &node->next;

@@ -11,7 +11,8 @@
  * one "next character" decoder with a mode that the text renderer, the
  * window and the string instructions all go through.  The Text* functions
  * here are that decoder: a character code is the Shift-JIS code in
- * Shift-JIS mode and the Unicode scalar in UTF-8 mode, and the tables of
+ * Shift-JIS mode and the Unicode scalar in UTF-8 mode. The opt-in GBK
+ * mode uses the packed CP936 code. The tables of
  * punctuation the text code keeps as Shift-JIS literals are read through
  * TextTableChar, which converts them to the current code space.
  */
@@ -34,10 +35,12 @@ void SplitPath(const char* path, char* drive, char* dir, char* fname, char* ext)
 
 #define TEXT_SJIS 0 // code page 932
 #define TEXT_UTF8 1 // code page 65001
+#define TEXT_GBK  2 // code page 936
 
 extern int gTextUtf8; // the mode: 1 in UTF-8 mode
+extern int gTextGbk;  // the mode: 1 in GBK mode
 
-void Text_SetEncoding(int mode); // TEXT_SJIS / TEXT_UTF8 (also told to the OS layer)
+void Text_SetEncoding(int mode); // TEXT_SJIS / TEXT_UTF8 / TEXT_GBK (also told to the OS layer)
 
 /* the character at `s`: its byte length (1 or 2 in Shift-JIS, 1 .. 4 in
  * UTF-8; a surrogate pair written as two 3-byte sequences counts as one
@@ -68,6 +71,6 @@ int TextCodeInSet(uint32_t code, const char* sjisSet);
  * to skip a conversion the text does not need. */
 #define TEXT_RAW 0x80000000u
 uint32_t TextSniff(const char* s);
-int TextGetCharMode(uint32_t* out, int* wide, const char* s, uint32_t mode); // the decoder with an explicit mode (TEXT_SJIS / TEXT_UTF8 / TEXT_RAW: one byte); *wide as TextIsWide
+int TextGetCharMode(uint32_t* out, int* wide, const char* s, uint32_t mode); // explicit text encoding (TEXT_RAW takes one byte); *wide as TextIsWide
 
 #endif

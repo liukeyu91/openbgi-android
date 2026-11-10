@@ -284,7 +284,7 @@ void OS_FontClose(OsFont_t* f)
 static int FontCharWide(const char* sjis, int len, WCHAR* wide)
 {
 	int wn;
-	if(gOsTextUtf8)
+	if(gOsTextUtf8 || gOsTextGbk)
 	{
 		uint32_t cp = OsCommon_CodePoint(sjis, len, NULL);
 		if(cp >= 0x10000)

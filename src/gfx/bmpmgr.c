@@ -563,8 +563,9 @@ int BmpMgr_DrawTextEx(BmpMgr_t* m, Bmp_t* dst, int* measure, int x, int y, const
 		}
 		else
 		{
-			advance = dbcs ? glyphW : glyphW / 2;
-			view.w = advance; // the blit covers only the advance
+			advance = Font_GlyphCellW(&glyph, glyphW, dbcs);
+			if(view.w > advance)
+				view.w = advance;
 		}
 		if(wrap && (uint32_t)(advance + 2 * gap + x) > (uint32_t)maxX)
 		{

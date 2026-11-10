@@ -145,7 +145,7 @@ void OS_EditSetText(const char* t)
 	WCHAR wide[WIN32_WPATH];
 	if(!gEdit)
 		return;
-	Win32_ToWide(t, wide, (int)BGI_COUNTOF(wide));
+	Win32_TextToWide(t, wide, (int)BGI_COUNTOF(wide));
 	SetWindowTextW(gEdit, wide);
 }
 

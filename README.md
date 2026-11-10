@@ -1,5 +1,22 @@
 # OpenBGI
 
+## OpenBGI Android 0.2
+
+这是 OpenBGI 的 Android 移植分支。当前 APK 面向 ARM64、Android 9
+及以上，适配简体中文《フレラバ HD Renewal Edition》。游戏文件由玩家自备。
+
+从 GitHub Releases 下载 `OpenBGI-Android-arm64.apk` 并安装。首次打开时，
+选择包含 `system.arc` 和 `Archive/` 的已解压游戏目录。导入会复制游戏档案，
+需要相应的可用空间。
+
+已在小米 8 验证剧情、普通及快速存读档和序章图像处理修复。首次导入的
+文件复制逻辑已做桌面回归，系统文件夹选择流程待真机验证。
+
+构建方法和依赖版本见 [Android 构建说明](tools/android/README.md)。
+项目基于 [Cytlan/OpenBGI](https://github.com/Cytlan/openbgi)，沿用 GPL-2.0。
+
+## Upstream OpenBGI
+
 OpenBGI is an open-source reimplementation, in C99, of Ethornell's
 "Buriko General Interpreter" (BGI), the visual-novel engine.  It is
 reverse-engineered function by function from the `tayutama.exe` build
@@ -79,6 +96,8 @@ Testing happens on a case-by-case basis, and to exercise newly implemented opcod
     make              Linux (gcc or clang; X11, Xext, FreeType, optionally
                       ALSA, fontconfig and libvorbisfile via pkg-config)
     make win          Windows through MinGW (i686-w64-mingw32-gcc)
+    make android-core Android ARM64 static core (set ANDROID_NDK_HOME)
+    make android-native Android NativeActivity library (see tools/android/README.md)
     make wasm         the browser through Emscripten (emcc) -> bin/wasm/openbgi.html;
                       `node tools/wasm/server.js <game dir>` serves it (docs/wasm.md)
     make tools        the command-line tools: bin/bpasm, the assembler /
@@ -96,6 +115,13 @@ binaries to `bin/`.  `VORBIS=vorbisfile|stb|none` selects the Vorbis
 decoder, `OPT=...` the optimisation flags; `docs/building.md` has the
 details, the optional dependencies and the state of the Windows and
 WebAssembly builds.
+
+The Android target builds `bin/android/arm64-v8a/libopenbgi-core.a`
+with the NDK Clang toolchain on Linux. It defaults to API 28
+(`ANDROID_API`). The Android app linking it supplies the platform
+services declared in `inc/bgi/os.h`.
+The NativeActivity smoke target supplies those services for the initial
+Fureraba HD startup test. See [the Android build and test steps](tools/android/README.md).
 
 ## Running
 
@@ -127,6 +153,11 @@ not use mutex."` (needed for a second instance in the same directory)
 work as before.  A game path with spaces in it may be passed as one
 argument (`bin/bgi "$HOME/VN/[August] Fortune Arterial"`), as
 may an option's value (`--games="$HOME/VN/my games.json"`).
+
+Use `--text-encoding=gbk` with a patch that stores its display strings
+and player names in Windows code page 936. It leaves path and archive name
+conversion in CP932. For the Chinese Fureraba HD patch, the Linux smoke
+test uses `--engine=1.616 --productname=FriendToLoverHD --text-encoding=gbk`.
 
 A game copied straight from its disc carries the disc marker, a 16-byte
 file named like the product (`Tayutama`, `HanairoHeptagram`,

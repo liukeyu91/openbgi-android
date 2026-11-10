@@ -161,7 +161,13 @@ int OS_DisplayAdapter(char* desc, size_t n, uint32_t version[4])
 {
 	// no Direct3D here: the X server is the "adapter"
 	if(n)
-		snprintf(desc, n, "X11 display");
+		snprintf(desc, n,
+#ifdef BGI_ANDROID
+			"Android native window"
+#else
+			"X11 display"
+#endif
+		);
 	version[0] = version[1] = version[2] = version[3] = 0;
 	return 1;
 }
@@ -177,6 +183,10 @@ struct OsProcess
 // the command line (Shift-JIS, converted) through "sh -c"; NULL when fork fails (a failed exec ends the child with 127)
 OsProcess_t* OS_ProcessStart(const char* cmdLine)
 {
+#ifdef BGI_ANDROID
+	BGI_UNUSED(cmdLine);
+	return NULL;
+#else
 	OsProcess_t* p = (OsProcess_t*)calloc(1, sizeof *p);
 	char utf[0x1000];
 	OsPosix_SjisToUtf8(cmdLine, utf, sizeof utf);
@@ -192,6 +202,7 @@ OsProcess_t* OS_ProcessStart(const char* cmdLine)
 		return NULL;
 	}
 	return p;
+#endif
 }
 
 void OS_ProcessWaitIdle(OsProcess_t* p)

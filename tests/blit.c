@@ -521,6 +521,34 @@ static void TestHalfSize(void)
 	gBmpMgr = NULL;
 }
 
+static void TestColourSubtract(void)
+{
+	Bmp_t src, dst;
+	uint32_t colour = 0xab25ff41u;
+	printf("colour subtract\n");
+	gBmpMgr = BmpMgr_New(3);
+	CHECK(BmpMgr_Create(gBmpMgr, 0, 1, 1, PM_ARGB32));
+	CHECK(BmpMgr_Create(gBmpMgr, 1, 2, 2, PM_ARGB32));
+	CHECK(BmpMgr_Create(gBmpMgr, 2, 1, 1, PM_RGB32));
+	BmpMgr_GetInfo(gBmpMgr, &src, 0);
+	BmpMgr_GetInfo(gBmpMgr, &dst, 1);
+	Bmp_Fill(&src, NULL, 0x7f3405f0u);
+	Bmp_Fill(&dst, NULL, 0x40202020u);
+	CHECK(BmpOp_ColourMode(1, 0, 5, colour, 128) == 0);
+	CHECK(*(uint32_t*)dst.pixels == 0x7f2200d0u);
+	CHECK(*(uint32_t*)(dst.pixels + 4) == 0x40202020u);
+	CHECK(*(uint32_t*)(dst.pixels + dst.pitch) == 0x40202020u);
+	CHECK(BmpOp_ColourMode(1, 2, 5, colour, 256) == 0);
+	CHECK(*(uint32_t*)dst.pixels == 0x7f2200d0u);
+	CHECK(BmpOp_ColourMode(1, 0, 6, colour, 256) == 6);
+	CHECK(BmpOp_ColourMode(1, 0, 4, colour, 128) == 0);
+	CHECK(*(uint32_t*)dst.pixels == 0x7f4684ffu);
+	CHECK(BmpOp_ColourMode(0, 0, 5, colour, 256) == 0);
+	CHECK(*(uint32_t*)src.pixels == 0x7f0f00afu);
+	BmpMgr_Delete(gBmpMgr);
+	gBmpMgr = NULL;
+}
+
 /* "91 31" and setParam 0xC0 / 0xC1 (1.573 on): an object with its hidden
  * switch set is not visible although shown and enabled; the switch and
  * "90 31"'s enabled flag reach the children only when the parent's
@@ -595,6 +623,7 @@ int main(void)
 	TestTransforms();
 	TestBicubic();
 	TestHalfSize();
+	TestColourSubtract();
 	TestHiddenSwitch();
 	TestVirtualVisibility();
 	if(gFails)

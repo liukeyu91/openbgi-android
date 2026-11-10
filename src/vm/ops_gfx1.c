@@ -386,7 +386,7 @@ static int Opcode_Gfx1_GatherAdd(Thread_t* t)
 /* 91 1D (1.494 on): dst, src, mode, colour, level →
  * The colour modes of the bust-shot control (BmpOp_ColourMode): src into
  * dst through mode 0 copy, 1 blend toward src XOR colour, 2 luminance
- * tint, 3 blend toward the colour, 4 add the colour, at `level` (0 ..
+ * tint, 3 blend toward the colour, 4 add the colour, 5 subtract it, at `level` (0 ..
  * 0x100).  An unknown mode is a script error. */
 static int Opcode_Gfx1_ColourMode(Thread_t* t)
 {

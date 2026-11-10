@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.openbgi.port"
+    android:versionCode="2"
+    android:versionName="0.2">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34" />
+    <application
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="false"
+        android:extractNativeLibs="false"
+        android:label="OpenBGI"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <activity
+            android:name="org.openbgi.port.LauncherActivity"
+            android:configChanges="keyboardHidden|orientation|screenLayout|screenSize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="android.app.NativeActivity"
+            android:configChanges="keyboardHidden|orientation|screenLayout|screenSize"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape">
+            <meta-data android:name="android.app.lib_name" android:value="openbgi" />
+        </activity>
+    </application>
+</manifest>

@@ -36,6 +36,7 @@
 #include <dirent.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -46,7 +47,6 @@
 
 #ifdef BGI_HAVE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
-#include <unistd.h>
 #endif
 
 // ---- shared faces -------------------------------------------------------------
@@ -186,9 +186,13 @@ static int ResolveByScan(int mincho, char* out, size_t n)
 	char userFonts[2][1024];
 	const char* dirs[6];
 	int ndirs = 0, i, pass;
+#ifdef BGI_ANDROID
+	dirs[ndirs++] = "/system/fonts";
+#else
 	dirs[ndirs++] = "/etc/alternatives";
 	dirs[ndirs++] = "/usr/share/fonts";
 	dirs[ndirs++] = "/usr/local/share/fonts";
+#endif
 	if(home)
 	{
 		snprintf(userFonts[0], sizeof userFonts[0], "%s/.fonts", home);
@@ -269,7 +273,14 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 	if(ResolveByFontconfig(utf8, mincho, bold, italic, out, n, index))
 		return 1;
 #endif
-	return ResolveByScan(mincho, out, n);
+	if(!ResolveByScan(mincho, out, n))
+		return 0;
+#ifdef BGI_ANDROID
+	// Android's Noto CJK collection lists JP, KR, SC, TC, HK in that order.
+	if(gOsTextGbk && (strstr(out, "NotoSansCJK-") || strstr(out, "NotoSerifCJK-")) && strstr(out, ".ttc"))
+		*index = 2;
+#endif
+	return 1;
 }
 
 // the shared face of a file and index: another reference to an open one, or a newly loaded one; NULL when FreeType cannot load it
@@ -329,6 +340,21 @@ static void FaceRelease(FaceRec_t* r)
 static void CellMetrics(FT_Face face, FT_Pos* ascUnits, FT_Pos* descUnits)
 {
 	const TT_OS2* os2 = (const TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+#ifdef BGI_ANDROID
+	/* Noto CJK's Win metrics reserve space beyond the CJK em for marks.
+	 * For GBK text use its typographic cell, so the ink has the intended
+	 * height at the script's independently specified character width. */
+	if(gOsTextGbk && os2 && face->family_name &&
+		(strncmp(face->family_name, "Noto Sans CJK", 13) == 0 ||
+		 strncmp(face->family_name, "Noto Serif CJK", 14) == 0) &&
+		os2->sTypoAscender > 0 && os2->sTypoDescender <= 0 &&
+		os2->sTypoAscender - os2->sTypoDescender == face->units_per_EM)
+	{
+		*ascUnits = os2->sTypoAscender;
+		*descUnits = -os2->sTypoDescender;
+		return;
+	}
+#endif
 	if(os2 && (os2->usWinAscent || os2->usWinDescent))
 	{
 		*ascUnits = os2->usWinAscent;
@@ -814,9 +840,27 @@ int OS_FontCharAdvance(OsFont_t* f, const char* sjis, int len)
 // ---- antialiased text for the back end's own windows ---------------------------
 
 // the next character of a string in the text encoding: its length (1 .. 4 bytes) and code point
-static int NextChar(const char* s, uint32_t* cp)
+static int NextChar(const char* s, uint32_t* cp, int gbk)
 {
 	int len = 1;
+	if(gOsTextGbk)
+	{
+		const uint8_t* bytes = (const uint8_t*)s;
+		if(gbk)
+		{
+			len = OS_GbkCharLen(s);
+			*cp = OS_GbkToCodePoint(len == 2 ? (uint16_t)((bytes[0] << 8) | bytes[1]) : bytes[0]);
+			return len;
+		}
+		// The back end's own UI still uses its CP932 literals.
+		if(OsCommon_SjisIsLead(bytes[0]) && bytes[1])
+		{
+			*cp = OsPosix_SjisChar((uint16_t)((bytes[0] << 8) | bytes[1]));
+			return 2;
+		}
+		*cp = bytes[0] >= 0xa1 && bytes[0] <= 0xdf ? 0xff61 + bytes[0] - 0xa1 : bytes[0];
+		return 1;
+	}
 	if(gOsTextUtf8)
 	{
 		int n = OsCommon_Utf8SeqLen((const uint8_t*)s);
@@ -832,7 +876,7 @@ static int NextChar(const char* s, uint32_t* cp)
  * cell top-left at (x, y), blending the coverage with the colour over
  * what is there and clipping to w x h; returns the pen position after
  * the last character (x itself without a font) */
-int OsPosix_FontDraw(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* sjis, uint32_t rgb)
+static int FontDrawText(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* sjis, uint32_t rgb, int gbk)
 {
 	int pen = x;
 	if(!f)
@@ -842,7 +886,7 @@ int OsPosix_FontDraw(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x,
 		uint32_t cp;
 		FT_GlyphSlot g;
 		int yy, xx;
-		sjis += NextChar(sjis, &cp);
+		sjis += NextChar(sjis, &cp, gbk);
 		g = LoadGlyph(f, cp, FT_RENDER_MODE_NORMAL);
 		if(!g)
 			continue;
@@ -871,7 +915,7 @@ int OsPosix_FontDraw(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x,
 }
 
 // the advance of `sjis` in pixels (the first `bytes` bytes, or all when < 0), without rendering; 0 without a font
-int OsPosix_FontTextWidth(OsFont_t* f, const char* sjis, int bytes)
+static int FontTextWidth(OsFont_t* f, const char* sjis, int bytes, int gbk)
 {
 	int pen = 0;
 	const char* end = bytes < 0 ? NULL : sjis + bytes;
@@ -882,13 +926,33 @@ int OsPosix_FontTextWidth(OsFont_t* f, const char* sjis, int bytes)
 		uint32_t cp;
 		FT_Face ft = f->rec->face;
 		FT_UInt gi;
-		sjis += NextChar(sjis, &cp);
+		sjis += NextChar(sjis, &cp, gbk);
 		FT_Activate_Size(f->size);
 		gi = FT_Get_Char_Index(ft, cp);
 		if(FT_Load_Glyph(ft, gi, FT_LOAD_NO_BITMAP | FT_LOAD_DEFAULT) == 0)
 			pen += (int)((ft->glyph->advance.x + 32) >> 6);
 	}
 	return pen;
+}
+
+int OsPosix_FontDraw(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* sjis, uint32_t rgb)
+{
+	return FontDrawText(f, dst, pitch, w, h, x, y, sjis, rgb, 0);
+}
+
+int OsPosix_FontDrawEdit(OsFont_t* f, uint32_t* dst, int pitch, int w, int h, int x, int y, const char* text, uint32_t rgb)
+{
+	return FontDrawText(f, dst, pitch, w, h, x, y, text, rgb, 1);
+}
+
+int OsPosix_FontTextWidth(OsFont_t* f, const char* sjis, int bytes)
+{
+	return FontTextWidth(f, sjis, bytes, 0);
+}
+
+int OsPosix_FontEditWidth(OsFont_t* f, const char* text, int bytes)
+{
+	return FontTextWidth(f, text, bytes, 1);
 }
 
 int OsPosix_FontHeight(OsFont_t* f)

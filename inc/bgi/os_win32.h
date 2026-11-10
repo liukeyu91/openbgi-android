@@ -47,6 +47,7 @@
  * an empty string.  A path alias (below) is replaced by the path it
  * stands for. */
 int Win32_ToWide(const char* s, WCHAR* out, int cap);
+int Win32_TextToWide(const char* s, WCHAR* out, int cap); // a game edit field's text, including GBK mode
 // the same into a malloc'ed buffer of the size the string needs; NULL for NULL, so an optional argument stays optional
 WCHAR* Win32_ToWideDup(const char* s);
 /* UTF-16 as Shift-JIS into out (n bytes, NUL-terminated, cut at a
@@ -54,7 +55,7 @@ WCHAR* Win32_ToWideDup(const char* s);
  * NUL.  A character without a Shift-JIS code becomes what the code page
  * substitutes (its best fit, else '?'). */
 int Win32_FromWide(const WCHAR* w, char* out, int n);
-// the same in the text encoding: UTF-8 in UTF-8 text mode, Shift-JIS otherwise (what the player typed, a font's name)
+// the same in the text encoding (what the player typed)
 int Win32_TextFromWide(const WCHAR* w, char* out, int n);
 // the bytes `units` UTF-16 units take in the text encoding (the length an ANSI control would count)
 int Win32_TextBytes(const WCHAR* w, int units);

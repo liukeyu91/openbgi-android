@@ -131,6 +131,7 @@ void Blit_FilterKind2(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);
 void Blit_FilterKind3(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);   // filter kind 3, "91 1D" mode 1: blend toward src XOR colour
 void Blit_TintKeepAlpha(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level); // 1.494 on: "91 1D" mode 3, blend toward colour keeping alpha
 void Blit_AddColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);     // 1.494 on: "91 1D" mode 4, add colour * level keeping alpha
+void Blit_SubtractColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level); // "91 1D" mode 5, subtract colour * level keeping alpha
 /* "90 19" and background type 4: src placed at (x, y) of dst and drawn
  * through the GRAY8 map `gray` of its size, revealed where the map is
  * below the threshold set by param / level.  0 ok, 1 modes differ, 3 level

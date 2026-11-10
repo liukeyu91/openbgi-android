@@ -91,6 +91,8 @@ static uint32_t CodePointOf(uint32_t code)
 {
 	if(gTextUtf8 || code < 0x80)
 		return code;
+	if(gTextGbk)
+		return OS_GbkToCodePoint((uint16_t)code);
 	if(code < 0x100)
 		return 0xff61 + (code - 0xa1); // the half-width katakana
 	return OS_SjisToCodePoint((uint16_t)code);
@@ -131,8 +133,7 @@ static void BuildGlyph(BidiCtx_t* x, BidiChar_t* ch, int delay)
 	}
 	else
 	{
-		// fixed pitch: a full or half cell
-		width = ch->wide ? x->glyphW : x->glyphW / 2;
+		width = Font_GlyphCellW(&g, x->glyphW, ch->wide);
 		ch->dx = 0;
 		ch->advance = width + Layout_Pitch(0, x->fi);
 	}

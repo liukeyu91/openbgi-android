@@ -7,8 +7,8 @@
  *
  * The sound library mixes in software and pulls 16-bit stereo frames
  * through OS_AudioStart()'s callback.  With ALSA available at build time
- * (BGI_HAVE_ALSA, see the Makefile) a thread feeds the default PCM device
- * in 20 ms periods; without it the same thread runs the mixer against the
+ * (BGI_HAVE_ALSA, see the Makefile) or on Android with AAudio, a thread
+ * feeds the playback device in 20 ms periods. Without an output device it runs against the
  * clock and discards the frames, so that fades, loops and the "is it still
  * playing" bookkeeping keep their timing on a silent machine.  The
  * callback therefore always runs on this file's thread, never on the
@@ -27,8 +27,10 @@
 #ifdef BGI_HAVE_ALSA
 #include <alsa/asoundlib.h>
 #endif
-
-#define AUDIO_PERIOD_FRAMES 882 // 20 ms at 44.1 kHz; the code below derives the period from the rate instead
+#ifdef BGI_ANDROID
+#include "../android/android_internal.h"
+#include <aaudio/AAudio.h>
+#endif
 
 static struct
 {
@@ -37,11 +39,62 @@ static struct
 	OsAudioFill_t fill; // the mixer's callback and its argument
 	void* user;
 	pthread_t thread;  // the thread that pulls the frames
-	volatile int stop; // set by OS_AudioStop: the thread ends after its current period
+	int stop;           // atomic flag set by OS_AudioStop
 #ifdef BGI_HAVE_ALSA
 	snd_pcm_t* pcm; // the playback device, NULL when it could not be opened (the silent path)
 #endif
 } gAudio;
+
+#ifdef BGI_ANDROID
+static int gAudioForeground;
+
+void OsAndroid_AudioForeground(int resumed)
+{
+	__atomic_store_n(&gAudioForeground, resumed, __ATOMIC_RELAXED);
+}
+
+// Only the mixer thread opens, writes or closes the stream.
+static AAudioStream* OpenAAudio(int rate)
+{
+	AAudioStreamBuilder* builder;
+	AAudioStream* stream = NULL;
+	aaudio_result_t result = AAudio_createStreamBuilder(&builder);
+	if(result != AAUDIO_OK)
+		return NULL;
+	AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
+	AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_GAME);
+	AAudioStreamBuilder_setSampleRate(builder, rate);
+	AAudioStreamBuilder_setChannelCount(builder, 2);
+	AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
+	result = AAudioStreamBuilder_openStream(builder, &stream);
+	AAudioStreamBuilder_delete(builder);
+	if(result != AAUDIO_OK)
+		return NULL;
+	if(AAudioStream_getSampleRate(stream) != rate ||
+		AAudioStream_getChannelCount(stream) != 2 ||
+		AAudioStream_getFormat(stream) != AAUDIO_FORMAT_PCM_I16 ||
+		AAudioStream_requestStart(stream) != AAUDIO_OK)
+	{
+		AAudioStream_close(stream);
+		return NULL;
+	}
+	OsAndroid_Log("AAudio stereo output started");
+	return stream;
+}
+
+static int WriteAAudio(AAudioStream* stream, const int16_t* buf, int frames)
+{
+	int done = 0;
+	while(done < frames)
+	{
+		aaudio_result_t n = AAudioStream_write(stream, buf + 2 * done, frames - done, 40000000);
+		if(n <= 0)
+			return n == 0; // a timeout can drop this period, a stream error needs a reopen
+		done += n;
+	}
+	return 1;
+}
+#endif
 
 // nanosleep that resumes after a signal
 static void SleepNs(long ns)
@@ -102,12 +155,44 @@ static void* AudioThread(void* arg)
 {
 	int period = gAudio.rate / 50; // 20 ms
 	int16_t* buf = (int16_t*)malloc((size_t)period * 2 * sizeof(int16_t));
+#ifdef BGI_ANDROID
+	AAudioStream* stream = NULL;
+	int retry = 0;
+#endif
 	if(!buf)
 		return NULL;
-	while(!gAudio.stop)
+	while(!__atomic_load_n(&gAudio.stop, __ATOMIC_RELAXED))
 	{
+#ifdef BGI_ANDROID
+		if(!__atomic_load_n(&gAudioForeground, __ATOMIC_RELAXED))
+		{
+			if(stream)
+			{
+				AAudioStream_close(stream);
+				stream = NULL;
+			}
+			retry = 0;
+			SleepNs(20000000L);
+			continue;
+		}
+		if(!stream && retry-- <= 0)
+		{
+			stream = OpenAAudio(gAudio.rate);
+			retry = 49; // retry once a second while foregrounded
+		}
+#endif
 		memset(buf, 0, (size_t)period * 2 * sizeof(int16_t));
 		gAudio.fill(gAudio.user, buf, period);
+#ifdef BGI_ANDROID
+		if(stream)
+		{
+			if(WriteAAudio(stream, buf, period))
+				continue;
+			AAudioStream_close(stream);
+			stream = NULL;
+			retry = 0;
+		}
+#endif
 #ifdef BGI_HAVE_ALSA
 		if(gAudio.pcm)
 		{
@@ -121,6 +206,10 @@ static void* AudioThread(void* arg)
 #endif
 		SleepNs(20L * 1000000L); // the silent clock
 	}
+#ifdef BGI_ANDROID
+	if(stream)
+		AAudioStream_close(stream);
+#endif
 	free(buf);
 	return NULL;
 }
@@ -155,7 +244,7 @@ void OS_AudioStop(void)
 {
 	if(!gAudio.running)
 		return;
-	gAudio.stop = 1;
+	__atomic_store_n(&gAudio.stop, 1, __ATOMIC_RELAXED);
 	pthread_join(gAudio.thread, NULL);
 #ifdef BGI_HAVE_ALSA
 	if(gAudio.pcm)

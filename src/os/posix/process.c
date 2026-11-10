@@ -16,6 +16,10 @@
  */
 #include "posix_internal.h"
 
+#ifdef BGI_ANDROID
+#include "../android/android_internal.h"
+#endif
+
 char gPosixExeDir[PATH_MAX];    // the game directory with a trailing '/': the one drive this layer presents
 char gPosixConfigDir[PATH_MAX]; // ~/.config/bgi
 char gPosixRegFile[PATH_MAX];   // the registry emulation's file (registry.txt in the configuration directory)
@@ -29,6 +33,7 @@ void OS_SetArgv0(const char* argv0)
 /* SIGTERM / SIGINT: the first one is the window's close button (so an
  * unattended run stopped by `timeout` still ends through the engine's
  * own shutdown and writes BGI_OPSTAT), the second one ends the process */
+#ifndef BGI_ANDROID
 static void OnSignal(int sig)
 {
 	static volatile sig_atomic_t count;
@@ -37,10 +42,14 @@ static void OnSignal(int sig)
 		_exit(1);
 	OsPosix_RequestClose();
 }
+#endif
 
 // the signal handlers, the directories, the character converters; always 1
 int OS_Init(void)
 {
+#ifdef BGI_ANDROID
+	return OsAndroid_InitPaths();
+#else
 	const char* home = getenv("HOME");
 	signal(SIGTERM, OnSignal);
 	signal(SIGINT, OnSignal);
@@ -56,13 +65,16 @@ int OS_Init(void)
 	mkdir(gPosixConfigDir, 0755);
 	snprintf(gPosixRegFile, sizeof gPosixRegFile, "%s/registry.txt", gPosixConfigDir);
 	return 1;
+#endif
 }
 
 // release the font libraries and the character converters
 void OS_Shutdown(void)
 {
 	OsPosix_FontShutdown();
+#ifndef BGI_ANDROID
 	OsPosix_SjisShutdown();
+#endif
 }
 
 // always "C:\": see below
@@ -79,6 +91,9 @@ void OS_ExeDir(char* buf, size_t n)
  * program name when it has a directory part, else the current directory */
 void OS_BinaryDir(char* buf, size_t n)
 {
+#ifdef BGI_ANDROID
+	snprintf(buf, n, "%s/", gPosixConfigDir);
+#else
 	char path[PATH_MAX];
 	ssize_t len = readlink("/proc/self/exe", path, sizeof path - 1);
 	char* slash;
@@ -100,6 +115,7 @@ void OS_BinaryDir(char* buf, size_t n)
 	else
 		slash[1] = 0;
 	snprintf(buf, n, "%s", path);
+#endif
 }
 
 void OS_GameDir(char* buf, size_t n)

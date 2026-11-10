@@ -544,6 +544,91 @@ static void TestLayoutExtensions(void)
 	BmpMgr_Delete(mgr);
 }
 
+static void TestGbkText(void)
+{
+	const char* period = "\x81\x42";
+	const char* name = "\x8e\xe5\x90\x6c"; // CP932 internal identifier
+	char utf8[16];
+	uint32_t code;
+	int32_t choice[6] = {0};
+
+	CHECK(TextCharLen("\xc4\xe3") == 1); // CP932 still treats this as a single-byte kana
+	CHECK(IsKinsokuChar(0x8142));
+	Text_SetEncoding(TEXT_GBK);
+	CHECK(TextGetChar(&code, "\xc4\xe3") == 2 && code == 0xc4e3);
+	CHECK(TextIsWide(code, 2));
+	CHECK(TextGetChar(&code, "\xc4") == 1 && code == 0xc4);
+	CHECK(TextGetChar(&code, "\xc4\x7f") == 1 && code == 0xc4);
+	CHECK(TextGetChar(&code, "\xc4\x40") == 2 && code == 0xc440);
+	CHECK(SjisCodes(choice, "\xc4\xe3\xba\xc3\xa3\xbf") == 3); // GBK "你好？"
+	CHECK(choice[0] == 0xc4e3 && choice[1] == 0xbac3 && choice[2] == 0xa3bf);
+	CHECK(OS_GbkToCodePoint(0xc4e3) == 0x4f60);
+	CHECK(OS_CodePointToGbk(0x4f60) == 0xc4e3);
+	CHECK(OS_CodePointToGbk(0x1f600) == 0);
+	CHECK(TextTableChar(&period) == 0xa1a3 && !*period);
+	CHECK(IsKinsokuChar(0xa1a3));
+	CHECK(!IsKinsokuChar(0x8142));
+	CHECK(OS_SjisToUtf8(name, utf8, sizeof utf8) == 6);
+	CHECK(strcmp(utf8, "\xe4\xb8\xbb\xe4\xba\xba") == 0);
+	Text_SetEncoding(TEXT_SJIS);
+	CHECK(TextCharLen("\xc4\xe3") == 1);
+	CHECK(IsKinsokuChar(0x8142));
+}
+
+static void TestGbkLatinLayout(void)
+{
+	const char* mixed = "\xc4\xe3\xba\xc3OK?WiW";
+	BmpMgr_t* mgr = BmpMgr_New(8);
+	RichState_t rich = {0};
+	RubyDict_t dict = {0};
+	Rect_t area = {0, 0, 639, 199};
+	int32_t cur[2] = {0}, lines, widths[3], style[5] = {2, 5, 5, 0, 0};
+	int font = 0;
+	FontInfo_t fi;
+	Glyph_t wideLatin = {.code = 'W', .right = 19};
+
+	printf("GBK mixed layout\n");
+	CHECK(Font_GlyphCellW(&wideLatin, 24, 0) == 12);
+	Text_SetEncoding(TEXT_GBK);
+	CHECK(Font_GlyphCellW(&wideLatin, 24, 0) == 21);
+	CHECK(Font_GlyphCellW(&wideLatin, 24, 1) == 24);
+	Engine_SelectProfile("1.616");
+	Gfx_SetScreenMode(PM_ARGB32);
+	Text_SetBmpMgrPtr(mgr);
+	Text_SetRichParams(0, 1, 0, 50, 0, 0);
+	if(BmpMgr_FontOpen(mgr, &font, "MS Gothic", 24, 100, 0) == 0 && BmpMgr_FontInfo(mgr, &fi, font))
+	{
+		const RichChar_t* c;
+		CHECK(Text_LayoutCoreH(&rich, &lines, mixed, 0, &dict, cur, &area, 24, font, 0, 0, 0xffffff, style) == 1);
+		CHECK(lines == 1);
+		CHECK(Text_MeasureInfo(widths, mixed, &fi, 0) == 1 && widths[0] == cur[0]);
+		for(c = rich.head; c; c = c->next)
+		{
+			Glyph_t g;
+			uint32_t code;
+			TextGetChar(&code, mixed + c->srcOfs);
+			if(code < '!' || code > '~')
+				continue;
+			FontRaster_Glyph(fi.font, &g, (int)code);
+			CHECK(c->glyph.w >= g.right + 3); // glyph plus outline on both sides
+			if(c->next)
+				CHECK(c->next->x - c->x > g.right); // the next character starts past the ink
+		}
+		RichState_Free(&rich);
+
+		area.r = widths[0] - 2; // one pixel too narrow for the same line
+		cur[0] = cur[1] = 0;
+		CHECK(Text_LayoutCoreH(&rich, &lines, mixed, 0, &dict, cur, &area, 24, font, 0, 0, 0xffffff, style) == 1);
+		CHECK(lines == 2);
+		RichState_Free(&rich);
+	}
+	else
+		printf("  (no font available: mixed layout checks skipped)\n");
+	Text_SetBmpMgrPtr(NULL);
+	BmpMgr_Delete(mgr);
+	Text_SetEncoding(TEXT_SJIS);
+}
+
 // run every group; exit status 1 when any check failed
 int main(void)
 {
@@ -553,6 +638,8 @@ int main(void)
 	TestRuby();
 	TestMarkup();
 	TestLayoutExtensions();
+	TestGbkText();
+	TestGbkLatinLayout();
 	OS_Shutdown();
 	if(gFails)
 	{
