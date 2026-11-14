@@ -58,6 +58,13 @@ int main(void)
 	CHECK(!strcmp(gEngine->name,"1.636"));
 	CHECK(!Compat_Configure(NULL,"auto",boot,sizeof boot)); /* no leaked game table */
 	remove("bin/test_compat_games.json");
+    {
+        const uint8_t making[]="MakingLoversFullHD",idle[]={0x80,0x52,0x17};
+        CHECK(Compat_Configure(NULL,"auto",making,sizeof making)!=NULL);
+        CHECK(!strcmp(gEngine->name,"1.659"));
+        CHECK(vm_optable_80[0x52]!=NULL && vm_optable_80[0x52]!=Opcode_NotImplemented);
+        CHECK(Check(idle,sizeof idle,&result) && result.total==0 && result.instructions==2);
+    }
 	OS_Shutdown();
 	if(failures)return 1;
 	puts("Compatibility analyzer checks passed");return 0;

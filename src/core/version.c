@@ -191,6 +191,7 @@ static const struct
 	{"YoakemaeyoriRuriironaPS2Win10", "1.659", NULL},
 	{"YoakemaeyoriRuriironaMCWin10", "1.659", NULL},
 	{"MadoiShirokinoKamikakushi", "1.659", NULL},
+	{"MakingLoversFullHD", "1.659", NULL},
 	{"Yumahorome", "1.662", NULL},
 	{"ArcanaAlchemia", "1.667", NULL},
 	{"HarukaAonoHanayomeni", "1.669", NULL},

@@ -80,6 +80,11 @@ static void TestDefaults(void)
 	CHECK(ProfileNamed("1.636") != NULL && ProfileNamed("1.636")->gen == GEN_1_636 && ProfileNamed("1.636")->dynCount == 0 &&
 		ProfileNamed("1.636")->bootCode == 0x800000 && ProfileNamed("1.616")->bootCode == 0x80000);
 	CHECK(Engine_DetectGame((const uint8_t*)"x\0SenNoHatouTsukisomeNoKouki\0", 29) != NULL && gEngine->gen == GEN_1_636);
+	{
+        const uint8_t making[]="MakingLoversFullHD";
+        CHECK(Engine_DetectGame(making,sizeof making)!=NULL && gEngine->gen==GEN_1_659);
+        CHECK(!strcmp(Engine_ProductName(),"MakingLoversFullHD"));
+    }
 	CHECK(Engine_GameAt(0, &g) && strcmp(g.match, "NurseryRhymeTrial") == 0 && strcmp(g.product, "NurseryRhyme") == 0);
 	CHECK(Engine_GameAt(1, &g) && strcmp(g.product, g.match) == 0 && strcmp(g.name, g.match) == 0 && g.directory == NULL);
 	CHECK(!Engine_GameAt(n, &g));
