@@ -124,6 +124,13 @@ uint32_t Cbg2_Decode(const void* src, void* dst);                             //
  * BGI_CbgOutSize(src) bytes.  Returns 0 on success, 0x80000003 if the magic
  * is wrong, 0x80000004 when the checksum of the weight table fails. */
 uint32_t BGI_CbgDecode(const void* src, void* dst);
+/* Optional bounded cache for repeated image loads. Keys are complete compressed
+ * bytes, never file names; callers still read current resources before lookup.
+ * Only decoder-written bytes are copied (the 24-bit loader tail stays untouched).
+ * These functions run on the engine thread; clear before adding loader threads. */
+uint32_t BGI_CbgDecodeCached(const void* src, uint32_t srcSize, void* dst);
+void BGI_CbgCacheSetLimit(size_t bytes); // clears entries; at most 64 MiB, 0 disables
+void BGI_CbgCacheClear(void);           // keeps the selected limit
 // the size of the decoded image: header plus tightly packed pixels
 static inline uint32_t BGI_CbgOutSize(const void* src)
 {

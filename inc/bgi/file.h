@@ -230,4 +230,7 @@ int SaveCheck(int slot);                      // "80 7B": the codes of SaveLoad,
 int SaveReadHeader(int slot, void* dst);      // "80 7A": the 64-byte header; 0 ok, 1 missing, 2 wrong size
 void Set_SaveEncode(int on);
 
+/* Native archive-name enumeration; NULL buffer queries total bytes, otherwise count. */
+int ArcRead_ListNames(const char* path, char* buffer, uint32_t* sizeOrCount);
+
 #endif // BGI_FILE_H_

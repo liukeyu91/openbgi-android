@@ -148,21 +148,41 @@ int CbgBuildTree(CbgNode_t* nodes, const uint32_t* weights, uint32_t leaves)
 static void CbgHuffDecode(uint8_t* dst, const uint8_t* src, const CbgNode_t* nodes,
 	uint32_t root, uint32_t count)
 {
-	uint8_t mask = 0x80;
+	/* An eight-bit prefix resolves common short codes in one lookup. Only the
+	 * current byte is inspected: no speculative read beyond the final byte. */
+	struct { uint16_t symbol; uint8_t bits; } prefix[256];
 	uint32_t i;
-	for(i = 0; i < count; i++)
+	unsigned shift = 0;
+	if(!count) return;
+	if(nodes[root].isParent != 1) { memset(dst, (uint8_t)root, count); return; }
+	for(i = 0; i < 256; ++i)
 	{
 		uint32_t node = root;
+		unsigned bits = 0;
+		while(node < CBG_NODES && nodes[node].isParent == 1 && bits < 8)
+		{
+			node = (i & (0x80u >> bits)) ? nodes[node].right : nodes[node].left;
+			++bits;
+		}
+		prefix[i].bits = node < 256 && nodes[node].isParent != 1 ? (uint8_t)bits : 0;
+		prefix[i].symbol = (uint16_t)node;
+	}
+	for(i = 0; i < count; i++)
+	{
+		unsigned key = (uint8_t)(*src << shift), bits = prefix[key].bits;
+		uint32_t node = root;
+		if(bits && bits <= 8 - shift)
+		{
+			dst[i] = (uint8_t)prefix[key].symbol;
+			shift += bits;
+			if(shift == 8) { ++src; shift = 0; }
+			continue;
+		}
 		while(nodes[node].isParent == 1)
 		{
-			uint32_t bit = (*src & mask) ? 1 : 0;
+			uint32_t bit = (*src & (0x80u >> shift)) ? 1 : 0;
 			node = bit ? nodes[node].right : nodes[node].left;
-			mask >>= 1;
-			if(mask == 0)
-			{
-				src++;
-				mask = 0x80;
-			}
+			if(++shift == 8) { ++src; shift = 0; }
 		}
 		dst[i] = (uint8_t)node;
 	}
@@ -198,34 +218,58 @@ static uint32_t CbgUnrle(uint8_t* dst, const uint8_t* src, uint32_t srcLen)
  * rounded-down average of its left and upper neighbour (same channel); the
  * first row and the first column use the single available neighbour, the
  * first pixel none */
+static uint32_t AddPixelBytes(uint32_t a, uint32_t b)
+{
+	const uint32_t lanes = 0x00ff00ffu;
+	return (((a & lanes) + (b & lanes)) & lanes) |
+		(((((a >> 8) & lanes) + ((b >> 8) & lanes)) & lanes) << 8);
+}
+
 static void CbgUnfilter(uint8_t* pix, const RawImageHeader_t* h)
 {
 	uint32_t w = h->width, hgt = h->height;
 	uint32_t bpp = (h->bpp & 0xffff) >> 3; // bytes per pixel
 	uint32_t stride = w * bpp;
-	uint32_t x, y, c;
-
-	for(y = 0; y < hgt; y++)
+	uint32_t x, y;
+	if(!w || !hgt || !bpp) return;
+	if(bpp == 4)
 	{
-		uint8_t* row = pix + y * stride;
-		for(x = 0; x < w; x++)
+		uint32_t left, up, delta, out;
+		memcpy(&left, pix, 4); // first pixel has no predictor
+		for(x = 1; x < w; ++x)
 		{
-			for(c = 0; c < bpp; c++)
+			memcpy(&delta, pix + x * 4, 4);
+			left = AddPixelBytes(delta, left);
+			memcpy(pix + x * 4, &left, 4);
+		}
+		for(y = 1; y < hgt; ++y)
+		{
+			uint8_t* row = pix + (size_t)y * stride;
+			const uint8_t* above = row - stride;
+			memcpy(&delta, row, 4); memcpy(&up, above, 4);
+			left = AddPixelBytes(delta, up);
+			memcpy(row, &left, 4);
+			for(x = 1; x < w; ++x)
 			{
-				uint8_t* d = row + x * bpp + c;
-				// a neighbour is read only where it exists: the original forms the
-				// index of a missing one with a 32-bit wrap-around, which would be an
-				// out-of-bounds read with 64-bit pointers
-				int up = y ? *(d - stride) : -1;
-				int left = x ? *(d - bpp) : -1;
-				int pred;
-				if(up >= 0)
-					pred = left >= 0 ? (left + up) >> 1 : up;
-				else
-					pred = left >= 0 ? left : 0;
-				*d = (uint8_t)(*d + pred);
+				uint32_t average;
+				memcpy(&delta, row + x * 4, 4); memcpy(&up, above + x * 4, 4);
+				// Four independent floor averages, with no cross-byte carry.
+				average = (left & up) + (((left ^ up) & 0xfefefefeu) >> 1);
+				out = AddPixelBytes(delta, average);
+				memcpy(row + x * 4, &out, 4); left = out;
 			}
 		}
+		return;
+	}
+	// Split the boundaries once, rather than branching for every channel byte.
+	for(x = bpp; x < stride; ++x) pix[x] = (uint8_t)(pix[x] + pix[x - bpp]);
+	for(y = 1; y < hgt; ++y)
+	{
+		uint8_t* row = pix + (size_t)y * stride;
+		const uint8_t* above = row - stride;
+		for(x = 0; x < bpp; ++x) row[x] = (uint8_t)(row[x] + above[x]);
+		for(x = bpp; x < stride; ++x)
+			row[x] = (uint8_t)(row[x] + ((row[x - bpp] + above[x]) >> 1));
 	}
 }
 

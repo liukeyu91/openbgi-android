@@ -10,13 +10,20 @@
  * kernel allows without them.
  */
 #include "posix_internal.h"
+#if defined(BGI_ANDROID)
+#include "../android/android_internal.h"
+#endif
 
 // the monotonic clock in milliseconds (wraps as timeGetTime does)
 uint32_t OS_TicksMs(void)
 {
+#if defined(BGI_ANDROID)
+    return (uint32_t)(OsAndroid_ClockNs() / 1000000u);
+#else
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+#endif
 }
 
 // nanosleep; a signal cuts it short

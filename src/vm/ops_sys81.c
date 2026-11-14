@@ -727,6 +727,20 @@ static int Opcode_Sys81_FileSeek(Thread_t* t) // 81 2B (1.573 on): status, handl
 	return 0;
 }
 
+/* Archive entry names: a NULL buffer queries the required byte count;
+ * otherwise pack the original names and store their count. Observed in
+ * KanojoStep's anmdef._bp (1.636). No stack result. */
+static int Opcode_Sys81_ArchiveNames(Thread_t* t) // 81 39: buf, outSizeOrCount, path ->
+{
+    const char* path = (const char*)PopPtr(t);
+    uint32_t* result = (uint32_t*)PopPtr(t);
+    char* buffer = (char*)PopPtr(t);
+    char native[0x1000];
+    OS_PathNative(path, native, sizeof native);
+    ArcRead_ListNames(native, buffer, result);
+    return 0;
+}
+
 /* Fill vm_optable_81 for the selected engine profile; the entries name an
  * opcode, its handler and the generations it exists in (see
  * Vm_Optable80Init in ops_sys.c for the rules) */
@@ -737,6 +751,7 @@ void Vm_Optable81Init(void)
 		{0x10, Opcode_Sys81_KeyRepeatNew, GEN_1_69_451, GEN_LAST},
 		{0x11, Opcode_Sys81_KeyboardState, GEN_1_69_472, GEN_LAST},
 		{0x1F, Opcode_Sys81_SetTweenKeyMask, GEN_1_69_451, GEN_LAST},
+		{0x39, Opcode_Sys81_ArchiveNames, GEN_1_636, GEN_LAST},
 		{0x3A, Opcode_Sys81_BrowseFolder, GEN_1_69_472, GEN_LAST},
 		{0x02, Opcode_Sys81_SetUiLanguage, GEN_1_662, GEN_LAST},
 		{0x03, Opcode_Sys81_GetUiLanguage, GEN_1_662, GEN_LAST},

@@ -74,6 +74,27 @@ size_t OS_SjisToUtf8(const char* s, char* out, size_t n)
 	return OsCommon_SjisToUtf8(s, out, n, OS_SjisToCodePoint);
 }
 
+/* Script-facing UI uses the selected text encoding. OS_SjisToUtf8 remains
+ * CP932 for filenames and the engine's built-in messages; do not change it.
+ */
+size_t OsAndroid_ScriptToUtf8(const char* text,char* out,size_t size)
+{
+    const uint8_t* p=(const uint8_t*)(text?text:"");size_t at=0;
+    if(!size)return 0;
+    if(!gOsTextGbk)return OS_SjisToUtf8((const char*)p,out,size);
+    while(*p){
+        int len=OS_GbkCharLen((const char*)p);
+        uint32_t cp=OS_GbkToCodePoint(len==2?(uint16_t)((p[0]<<8)|p[1]):p[0]);
+        size_t bytes=cp<0x80?1:cp<0x800?2:3;
+        if(bytes>=size-at)break;
+        if(bytes==1)out[at++]=(char)cp;
+        else if(bytes==2){out[at++]=(char)(0xc0|(cp>>6));out[at++]=(char)(0x80|(cp&63));}
+        else{out[at++]=(char)(0xe0|(cp>>12));out[at++]=(char)(0x80|((cp>>6)&63));out[at++]=(char)(0x80|(cp&63));}
+        p+=len;
+    }
+    out[at]=0;return at;
+}
+
 void OsPosix_SjisToUtf8(const char* s, char* out, size_t n)
 {
 	OS_SjisToUtf8(s, out, n);

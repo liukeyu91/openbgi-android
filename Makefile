@@ -6,7 +6,7 @@
 #   make                 native Linux build        -> bin/bgi
 #   make win             MinGW cross build          -> bin/bgi.exe
 #   make android-core    Android ARM64 core archive -> bin/android/arm64-v8a/libopenbgi-core.a
-#   make android-native  Android NativeActivity library -> bin/android/arm64-v8a/libopenbgi.so
+#   make android-native  Android SurfaceView/JNI library -> bin/android/arm64-v8a/libopenbgi.so
 #   make wasm            Emscripten build           -> bin/wasm/openbgi.html (+ .js, .wasm; docs/wasm.md)
 #   make CC=clang        any other C99 compiler
 #   make tools           the command-line tools -> bin/bpasm, bin/bgiscn, bin/bgidump, bin/bgipack
@@ -107,7 +107,7 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     ANDROID_POSIX := audio files font machine native paths process registry thread time
     OS_SRC := $(wildcard src/os/android/*.c) $(addprefix src/os/posix/,$(addsuffix .c,$(ANDROID_POSIX)))
     CFLAGS += -I$(FREETYPE_INCLUDE)
-    LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lm
+    LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lEGL -lGLESv2 -lm
     ANDROID_VORBIS_ARCHIVES := $(addprefix $(ANDROID_VORBIS_PREFIX)/lib/,libvorbisfile.a libvorbis.a libogg.a)
     VORBIS := vorbisfile
     VORBIS_CFLAGS := -I$(ANDROID_VORBIS_PREFIX)/include
@@ -180,6 +180,13 @@ OBJ := $(patsubst src/%.c,obj/$(PLATFORM)/%.o,$(SRC)) $(patsubst tools/%.c,obj/$
 DEP := $(OBJ:.o=.d)
 LIB_OBJ := $(filter-out obj/$(PLATFORM)/sys/main.o,$(OBJ)) # the engine without its entry point
 
+# Opt-in device harness: a separate APK/library; never part of the release engine.
+ifeq ($(PLATFORM):$(ANDROID_HOST_TEST),android-native:1)
+  LIB_OBJ += obj/android-native/tools/android/hosttest.o
+  TARGET := bin/android-hosttest/arm64-v8a/libopenbgi.so
+  ANDROID_HOST_WRAP := -Wl,--wrap=Engine_Main
+endif
+
 TARGET ?= bin/bgi$(EXE)
 
 .PHONY: all win android-core android-native wasm wasm-sim tools check check-win check-wasm wasm-test test clean msg
@@ -226,7 +233,7 @@ else ifeq ($(PLATFORM),android-native)
 $(filter obj/android-native/snd/bw/%,$(OBJ)): $(ANDROID_VORBIS_ARCHIVES)
 $(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) | bin
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -shared -Wl,--no-undefined -Wl,-soname,libopenbgi.so -Wl,-z,max-page-size=16384 -o $@ $(LIB_OBJ) $(LDLIBS)
+	$(CC) $(LDFLAGS) $(ANDROID_HOST_WRAP) -shared -Wl,--no-undefined -Wl,-soname,libopenbgi.so -Wl,-z,max-page-size=16384 -o $@ $(LIB_OBJ) $(LDLIBS)
 else
 $(TARGET): $(OBJ) | bin
 	@mkdir -p $(dir $@)
@@ -280,11 +287,18 @@ wasm-test:
 	node tools/wasm/selftest.js
 
 # ---- tests ---------------------------------------------------------------------
-TEST_SRC := $(filter-out tests/wasmfs.c tests/win32wide.c,$(wildcard tests/*.c))
+TEST_SRC := $(filter-out tests/wasmfs.c tests/win32wide.c tests/posixpaths.c,$(wildcard tests/*.c))
 TEST_BIN := $(patsubst tests/%.c,bin/test_%$(EXE),$(TEST_SRC))
 
 bin/test_%$(EXE): tests/%.c $(LIB_OBJ) | bin
 	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+
+# Count actual decoder calls while exercising cache behavior with real images.
+bin/test_cbgcache$(EXE): tests/cbgcache.c $(LIB_OBJ) | bin
+	$(CC) $(CFLAGS) -Wl,--wrap=BGI_CbgDecode -o $@ $< $(LIB_OBJ) $(LDLIBS)
+
+bin/test_cbgfast$(EXE): tests/cbgfast.c src/core/cbg.c $(LIB_OBJ) | bin
+	$(CC) $(CFLAGS) -o $@ $< $(filter-out obj/$(PLATFORM)/core/cbg.o,$(LIB_OBJ)) $(LDLIBS)
 
 # the WebAssembly file layer on the host, against the mock server of the test
 # (built apart: it defines the OS_File* functions the platform's back end has too)
@@ -301,7 +315,9 @@ bin/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32stub/wi
 	$(CC) $(CFLAGS) -DBGI_WIN32 -fshort-wchar -Itools/win32stub -o $@ $(WIN32WIDE_SRC)
 
 ifeq ($(PLATFORM),posix)
-TEST_BIN += bin/test_wasmfs$(EXE) bin/test_win32wide$(EXE)
+bin/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c | bin
+	$(CC) $(CFLAGS) -o $@ $^ -pthread
+TEST_BIN += bin/test_wasmfs$(EXE) bin/test_win32wide$(EXE) bin/test_posixpaths$(EXE)
 endif
 
 test: $(TEST_BIN)

@@ -1144,6 +1144,61 @@ static void TestFiles(void)
 	strcpy((char*)d + 0x400, A);
 	strcpy((char*)d + 0x480, B);
 	strcpy((char*)d + 0x500, "BIN/TEST_VM_B.TMP");
+    {
+        const uint32_t query[] = {0, 0, DataPtr(0x580), 0};
+        const uint32_t fill[] = {DataPtr(0x600), 128, DataPtr(0x580), 0};
+        CHECK(OS_DirCreate("bin/test_vm_dirs"));
+        CHECK(OS_DirCreate("bin/test_vm_dirs/MixedSub"));
+        Spit("bin/test_vm_dirs/file.tmp", "x");
+        strcpy((char*)d + 0x580, "bin/test_vm_dirs/*.*");
+        CHECK(Call(0x80, 0x26, query, 4) == 9);
+        CHECK(Call(0x80, 0x26, fill, 4) == 1 && strcmp((char*)d + 0x600, "MixedSub") == 0);
+        remove("bin/test_vm_dirs/file.tmp");
+        CHECK(OS_DirRemove("bin/test_vm_dirs/MixedSub"));
+        CHECK(OS_DirRemove("bin/test_vm_dirs"));
+    }
+    {
+        uint8_t image[16 + 256] = {0};
+        uint32_t size;
+        memcpy(image, "BURIKO ARC20", 12); image[12] = 2;
+        memcpy(image + 16, "MixedName", 10); memcpy(image + 144, "Second", 7);
+        uint32_t query[] = {0, DataPtr(0x210), DataPtr(0x580)};
+        int mode, j;
+        strcpy((char*)d + 0x580, "bin/test_vm_names.arc");
+        CHECK(OS_WriteNativeFile("bin/test_vm_names.arc", image, sizeof image));
+        for(mode = 0; mode < 2; ++mode) {
+            Asm_t a; a.len = 0; query[0] = mode ? DataPtr(0x600) : 0;
+            memset(d + 0x600, 0xa5, 64);
+            PushI32(&a, 42);
+            for(j = 0; j < 3; ++j)PushI32(&a, query[j]);
+            A8(&a, 0x81); A8(&a, 0x39);
+            CHECK(Eval(&a) == 42);
+            memcpy(&size, d + 0x210, 4);
+            CHECK(size == (mode ? 2 : 17));
+            if(mode)CHECK(memcmp(d + 0x600, "MixedName\0Second\0", 17) == 0 && d[0x611] == 0xa5);
+        }
+        remove("bin/test_vm_names.arc");
+    }
+    {
+        const uint32_t query[] = {0, 0, DataPtr(0x580), 0, 0};
+        uint32_t fill[] = {DataPtr(0x600), 128, DataPtr(0x580), 0, 0};
+        uint32_t required;
+        strcpy((char*)d + 0x580, "bin/test_vm_?.tmp");
+        Spit(A, "a"); Spit(B, "b");
+        required = Call(0x80, 0x25, query, 5);
+        CHECK(required == strlen("test_vm_a.tmp") + strlen("test_vm_b.tmp") + 2);
+        memset(d + 0x600, 0xa5, 128);
+        fill[1] = required;
+        CHECK(Call(0x80, 0x25, fill, 5) == 2 && d[0x600 + required] == 0xa5);
+        CHECK(strlen((char*)d + 0x600) + strlen((char*)d + 0x600 + strlen((char*)d + 0x600) + 1) + 2 == required);
+        fill[1] = required - 1;
+        CHECK(Call(0x80, 0x25, fill, 5) == 0xffffffffu);
+        fill[1] = 128; fill[4] = 1;
+        CHECK(Call(0x80, 0x25, fill, 5) == 1);
+        strcpy((char*)d + 0x580, "bin/test_vm_no_such_*.tmp");
+        CHECK(Call(0x80, 0x25, query, 5) == 0);
+        remove(A); remove(B);
+    }
 	Spit(A, "hello");
 	{
 		const uint32_t mv[] = {pb, pa}; // newPath, existing

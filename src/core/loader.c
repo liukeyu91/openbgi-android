@@ -21,6 +21,7 @@
 #include "bgi/sound.h"
 #include "bgi/error.h"
 #include "bgi/sys.h"
+#include "bgi/codec.h"
 
 static int gLoaderRun; // between Loader_Start and Loader_Stop
 
@@ -75,12 +76,16 @@ void Loader_QueueSe(uint32_t* status, int slot, const void* desc, int fadeInMs, 
 // part of Engine_Init: the original starts the loader thread here
 void Loader_Start(void)
 {
+#ifdef BGI_ANDROID
+	BGI_CbgCacheSetLimit(64u * 1024u * 1024u);
+#endif
 	gLoaderRun = 1;
 }
 
 // part of Engine_Shutdown: the original stops the thread and waits for it
 void Loader_Stop(void)
 {
+	BGI_CbgCacheSetLimit(0);
 	gLoaderRun = 0;
 }
 

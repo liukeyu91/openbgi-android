@@ -28,6 +28,8 @@
  */
 #include "bgi/version.h"
 #include "bgi/os.h"
+#include "bgi/engine.h"
+#include "bgi/strutil.h"
 
 #include <stdio.h>
 
@@ -205,6 +207,22 @@ static void TestErrors(void)
 	CHECK(!Engine_SaveGamesJson("/nonexistent/dir/games.json")); // a failure to write is reported, not fatal
 }
 
+static void TestAndroidSelection(void)
+{
+    static const uint8_t fureraba[] = "FriendToLoverHD";
+    static const uint8_t second[] = "NurseryRhyme";
+    WriteText("{\"games\":[{\"match\":\"FriendToLoverHD\",\"profile\":\"1.616\",\"product\":\"FriendToLoverHD\"}]}");
+    CHECK(Engine_LoadGamesJson(gPath)>0);
+    CHECK(Engine_DetectGame(fureraba,sizeof fureraba)!=NULL);
+    CHECK(strcmp(gEngine->name,"1.616")==0);
+    CHECK(strcmp(Engine_ProductName(),"FriendToLoverHD")==0);
+    CHECK(Engine_DetectGame(second,sizeof second)!=NULL);
+    CHECK(strcmp(gEngine->name,"1.64")==0);
+    CHECK(Engine_Main("--list-engines --text-encoding=gbk")==0 && gTextGbk && !gTextUtf8);
+    CHECK(Engine_Main("--list-engines --text-encoding=utf8")==0 && !gTextGbk && gTextUtf8);
+    CHECK(Engine_Main("--list-engines --text-encoding=sjis")==0 && !gTextGbk && !gTextUtf8);
+}
+
 int main(void)
 {
 	const char* tmp = getenv("BGI_TEST_TMP");
@@ -219,6 +237,7 @@ int main(void)
 	TestGames();
 	printf("errors\n");
 	TestErrors();
+	TestAndroidSelection();
 	remove(gPath);
 	OS_Shutdown();
 	if(gFails)

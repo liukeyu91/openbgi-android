@@ -15,7 +15,8 @@ zipalign=${ZIPALIGN_BIN:-"$tools/zipalign"}
 signer=${APKSIGNER_JAR:-"$tools/lib/apksigner.jar"}
 d8=${D8_JAR:-"$tools/lib/d8.jar"}
 
-out="$root/bin/android"
+out=${ANDROID_PACKAGE_OUT:-"$root/bin/android"}
+manifest=${ANDROID_PACKAGE_MANIFEST:-"$root/tools/android/AndroidManifest.xml"}
 lib="$out/arm64-v8a/libopenbgi.so"
 test -f "$lib"
 test -f "$ft/docs/GPLv2.TXT"
@@ -24,10 +25,15 @@ stage=$(mktemp -d "$out/.package.XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
 trap 'exit 1' HUP INT TERM
 
-"$aapt2" link --manifest "$root/tools/android/AndroidManifest.xml" -I "$platform" -o "$stage/unsigned.apk"
+"$aapt2" compile --dir "$root/tools/android/res" -o "$stage/resources.zip"
+"$aapt2" link --manifest "$manifest" -I "$platform" -o "$stage/unsigned.apk" "$stage/resources.zip"
 mkdir -p "$stage/classes"
+sh "$root/tools/android/generate-profiles.sh" "$stage/EngineProfiles.java"
 javac --release 8 -encoding UTF-8 -classpath "$platform" -d "$stage/classes" \
-    "$root/tools/android/LauncherActivity.java" "$root/tools/android/GameImport.java"
+    "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" \
+    "$root/tools/android/InitialTextRepair.java" "$root/tools/android/InitialTextRepairDialog.java" \
+    "$root/tools/android/ArchiveTextSamples.java" "$root/tools/android/EncodingDetector.java" "$root/tools/android/EncodingPreview.java" "$root/tools/android/GameEncoding.java" \
+    "$stage/EngineProfiles.java" "$root/tools/android/TouchInput.java" "$root/tools/android/InputKeys.java" "$root/tools/android/GameSettings.java" "$root/tools/android/SettingsDialog.java" "$root/tools/android/Viewport.java" "$root/tools/android/AudioFocusController.java" "$root/tools/android/GameAudioFocus.java" "$root/tools/android/InputDialogs.java" "$root/tools/android/GameTextCodec.java" "$root/tools/android/TextInput.java" "$root/tools/android/GameActivity.java" "$root/tools/android/LauncherActivity.java" "$root/tools/android/GameImport.java" "$root/tools/android/CrashLogs.java"
 jar cf "$stage/launcher.jar" -C "$stage/classes" .
 java -cp "$d8" com.android.tools.r8.D8 --release --min-api 28 --lib "$platform" \
     --output "$stage" "$stage/launcher.jar"

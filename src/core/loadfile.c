@@ -126,7 +126,7 @@ uint32_t LoadFile(void* buf, const char* arc, const char* name)
 	{
 		uint32_t size = BGI_CbgOutSize(buf);
 		uint8_t* out = (uint8_t*)BGI_Alloc(size);
-		if(BGI_CbgDecode(buf, out) == 0)
+		if(BGI_CbgDecodeCached(buf, n, out) == 0)
 		{
 			memcpy(buf, out, size);
 			n = size;
@@ -228,7 +228,7 @@ static int DecodeRange(void* dst, const uint8_t* src, uint32_t srcSize, uint32_t
 		total = 0x10u + (uint32_t)h->width * h->height * (bpp == 24 ? 4 : bpp >> 3);
 		direct = dst && off == 0 && size == 0;
 		to = direct ? (uint8_t*)dst : (tmp = (uint8_t*)BGI_Calloc(total));
-		if(BGI_CbgDecode(src, to) != 0)
+		if(BGI_CbgDecodeCached(src, srcSize, to) != 0)
 		{
 			BGI_Free(tmp);
 			return 5;

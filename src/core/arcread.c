@@ -11,6 +11,7 @@
  * link it on their own; only the DSC decoder of codec.h is shared.
  */
 #include "bgi/arcread.h"
+#include "bgi/os.h"
 #include "bgi/codec.h"
 
 // the two index magics (12 bytes each), repeated here so that file.h is not needed
@@ -136,4 +137,26 @@ uint8_t* ArcRead_Load(const ArcRead_t* a, const ArcEntry_t* e, uint32_t* size, i
 	}
 	*size = e->size;
 	return raw;
+}
+
+/* Shared with the VM's 81 39 without exposing the tools' index type. */
+int ArcRead_ListNames(const char* path, char* buffer, uint32_t* sizeOrCount)
+{
+    ArcRead_t* arc;
+    FILE* file;
+    uint32_t i, bytes = 0;
+    int fill = buffer != NULL;
+    if(sizeOrCount) *sizeOrCount = 0;
+    file = OS_NativeOpen(path, "rb");
+    if(!file) return 0;
+    arc = ArcRead_OpenFile(file, path);
+    if(!arc) return 0;
+    for(i = 0; i < arc->count; ++i) {
+        size_t n = strlen(arc->entries[i].name) + 1;
+        if(buffer) { memcpy(buffer, arc->entries[i].name, n); buffer += n; }
+        bytes += (uint32_t)n;
+    }
+    if(sizeOrCount) *sizeOrCount = fill ? arc->count : bytes;
+    ArcRead_Close(arc);
+    return 1;
 }

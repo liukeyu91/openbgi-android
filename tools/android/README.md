@@ -1,26 +1,185 @@
-# OpenBGI for Android
+# OpenBGI for Android 0.10.5-preview
 
-This build is configured for the Chinese Fureraba HD sample. It uses
-profile `1.616`, product `FriendToLoverHD` and GBK display text. The app
-loads a user-supplied copy of the active game archives from `files/game`
-inside the app's sandbox. On first launch, the system folder picker
-lets the user choose the extracted game folder and import its archives.
-It also looks for `game` in the app-specific
-external files directory when the internal copy is absent. Configuration
-is stored in the internal `files/openbgi` directory.
+Import and first launch now sample scene strings to resolve automatic encoding.
+Uncertain or mixed results require a manual choice before starting the VM.
+Previously saved manual settings are retained. The native engine is unchanged
+from 0.10.3. This version has not been installed on a device; see
+[release notes](../../docs/android-fixes-0.10.5.md).
+Earlier portrait-transition measurements and remaining issues are recorded in
+[0.10.3 device validation](../../docs/android-device-validation-0.10.3.md).
+
+Users who imported games into **OpenBGI UI Preview** need the in-place update
+for `org.openbgi.uipreview`, built by `tools/android/package-ui-preview.sh`.
+It preserves that package's data and signing key; it does not share games with
+`org.openbgi.port`. Neither APK bundles game resources or creates demo entries.
+
+Native library UI: illustrated cover cards, direct launch, search, recent/name
+sorting, per-game rename and user-selected covers. Settings are grouped into
+text/compatibility, display/input and optional key mappings; Cancel does not save.
+The library adapts between a bottom navigation bar and a landscape side rail.
+Guide, project information and crash-log export have their own pages. In-game
+shortcuts use a compact, collapsible overlay.
+
+Game resources are supplied by the player. User covers are copied to each game's
+`.openbgi/cover.jpg`; game titles and last-opened timestamps remain app metadata.
+No cover or game resources are downloaded or bundled. See
+[UI release notes and validation limits](../../docs/android-ui-0.10.md).
+
+This preview also reserves the edit session before asynchronously opening the
+Android keyboard. This prevents immediate B0 23 polls from dismissing a new field.
+Real-game black regions and mixed menu encodings remain unresolved. Game-level
+validation is left to the user's requested play testing; UI checks do not replace it.
+
+## Earlier input work
+
+Partially validated on Xiaomi Mi 8 / Android 10. Long-press a native text field,
+then select **初始文字编码** in the explicit operation dialog to reinterpret its
+original initial bytes as SJIS, GBK or UTF-8. A valid explicit selection replaces
+only that field, encoded using the current game's existing encoding. It does
+not press Enter, switch the game encoding or rewrite old saves.
+Candidates that cannot round-trip through the target encoding, exceed the field
+byte limit or violate its character filter are rejected instead of truncated.
+Numeric-only form fields do not expose this action. See
+[device evidence and limitations](../../docs/android-device-validation-0.9.1.md).
+Select-all/copy/cut/paste delegate to EditText. Nine input-host checks and
+controlled fault/log-cap checks pass; both games load existing saves.
+Real-game surname/comment entry still has a partial black-screen blocker;
+IME first-frame repaint and mixed menu encodings remain open.
 
 ## Install and import
 
-Install the signed APK on an ARM64 device running Android 9 or later.
-Keep the app installed when updating from the smoke build to retain
-its local game and saves. With a game already imported, the app opens
-it directly.
+ARM64, Android 9 or newer. Install over 0.2/0.3 using the same signing key;
+do not uninstall if you want to retain app-local saves.
 
-For a new installation, put the extracted Chinese Fureraba HD folder
-on the phone, for example in a subfolder of Downloads. Open OpenBGI
-and select the game folder itself, which contains `system.arc` and
-`Archive/`. The importer copies the game archives to app storage.
-Allow enough free space for that copy.
+The launcher lists imported games. Choose **添加游戏** and select the
+extracted game's root containing `system.arc` or `ipl._bp`. Import copies
+the complete directory, including subdirectories, empty directories, non-ARC
+files and `games.json`, retaining original names and bytes. It needs enough
+space for a second copy. Keep the app in the foreground until import completes.
+The app reserves `.openbgi` at the root for its private configuration; choose
+the original PC game folder rather than another installation's internal folder.
+
+Each new import has a UUID and lives directly at `files/games/<id>/`.
+Relative saves stay with the game; registry and app-data paths are isolated in
+that game's `.openbgi/`. Settings are saved atomically in `.openbgi/settings.ini`;
+legacy `.openbgi/encoding.txt` is used when no encoding override exists.
+New imports use **自动识别**: the bounded scene sampler runs after copying,
+and the selected `sjis`, `gbk` or `utf8` value is saved for the native engine.
+No-text, uncertain and mixed results remain unresolved and cannot start the VM
+until an encoding is selected. Results and the automatic/manual mode are stored
+in `settings.ini`; scans do not repeat on each line or every launch.
+Legacy `encoding.txt=sjis` without an explicit saved encoding is re-evaluated on
+first launch. Explicit `settings.ini` encodings and legacy GBK/UTF-8 overrides
+are retained. To re-evaluate a previously manual setting, select **自动识别**
+in **游戏设置**, save, and launch the game.
+Manual choices remain `sjis` for Japanese originals, `gbk` for the tested Chinese
+Fureraba HD, and `utf8` for UTF-8 patches. Automatic detection reads imported
+resources, not translation overlays packed inside a Windows EXE; those overlays
+must first be extracted into the game directory.
+The **编码预览** button reads a bounded selection of scene strings,
+offers a suggestion and shows the same bytes under all three encodings.
+Choose a sample from the selector, compare its columns, select an encoding and
+then save the settings page. Selecting or cancelling the preview alone never
+writes settings. Ambiguous/unsupported samples require manual selection.
+The preview does not execute the game or guarantee its actual first line.
+Default-name/menu mixed encodings still need further work. See
+[0.8.0 encoding evidence](../../docs/android-encoding-0.8.md).
+
+The default profile is automatic; no fixed engine profile or product name is passed. The engine
+uses the game's `games.json`, then its built-in game table. If no game-local
+table exists, the launcher supplies a table that adds `FriendToLoverHD` with
+profile `1.616`; built-in entries remain available. Existing tables are preserved.
+Unknown games can use an appropriate `games.json` entry. A manual profile override
+in the settings page passes only the selected built-in `--engine` option; product
+detection remains automatic. See `docs/versions.md` and `src/core/version.c` for the schema.
+
+Settings also offer aspect-fit, stretch and integer scaling (aspect-fit downscale
+when one integer multiple cannot fit), reading/swipe-wheel or left-button-drag
+touch presets, the screen key toolbar and gamepad A/B swap. Single tap is left
+click, long press or two-finger tap is right click. Drag releases on cancellation,
+focus loss and backgrounding, including release outside the game viewport.
+The renderer, touch mapping and IME share the same viewport calculation.
+The default screen keys are Escape/menu, wheel-up/backlog, S/save and L/load;
+these send input to the game, whose shortcut configuration determines the action.
+Each can be rebound in the settings page. Settings take effect next session.
+Keyboard letters, digits, F1-F12, modifiers, navigation keys and basic gamepad
+buttons/axes are mapped to engine Windows VK codes. See the tested scope in
+[0.6.0 validation](../../docs/android-input-settings-0.6.md).
+
+Upgrading migrates `files/game` to `files/games/legacy`, together with the old
+`files/openbgi` configuration and saves, and defaults that entry to GBK. A legacy
+external `files/game` copy is also recognized, with isolated internal configuration.
+These migrations still need device validation; the APK signature matches 0.3.
+
+Each game session uses a separate `:engine` process, terminated after engine
+shutdown so the VM globals are not reused for another game. Exit the running
+game before switching or deleting. Deletion prompts explicitly because it also
+deletes that entry's app-local saves. The legacy external source directory is
+retained when deleting its library entry.
+
+The launcher provides **导出崩溃日志** even before importing a game. It exports
+engine logs, Java exceptions, native fatal signal records and available Android
+11+ system exit information. Recorded fatal native signals exit directly to
+avoid handler recursion and do not guarantee a system tombstone/full stack.
+Oversized legacy signal logs reset at engine startup. See the 0.9.1 report.
+No root is needed. GameActivity + SurfaceView + JNI now hosts the engine.
+The single-line OS_Edit control supports the Android IME, byte limits in the
+selected encoding, selection, colours and viewport positioning. Single/two-field
+script dialogs and the name/birthday profile also use native Android forms.
+OS_MessageBox waits for the actual button result. Backgrounding blocks the VM
+at its message pump, suspends the existing audio mixer and freezes both engine
+clocks; wall-clock save timestamps continue normally. AudioFocusRequest now gates VM, audio and engine clocks together. Transient and
+duck requests pause and resume automatically on gain. Permanent loss or a noisy
+output-device broadcast keeps a visible pause overlay until the player chooses
+**继续游戏**. Backgrounding abandons focus; stale callbacks cannot restart the
+engine. No phone/Bluetooth runtime permission is requested. Actual cellular
+calls and physical headset/Bluetooth disconnections still need hardware testing.
+See docs/android-audio-focus-0.5.1.md for the tested scope. See docs/android-device-validation-0.5.md.
+This release does not claim compatibility with every upstream game.
+
+## Validation
+
+`sh tools/android/tests/run-text-repair-tests.sh` checks 29 conversion cases
+and the existing 10 input-filter cases without Android or game data.
+Device checks cover the operation menu, cancellation, per-field repair,
+backgrounding, stale previews, strict limits and a single physical Enter submit.
+Real-game entry and IME repaint remain open; see the 0.9.1 report.
+Isolated host fixtures are in tools/android/hosttest.c and link only with
+ANDROID_HOST_TEST=1.
+
+`sh tools/android/tests/run-encoding-tests.sh` runs 39 checks with JDK 8+.
+It uses self-authored scene/archive fixtures, including DSC compression,
+loose overrides, invalid data, ambiguous text and cancellation. No game is needed.
+
+The presentation backend now uses EGL + GLES2: a persistent logical canvas
+texture, merged dirty-region uploads, GPU nearest-neighbor scaling and a full
+GPU quad/black-border redraw. It no longer locks/scales the physical window
+buffer on the CPU. CPU game compositing and source pixel conversion remain.
+Choreographer grants at most one presentation per frame callback, with EGL
+swap interval 1; unchanged frames do not upload or swap. The UI/lifecycle mutex
+is released before any EGL/GLES driver call. Surface generations invalidate
+the renderer, and background/resume rebuilds from the retained CPU canvas.
+Driver failures are logged and retried with a one-second backoff; graphics
+calls and cleanup stay on the VM thread. See [0.7.0 device evidence](../../docs/android-egl-0.7.md).
+
+Run `sh tools/android/tests/run-input-tests.sh` with JDK 8+ and a host C99 compiler
+for 48 input/settings checks and 270 native/Java viewport comparisons. The script
+accepts JAVA, JAVAC and CC executable overrides. Test sources are excluded from
+the production APK. Physical controller/mouse testing remains pending.
+
+Host tests cover recursive copies, original filename case, Unicode paths, empty
+directories, two game save directories, traversal rejection, duplicate paths,
+short reads, interrupted-import retry and preserving an existing game's saves.
+The engine tests cover the Fureraba JSON entry, another built-in game identifier,
+and explicit GBK / UTF-8 / SJIS options. These are not two full-game playthroughs.
+The current host suite has the same two failing test groups as its earlier baseline:
+`bpc` and `win32wide`. Native/Java compilation, APK alignment and signing checks pass.
+Subsequent device validation on Xiaomi Mi 8 (Android 10) passed SAF full-directory
+import (all 75 original files matched SHA-256), Fureraba startup, imported autosave
+loading, new normal save creation, cold-start loading, GBK persistence, engine
+process exit/restart and actual ZIP export after a controlled SIGABRT. See
+`docs/android-device-validation-0.4.md` in the publish checkout. Kanojo Step was subsequently prepared and tested; see `docs/android-kanojostep.md`. Legacy migration remains unverified because the device's
+old app installation contained no game data or saves.
 
 ## Build
 
@@ -69,10 +228,20 @@ Keep using the same key when installing updates over this build.
 
 Tap **从头开始**, keep the default name and tap **结束输入**. Check that
 the name reads **青叶／恭介** and the first line reads **想要女朋友！**.
-Single taps map to left click, two-finger taps to right click, vertical
-swipes to the mouse wheel and Back to Escape. Use `adb logcat -s OpenBGI`
+Single taps map to left click, long press/two-finger taps to right click, vertical
+swipes to the mouse wheel in the reading preset, and Back to Escape. Use `adb logcat -s OpenBGI`
 to see boot errors and screen titles.
 
 The mixer uses AAudio for stereo output and libvorbisfile for BW codec 3
-music, voice and effects. Audio pauses in the background. Native text
-editing and child windows are subsequent work.
+music, voice and effects. Audio pauses in the background. Android IME editing
+and native input/dialog forms are implemented; video remains pending.
+
+## Kanojo Step (local 0.4.1 validation)
+
+See [Kanojo Step preparation and validation](../../docs/android-kanojostep.md).
+Its Chinese package embeds translated loose resources inside a Windows EXE;
+these must be statically extracted into a separate game copy before importing.
+The game profile is 1.636 and its translated display text uses GBK.
+Startup, early Chinese dialogue, quick save/load, cold-start quick load and
+switching back to the Fureraba normal save were verified on Mi 8. This is
+not a complete-playthrough compatibility claim.

@@ -495,9 +495,18 @@ int OS_FontEnumFaces(char* buf, int charset, int* outBytes)
 		FcFontSetDestroy(set);
 	FcObjectSetDestroy(os);
 	FcPatternDestroy(pat);
+#elif defined(BGI_ANDROID)
+    /* Games may use a do/while over this list and assume at least one
+     * installed face. These ASCII family names are valid in all text modes. */
+    static const char faces[] = "Noto Sans CJK SC\0Noto Serif CJK SC\0";
+    BGI_UNUSED(charset);
+    bytes = (int)sizeof faces - 1;
+    count = 2;
+    if(buf)
+        memcpy(buf, faces, (size_t)bytes);
 #else
-	BGI_UNUSED(buf);
-	BGI_UNUSED(charset);
+    BGI_UNUSED(buf);
+    BGI_UNUSED(charset);
 #endif
 	*outBytes = bytes;
 	return count;

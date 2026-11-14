@@ -28,6 +28,10 @@
  * routine given a mode combination it does not implement draws nothing.
  */
 #include "bgi/gfx/bitmap.h"
+#include "blit_lanes.h"
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 // pack a lane to a byte with unsigned saturation (packuswb)
 static inline uint8_t Sat8(int v)
@@ -100,6 +104,38 @@ static void AlphaCopy16(Bmp_t* dst, const Bmp_t* src)
 
 /* RGB32 <- ARGB32: d += (s - d) * (a >> 1) >> 7 for pixels with
  * alpha >= 2 (lanes B G R; the top byte keeps d's value) */
+#if defined(__aarch64__)
+static int PartialRowOverlap(const uint32_t* a, const uint32_t* b, int width)
+{
+	uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
+	uintptr_t distance = x > y ? x - y : y - x;
+	return distance && distance < (size_t)width * 4;
+}
+static inline uint8x8_t BlendChannel7Neon(uint8x8_t s, uint8x8_t d, uint16x8_t weight, uint16x8_t inverse)
+{
+	return vmovn_u16(vshrq_n_u16(vaddq_u16(vmulq_u16(vmovl_u8(s), weight), vmulq_u16(vmovl_u8(d), inverse)), 7));
+}
+static int BlendRgbNeonRow(uint32_t* dst, const uint32_t* src, int width, unsigned inv)
+{
+	uint16x8_t opacity = vdupq_n_u16((uint16_t)inv), full = vdupq_n_u16(128);
+	int x;
+	// Partial overlap depends on scalar forward-write order. Exact alias is safe.
+	if(PartialRowOverlap(dst, src, width)) return 0;
+	for(x = 0; x + 8 <= width; x += 8)
+	{
+		uint8x8x4_t s = vld4_u8((const uint8_t*)(src + x)), d;
+		uint16x8_t weight = vshrq_n_u16(vmulq_u16(vshrq_n_u16(vmovl_u8(s.val[3]), 1), opacity), 8);
+		uint16x8_t inverse = vsubq_u16(full, weight);
+		if(!vmaxvq_u16(weight)) continue;
+		d = vld4_u8((const uint8_t*)(dst + x));
+		d.val[0] = BlendChannel7Neon(s.val[0], d.val[0], weight, inverse);
+		d.val[1] = BlendChannel7Neon(s.val[1], d.val[1], weight, inverse);
+		d.val[2] = BlendChannel7Neon(s.val[2], d.val[2], weight, inverse);
+		vst4_u8((uint8_t*)(dst + x), d); // destination's top byte is unchanged
+	}
+	return x;
+}
+#endif
 static void AlphaCopy32_To1(Bmp_t* dst, const Bmp_t* src)
 {
 	int y, x;
@@ -107,18 +143,17 @@ static void AlphaCopy32_To1(Bmp_t* dst, const Bmp_t* src)
 	{
 		const uint32_t* s = (const uint32_t*)ROW(src, y);
 		uint32_t* d = (uint32_t*)ROW(dst, y);
-		for(x = 0; x < src->w; x++)
+		x = 0;
+#if defined(__aarch64__)
+		x = BlendRgbNeonRow(d, s, src->w, 256);
+#endif
+		for(; x < src->w; x++)
 		{
 			uint32_t sv = s[x], dv = d[x];
-			int a = (int)(sv >> 25), i, out = (int)(dv & 0xff000000u);
+            int a = (int)(sv >> 25);
 			if(!(sv & 0xfe000000u))
 				continue;
-			for(i = 0; i < 24; i += 8)
-			{
-				int sc = (int)((sv >> i) & 0xff), dc = (int)((dv >> i) & 0xff);
-				out |= Sat8((((sc - dc) * a) >> 7) + dc) << i;
-			}
-			d[x] = (uint32_t)out;
+            d[x] = Blit_BlendRgb7(dv,sv,(unsigned)a);
 		}
 	}
 }
@@ -230,13 +265,7 @@ static void Blend32_Plain(Bmp_t* dst, const Bmp_t* src, int level)
 		for(x = 0; x < src->w; x++)
 		{
 			uint32_t sv = s[x], dv = d[x];
-			int i, out = (int)(sv & 0xff000000u);
-			for(i = 0; i < 24; i += 8)
-			{
-				int sc = (int)((sv >> i) & 0xff), dc = (int)((dv >> i) & 0xff);
-				out |= Sat8((((dc - sc) * l2) >> 7) + sc) << i;
-			}
-			d[x] = (uint32_t)out;
+			d[x] = Blit_BlendRgb7(sv, dv, (unsigned)l2);
 		}
 	}
 }
@@ -278,19 +307,18 @@ static void Blend32_2to1(Bmp_t* dst, const Bmp_t* src, int level)
 	{
 		const uint32_t* s = (const uint32_t*)ROW(src, y);
 		uint32_t* d = (uint32_t*)ROW(dst, y);
-		for(x = 0; x < src->w; x++)
+		x = 0;
+#if defined(__aarch64__)
+		x = BlendRgbNeonRow(d, s, src->w, (unsigned)inv);
+#endif
+		for(; x < src->w; x++)
 		{
 			uint32_t sv = s[x], dv = d[x];
-			int w, i, out = (int)(dv & 0xff000000u);
+            int w;
 			if(!(sv & 0xfe000000u))
 				continue;
 			w = ((int)(sv >> 25) * inv) >> 8;
-			for(i = 0; i < 24; i += 8)
-			{
-				int sc = (int)((sv >> i) & 0xff), dc = (int)((dv >> i) & 0xff);
-				out |= Sat8((((sc - dc) * w) >> 7) + dc) << i;
-			}
-			d[x] = (uint32_t)out;
+            d[x] = Blit_BlendRgb7(dv,sv,(unsigned)w);
 		}
 	}
 }
@@ -430,6 +458,60 @@ static void Crossfade32(Bmp_t* dst, const Bmp_t* a, const Bmp_t* b, int ratio, i
 	}
 }
 
+#if defined(__aarch64__)
+static inline uint8x8_t CrossfadeChannelNeon(uint8x8_t a, uint8x8_t b, uint8x8_t d,
+	uint16x8_t va, uint16x8_t vb, uint16x8_t invAlpha, uint16x8_t ratio, uint16x8_t invRatio)
+{
+	uint16x8_t ca = vshrq_n_u16(vmulq_u16(vmovl_u8(a), va), 8);
+	uint16x8_t cb = vshrq_n_u16(vmulq_u16(vmovl_u8(b), vb), 8);
+	uint16x8_t mix = vshrq_n_u16(vaddq_u16(vmulq_u16(ca, invRatio), vmulq_u16(cb, ratio)), 8);
+	uint16x8_t cd = vshrq_n_u16(vmulq_u16(vmovl_u8(d), invAlpha), 8);
+	return vmovn_u16(vaddq_u16(mix, cd)); // colour <= alpha + (255-alpha)
+}
+
+/* Eight pixels at once, preserving all four separate rounding steps of the
+ * scalar reference. Unaligned/cropped rows and aliased sources are supported. */
+static void Crossfade32Neon(Bmp_t* dst, const Bmp_t* a, const Bmp_t* b, unsigned ratio, unsigned level)
+{
+	uint16x8_t inv = vdupq_n_u16((uint16_t)(256 - level));
+	uint16x8_t r = vdupq_n_u16((uint16_t)ratio), ir = vdupq_n_u16((uint16_t)(256 - ratio));
+	uint16x8_t full = vdupq_n_u16(256), zero = vdupq_n_u16(0);
+	int y, x;
+	for(y = 0; y < a->h; ++y)
+	{
+		const uint32_t* pa = (const uint32_t*)ROW(a, y);
+		const uint32_t* pb = (const uint32_t*)ROW(b, y);
+		uint32_t* d = (uint32_t*)ROW(dst, y);
+		int vectorWidth = PartialRowOverlap(d, pa, a->w) || PartialRowOverlap(d, pb, a->w) ? 0 : a->w;
+		for(x = 0; x + 8 <= vectorWidth; x += 8)
+		{
+			uint8x8x4_t av = vld4_u8((const uint8_t*)(pa + x));
+			uint8x8x4_t bv = vld4_u8((const uint8_t*)(pb + x));
+			uint8x8x4_t dv, out;
+			uint16x8_t va = vshrq_n_u16(vmulq_u16(vmovl_u8(av.val[3]), inv), 8);
+			uint16x8_t vb = vshrq_n_u16(vmulq_u16(vmovl_u8(bv.val[3]), inv), 8);
+			uint16x8_t alpha = vshrq_n_u16(vaddq_u16(vmulq_u16(va, ir), vmulq_u16(vb, r)), 8);
+			if(vmaxvq_u16(alpha) == 0) continue;
+			dv = vld4_u8((const uint8_t*)(d + x));
+			uint16x8_t wd = vsubq_u16(full, alpha);
+			uint8x8_t mask = vmovn_u16(vcgtq_u16(alpha, zero));
+			out.val[0] = vbsl_u8(mask, CrossfadeChannelNeon(av.val[0],bv.val[0],dv.val[0],va,vb,wd,r,ir), dv.val[0]);
+			out.val[1] = vbsl_u8(mask, CrossfadeChannelNeon(av.val[1],bv.val[1],dv.val[1],va,vb,wd,r,ir), dv.val[1]);
+			out.val[2] = vbsl_u8(mask, CrossfadeChannelNeon(av.val[2],bv.val[2],dv.val[2],va,vb,wd,r,ir), dv.val[2]);
+			out.val[3] = vbsl_u8(mask, vdup_n_u8(0), dv.val[3]);
+			vst4_u8((uint8_t*)(d + x), out);
+		}
+		if(x < a->w)
+		{
+			Bmp_t aa = *a, bb = *b, dd = *dst;
+			aa.pixels = (uint8_t*)(pa + x); bb.pixels = (uint8_t*)(pb + x); dd.pixels = (uint8_t*)(d + x);
+			aa.w = bb.w = dd.w = a->w - x; aa.h = bb.h = dd.h = 1;
+			Crossfade32(&dd, &aa, &bb, (int)ratio, (int)level);
+		}
+	}
+}
+#endif
+
 /* Draw the cross fade of two ARGB32 pictures (ratio 0 = a, 0x100 = b) over
  * an RGB32 destination at transparency `level`; a level of 0x100 or more
  * draws nothing.  0 ok, 9 a or b is not ARGB32, 0xa dst is not RGB32. */
@@ -440,7 +522,14 @@ int Blit_Crossfade(Bmp_t* dst, const Bmp_t* a, const Bmp_t* b, int ratio, int le
 	if(a->mode != PM_ARGB32 || b->mode != PM_ARGB32)
 		return 9;
 	if((unsigned)level < 0x100u)
-		Crossfade32(dst, a, b, ratio, level);
+	{
+#if defined(__aarch64__)
+		if((unsigned)ratio <= 0x100u)
+			Crossfade32Neon(dst, a, b, (unsigned)ratio, (unsigned)level);
+		else
+#endif
+			Crossfade32(dst, a, b, ratio, level);
+	}
 	return 0;
 }
 
@@ -457,6 +546,12 @@ static void CrossfadeTo32(Bmp_t* tmp, const Bmp_t* a, const Bmp_t* b, int ratio)
 		{
 			uint32_t av = pa[x], bv = pb[x];
 			int i, out = 0;
+			if((unsigned)ratio <= 256u)
+			{
+				uint64_t v = Blit_ExpandBytes(av) * (256u - (unsigned)ratio) + Blit_ExpandBytes(bv) * (unsigned)ratio;
+				d[x] = Blit_PackBytes((v >> 8) & UINT64_C(0x00ff00ff00ff00ff));
+				continue;
+			}
 			for(i = 0; i < 32; i += 8)
 			{
 				int ac = (int)((av >> i) & 0xff), bc = (int)((bv >> i) & 0xff);
@@ -492,6 +587,11 @@ static void CrossfadeTo32A(Bmp_t* tmp, const Bmp_t* a, const Bmp_t* b, int ratio
 			}
 			w = (int)((wa << 7) / sum); // 0..0x80
 			out = (int)(((sum >> 8) & 0xff) << 24);
+			if((unsigned)ratio <= 256u)
+			{
+				d[x] = (Blit_BlendRgb7(bv, av, (unsigned)w) & 0xffffffu) | (uint32_t)out;
+				continue;
+			}
 			for(i = 0; i < 24; i += 8)
 			{
 				int ac = (int)((av >> i) & 0xff), bc = (int)((bv >> i) & 0xff);

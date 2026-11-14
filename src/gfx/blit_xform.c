@@ -26,6 +26,7 @@
  */
 #include <math.h>
 #include "bgi/gfx/bitmap.h"
+#include "blit_lanes.h"
 
 // pack a lane to a byte with unsigned saturation (packuswb)
 static inline uint8_t Sat8(int v)
@@ -340,8 +341,10 @@ static void Xform_Sample(const Bmp_t* src, XformPos_t p, int lanes[4])
 {
 	int x = p.x >> 16, y = p.y >> 16;
 	int fx = (p.x >> 12) & 15, fy = (p.y >> 12) & 15;
-	int w = src->w, h = src->h, i;
+    int w = src->w, h = src->h;
 	uint32_t p00 = 0, p01 = 0, p10 = 0, p11 = 0;
+    const uint64_t mask=UINT64_C(0x00ff00ff00ff00ff);
+    uint64_t top,bottom,result;
 
 	lanes[0] = lanes[1] = lanes[2] = lanes[3] = 0;
 	if(y <= -2 || x <= -2 || y >= h)
@@ -357,15 +360,7 @@ static void Xform_Sample(const Bmp_t* src, XformPos_t p, int lanes[4])
 	}
 	if(y + 1 < h)
 	{
-		if(fy == 0)
-		{ // one row is enough
-			for(i = 0; i < 4; i++)
-			{
-				int a = (int)((p00 >> (8 * i)) & 0xff), b = (int)((p01 >> (8 * i)) & 0xff);
-				lanes[i] = b + (((a - b) * (16 - fx)) >> 4);
-			}
-			return;
-		}
+        if(fy == 0)goto sample; // one row is enough
 		if(x >= w)
 			return;
 		if(x >= 0)
@@ -373,14 +368,18 @@ static void Xform_Sample(const Bmp_t* src, XformPos_t p, int lanes[4])
 		if(x + 1 < w)
 			p11 = PIX32(src, x + 1, y + 1);
 	}
-	for(i = 0; i < 4; i++)
-	{
-		int a = (int)((p00 >> (8 * i)) & 0xff), b = (int)((p01 >> (8 * i)) & 0xff);
-		int c = (int)((p10 >> (8 * i)) & 0xff), d = (int)((p11 >> (8 * i)) & 0xff);
-		int r0 = b + (((a - b) * (16 - fx)) >> 4);
-		int r1 = d + (((c - d) * (16 - fx)) >> 4);
-		lanes[i] = r1 + (((r0 - r1) * (16 - fy)) >> 4);
-	}
+sample:
+    /* Positive weighted sums equal the old signed-difference floors. Keep
+     * the horizontal rounding before the vertical one; a single 2D sum
+     * would change edge/alpha pixels. All four lanes advance together. */
+    top=((Blit_ExpandBytes(p00)*(16-fx)+Blit_ExpandBytes(p01)*fx)>>4)&mask;
+    if(fy==0)result=top;
+    else {
+        bottom=((Blit_ExpandBytes(p10)*(16-fx)+Blit_ExpandBytes(p11)*fx)>>4)&mask;
+        result=((top*(16-fy)+bottom*fy)>>4)&mask;
+    }
+    lanes[0]=(int)(result&255);lanes[1]=(int)((result>>16)&255);
+    lanes[2]=(int)((result>>32)&255);lanes[3]=(int)((result>>48)&255);
 }
 
 // nearest sample; 0 when outside (unsigned compare, so negatives fall out)
@@ -449,7 +448,7 @@ static void Xform_Blend1(Bmp_t* dst, const XformMap_t* m, const Bmp_t* src, int 
  * are left alone */
 static void Xform_Blend2(Bmp_t* dst, const XformMap_t* m, const Bmp_t* src, int level, int smooth)
 {
-	int inv = 0x100 - level, i, j, k;
+    int inv = 0x100 - level, i, j;
 	XformPos_t rowStart, p;
 	XFORM_ROWS(*m, dst)
 	{
@@ -457,7 +456,7 @@ static void Xform_Blend2(Bmp_t* dst, const XformMap_t* m, const Bmp_t* src, int 
 		XFORM_COLS(*m, dst)
 		{
 			int s[4], a7, w;
-			uint32_t dv, out;
+            uint32_t sv;
 			if(smooth)
 			{
 				Xform_Sample(src, p, s);
@@ -465,25 +464,15 @@ static void Xform_Blend2(Bmp_t* dst, const XformMap_t* m, const Bmp_t* src, int 
 			}
 			else
 			{
-				uint32_t sv;
 				if(!Xform_Nearest(src, p, &sv))
 					continue;
-				s[0] = (int)(sv & 0xff);
-				s[1] = (int)((sv >> 8) & 0xff);
-				s[2] = (int)((sv >> 16) & 0xff);
 				a7 = (int)(sv >> 25);
 			}
 			if(!a7)
 				continue;
 			w = (a7 * inv) >> 8;
-			dv = d[i];
-			out = dv & 0xff000000u;
-			for(k = 0; k < 3; k++)
-			{
-				int dc = (int)((dv >> (8 * k)) & 0xff);
-				out |= (uint32_t)Sat8(dc + Mul7(s[k] - dc, w)) << (8 * k);
-			}
-			d[i] = out;
+            if(smooth)sv=(uint32_t)s[0]|(uint32_t)s[1]<<8|(uint32_t)s[2]<<16;
+            d[i] = Blit_BlendRgb7(d[i],sv,(unsigned)w);
 		}
 	}
 }

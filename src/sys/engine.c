@@ -302,7 +302,7 @@ void Engine_Shutdown(void)
 //                      have no handler yet, and exit (after --engine=)
 //   --lang=en|ja       the language of the engine's messages (English by
 //                      default, "ja" the originals); BGI_LANG=ja the same
-//   --text-encoding=gbk use CP936 for a game's display text and text input
+//   --text-encoding=utf8|sjis|gbk select display encoding; gbk uses CP936 for a game's display text and text input
 //   --list=ARCHIVE     print the entries of an archive and what they are, and exit
 //   --extract=ARCHIVE  write the entries into a directory (--out=DIR, default
 //                      the archive's name without its extension) and exit:
@@ -386,7 +386,11 @@ static void Engine_ParseOptions(char* cmd)
 		else if(strcmp(opt, "--list-engines") == 0)
 			gOptList = 1;
 		else if(strcmp(opt, "--text-encoding=gbk") == 0)
-			Text_SetEncoding(TEXT_GBK);
+            Text_SetEncoding(TEXT_GBK);
+        else if(strcmp(opt, "--text-encoding=utf8") == 0)
+            Text_SetEncoding(TEXT_UTF8);
+        else if(strcmp(opt, "--text-encoding=sjis") == 0)
+            Text_SetEncoding(TEXT_SJIS);
 		else if(strcmp(opt, "--list-missing") == 0)
 			gOptListMissing = 1;
 		else if(strcmp(opt, "--debug") == 0 || strcmp(opt, "--debug=pause") == 0)

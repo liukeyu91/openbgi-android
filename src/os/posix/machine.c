@@ -11,6 +11,9 @@
  *             failure
  */
 #include "posix_internal.h"
+#if defined(BGI_ANDROID)
+#include "../android/android_internal.h"
+#endif
 
 // ---- machine -----------------------------------------------------------------------------------
 
@@ -85,11 +88,16 @@ uint64_t OS_ReadTsc(void)
 // the monotonic clock in nanoseconds stands in for the performance counter
 int OS_PerfCounterNs(int64_t* out)
 {
+#if defined(BGI_ANDROID)
+    *out = (int64_t)OsAndroid_ClockNs();
+    return 1;
+#else
 	struct timespec ts;
 	if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
 		return 0;
 	*out = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 	return 1;
+#endif
 }
 
 // CPUID.1:EAX (family, model, stepping), 0 without CPUID

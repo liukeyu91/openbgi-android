@@ -7,33 +7,24 @@
  */
 #include "android_internal.h"
 
-#include <android/keycodes.h>
-
-typedef struct Viewport
-{
-	int x, y, w, h;
-} Viewport_t;
+#include "viewport.h"
+#include "renderer.h"
+#include "canvas.h"
+#include "bgi/codec.h"
 
 static OsEventHandlers_t gEvents;
 static uint32_t* gCanvas;
 static int gWidth, gHeight, gVisible, gDirty, gAlive, gActive;
 static int gClose, gQuit, gDcToken;
 static unsigned gRedraw;
+static AndroidDamage_t gDamage;
+static uint64_t gLastFrame,gRetryAt;
 static int gMouseX, gMouseY;
 static uint8_t gKeys[256];
-static int gGesture, gTwoFingers, gDragged;
-static float gStartX, gStartY, gScrollY;
 
-static Viewport_t Viewport(int w, int h)
+static Viewport_t Viewport(int w,int h)
 {
-	Viewport_t v = {0, 0, w, h};
-	if((int64_t)w * gHeight > (int64_t)h * gWidth)
-		v.w = (int)((int64_t)h * gWidth / gHeight);
-	else
-		v.h = (int)((int64_t)w * gHeight / gWidth);
-	v.x = (w - v.w) / 2;
-	v.y = (h - v.h) / 2;
-	return v;
+    return AndroidViewport(w,h,gWidth,gHeight,gAndroidHost->scaleMode);
 }
 
 static int SetCanvas(int w, int h)
@@ -50,43 +41,10 @@ static int SetCanvas(int w, int h)
 	gCanvas = pixels;
 	gWidth = w;
 	gHeight = h;
+	OsAndroid_EditCommand(ANDROID_EDIT_CANVAS, w, h, 0, 0, NULL);
 	gDirty = 1;
+	gDamage = (AndroidDamage_t){0,0,w,h};
 	return 1;
-}
-
-static void PresentLocked(ANativeWindow* window)
-{
-	ANativeWindow_Buffer b;
-	Viewport_t v;
-	int y;
-	if(!window || !gCanvas || !gVisible || !gDirty || ANativeWindow_lock(window, &b, NULL) != 0)
-		return;
-	if(b.format == WINDOW_FORMAT_RGBA_8888 || b.format == WINDOW_FORMAT_RGBX_8888)
-	{
-		v = Viewport(b.width, b.height);
-		for(y = 0; y < b.height; y++)
-		{
-			uint32_t* row = (uint32_t*)b.bits + (size_t)y * b.stride;
-			int x;
-			if(v.w <= 0 || v.h <= 0 || y < v.y || y >= v.y + v.h)
-			{
-				for(x = 0; x < b.width; x++)
-					row[x] = 0xff000000u;
-			}
-			else
-			{
-				const uint32_t* src = gCanvas + (size_t)((int64_t)(y - v.y) * gHeight / v.h) * gWidth;
-				for(x = 0; x < v.x; x++)
-					row[x] = 0xff000000u;
-				for(; x < v.x + v.w; x++)
-					row[x] = src[(int64_t)(x - v.x) * gWidth / v.w] | 0xff000000u;
-				for(; x < b.width; x++)
-					row[x] = 0xff000000u;
-			}
-		}
-		gDirty = 0;
-	}
-	ANativeWindow_unlockAndPost(window);
 }
 
 static uint32_t SurfacePixel(const OsSurface_t* src, int x, int y)
@@ -132,6 +90,23 @@ static void Blit(int dx, int dy, int dw, int dh, const OsSurface_t* src,
 	}
 	if(l < 0) l = 0;
 	if(t < 0) t = 0;
+    if(dw==sw && dh==sh && l<r && t<b)
+    {
+        /* Ordinary presents are already logical-size pixels. Clip the source
+         * columns once and copy rows without a per-pixel scale division. */
+        int64_t pos=(int64_t)sx+l-dx,first=pos<0?0:pos,last=pos+(r-l);
+        if(last>src->width)last=src->width;
+        if(first<last) {
+            int target=l+(int)(first-pos),count=(int)(last-first);
+            for(y=t;y<b;y++) {
+                int64_t fromY=(int64_t)sy+y-dy;
+                if(fromY>=0 && fromY<src->height)
+                    AndroidCanvasCopyRow(gCanvas+(size_t)y*gWidth+target,
+                        (const uint8_t*)src->pixels+(size_t)fromY*src->pitch+(size_t)first*(src->bpp/8),count,src->bpp);
+            }
+        }
+        AndroidDamageAdd(&gDamage,l,t,r,b,gWidth,gHeight);gDirty=1;return;
+    }
 	for(y = t; y < b; y++)
 	{
 		int64_t fromY = sy + ((int64_t)y - dy) * sh / dh;
@@ -145,7 +120,8 @@ static void Blit(int dx, int dy, int dw, int dh, const OsSurface_t* src,
 				gCanvas[(size_t)y * gWidth + x] = SurfacePixel(src, (int)fromX, (int)fromY);
 		}
 	}
-	gDirty = 1;
+	AndroidDamageAdd(&gDamage,l,t,r,b,gWidth,gHeight);
+	if(l<r && t<b)gDirty = 1;
 }
 
 static int MapPoint(float x, float y, int width, int height)
@@ -168,186 +144,94 @@ static void MouseButton(int button, int down)
 		gEvents.mouse_button(button, down, gMouseX, gMouseY);
 }
 
-static int VirtualKey(int code)
-{
-	switch(code)
-	{
-		case AKEYCODE_BACK:
-		case AKEYCODE_ESCAPE: return 0x1b;
-		case AKEYCODE_ENTER:
-		case AKEYCODE_DPAD_CENTER: return 0x0d;
-		case AKEYCODE_DPAD_UP: return 0x26;
-		case AKEYCODE_DPAD_DOWN: return 0x28;
-		case AKEYCODE_DPAD_LEFT: return 0x25;
-		case AKEYCODE_DPAD_RIGHT: return 0x27;
-		case AKEYCODE_SPACE: return 0x20;
-		case AKEYCODE_CTRL_LEFT:
-		case AKEYCODE_CTRL_RIGHT: return 0x11;
-		default: return 0;
-	}
-}
+typedef AndroidInputEvent_t InputEvent_t;
 
-typedef struct InputEvent
-{
-	int type, action, key, repeat, width, height;
-	float x, y, wheel;
-} InputEvent_t;
-
-/* Copy the event while the Activity owns the queue. Dispatch engine
- * callbacks after unlocking, since a callback may present a new frame. */
 static int ReadInputLocked(AndroidHost_t* host, InputEvent_t* out)
 {
-	AInputEvent* event;
-	AInputQueue* queue = host->input;
-	int handled = 0;
-	if(!queue || AInputQueue_getEvent(queue, &event) < 0)
-		return 0;
-	if(AInputQueue_preDispatchEvent(queue, event))
-		return 1;
-	out->type = AInputEvent_getType(event);
-	if(out->type == AINPUT_EVENT_TYPE_KEY)
-	{
-		out->action = AKeyEvent_getAction(event);
-		out->key = VirtualKey(AKeyEvent_getKeyCode(event));
-		out->repeat = AKeyEvent_getRepeatCount(event) != 0;
-		handled = out->key != 0;
-	}
-	else if(out->type == AINPUT_EVENT_TYPE_MOTION && host->window)
-	{
-		out->action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-		out->x = AMotionEvent_getX(event, 0);
-		out->y = AMotionEvent_getY(event, 0);
-		out->wheel = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_VSCROLL, 0);
-		out->width = ANativeWindow_getWidth(host->window);
-		out->height = ANativeWindow_getHeight(host->window);
-		handled = 1;
-	}
-	AInputQueue_finishEvent(queue, event, handled);
-	return 1;
+    if(!host->inputCount) return 0;
+    *out = host->input[0];
+    memmove(host->input, host->input + 1, --host->inputCount * sizeof *out);
+    return 1;
 }
 
 static void DispatchInput(const InputEvent_t* e)
 {
-	int inside;
-	if(!gActive)
-		return;
-	if(e->type == AINPUT_EVENT_TYPE_KEY && e->key)
-	{
-		if(e->action == AKEY_EVENT_ACTION_DOWN)
-		{
-			gKeys[e->key] = 0x80;
-			if(gEvents.key_down)
-				gEvents.key_down(e->key, e->repeat);
-		}
-		else if(e->action == AKEY_EVENT_ACTION_UP)
-		{
-			gKeys[e->key] = 0;
-			if(gEvents.key_up)
-				gEvents.key_up(e->key);
-		}
-		return;
-	}
-	if(e->type != AINPUT_EVENT_TYPE_MOTION)
-		return;
-	inside = MapPoint(e->x, e->y, e->width, e->height);
-	if(inside && gEvents.mouse_move)
-		gEvents.mouse_move(gMouseX, gMouseY);
-	switch(e->action)
-	{
-		case AMOTION_EVENT_ACTION_DOWN:
-			gGesture = inside;
-			gTwoFingers = gDragged = 0;
-			gStartX = e->x;
-			gScrollY = gStartY = e->y;
-			break;
-		case AMOTION_EVENT_ACTION_POINTER_DOWN:
-			gTwoFingers = 1;
-			break;
-		case AMOTION_EVENT_ACTION_MOVE:
-			if(gGesture && !gTwoFingers)
-			{
-				float step = e->height / 12.0f;
-				if(step > 0 && (e->y - gScrollY >= step || gScrollY - e->y >= step))
-				{
-					int delta = (int)((e->y - gScrollY) / step);
-					gDragged = 1;
-					gScrollY += delta * step;
-					if(gEvents.mouse_wheel)
-						gEvents.mouse_wheel(delta * 120);
-				}
-			}
-			break;
-		case AMOTION_EVENT_ACTION_UP:
-			if(gGesture && inside && !gDragged &&
-				e->x - gStartX < e->width / 15.0f && gStartX - e->x < e->width / 15.0f &&
-				e->y - gStartY < e->height / 15.0f && gStartY - e->y < e->height / 15.0f)
-			{
-				MouseButton(gTwoFingers, 1);
-				MouseButton(gTwoFingers, 0);
-			}
-			gGesture = 0;
-			break;
-		case AMOTION_EVENT_ACTION_CANCEL:
-			gGesture = 0;
-			break;
-		case AMOTION_EVENT_ACTION_SCROLL:
-			if(gEvents.mouse_wheel && e->wheel)
-				gEvents.mouse_wheel((int)(e->wheel * 120));
-			break;
-	}
+    int inside;
+    if(!gActive)return;
+    if(e->type==AINPUT_EVENT_TYPE_KEY){
+        if(e->key<=0 || e->key>=256)return;
+        if(e->action==AKEY_EVENT_ACTION_DOWN){gKeys[e->key]=0x80;if(gEvents.key_down)gEvents.key_down(e->key,e->repeat);}
+        else if(e->action==AKEY_EVENT_ACTION_UP){gKeys[e->key]=0;if(gEvents.key_up)gEvents.key_up(e->key);}
+        return;
+    }
+    if(e->type!=AINPUT_EVENT_TYPE_MOTION)return;
+    if(e->action==ANDROID_POINTER_CANCEL){
+        if(gKeys[1])MouseButton(0,0);if(gKeys[2])MouseButton(1,0);return;
+    }
+    inside=MapPoint(e->x,e->y,e->width,e->height);
+    if((inside || gKeys[1] || gKeys[2]) && gEvents.mouse_move)gEvents.mouse_move(gMouseX,gMouseY);
+    if(e->action==ANDROID_POINTER_DOWN && inside && e->key>=0 && e->key<=1 && !gKeys[e->key+1])MouseButton(e->key,1);
+    else if(e->action==ANDROID_POINTER_UP && e->key>=0 && e->key<=1 && gKeys[e->key+1])MouseButton(e->key,0);
+    else if(e->action==ANDROID_POINTER_WHEEL && inside && e->wheel && gEvents.mouse_wheel)gEvents.mouse_wheel((int)(e->wheel*120));
+}
+
+static void ResetInput(void)
+{
+    int vk;
+    for(vk = 1; vk < (int)sizeof gKeys; ++vk)
+        if(gKeys[vk])
+        {
+            if(vk <= 2) MouseButton(vk - 1, 0);
+            else { gKeys[vk]=0; if(gEvents.key_up)gEvents.key_up(vk); }
+        }
+    memset(gKeys, 0, sizeof gKeys);
 }
 
 int OS_PumpMessages(void)
 {
-	AndroidHost_t* host = gAndroidHost;
-	InputEvent_t event = {0};
-	int input, active, destroyed;
-	pthread_mutex_lock(&host->lock);
-	active = host->focused && host->resumed && host->window;
-	destroyed = host->destroyed;
-	if(gRedraw != host->redraw)
-	{
-		gRedraw = host->redraw;
-		gDirty = 1;
-	}
-	if(host->resumed)
-		PresentLocked(host->window);
-	input = ReadInputLocked(host, &event);
-	pthread_mutex_unlock(&host->lock);
-	if(gQuit || destroyed)
-	{
-		gQuit = 0;
-		if(gEvents.quit)
-			gEvents.quit();
-		return 1;
-	}
-	if(gActive != active)
-	{
-		int vk;
-		gActive = active;
-		if(!active)
-		{
-			for(vk = 1; vk < (int)sizeof gKeys; vk++)
-				if(gKeys[vk] && gEvents.key_up)
-					gEvents.key_up(vk);
-			memset(gKeys, 0, sizeof gKeys);
-			gGesture = 0;
-		}
-		if(gEvents.activate)
-			gEvents.activate(active);
-	}
-	if(gClose)
-	{
-		gClose = 0;
-		if(gEvents.close_request)
-			gEvents.close_request();
-		return 1;
-	}
-	if(input)
-		DispatchInput(&event);
-	if(!active && !input)
-		OS_SleepMs(16);
-	return input;
+    AndroidHost_t* host = gAndroidHost;
+    InputEvent_t event = {0};
+    ANativeWindow* window;
+    unsigned redraw;
+    uint64_t frame;
+    int input,active,destroyed,reset;
+    pthread_mutex_lock(&host->lock);
+    if(!host->resumed && !host->destroyed){
+        pthread_mutex_unlock(&host->lock);
+        BGI_CbgCacheClear();
+        ResetInput();
+        if(gActive && gEvents.activate)gEvents.activate(0);
+        gActive=0;
+        OsAndroid_RenderClose();gDirty=1;
+        pthread_mutex_lock(&host->lock);
+        while(!host->resumed && !host->destroyed)pthread_cond_wait(&host->changed,&host->lock);
+    }
+    active=host->focused && host->resumed && host->window;
+    destroyed=host->destroyed;reset=host->inputReset;host->inputReset=0;
+    redraw=host->redraw;frame=host->frameSerial;
+    window=!destroyed && host->resumed?host->window:NULL;
+    if(window)ANativeWindow_acquire(window);
+    input=ReadInputLocked(host,&event);
+    pthread_mutex_unlock(&host->lock);
+    /* Never hold the UI/lifecycle mutex across driver calls or eglSwapBuffers. */
+    if(gRedraw!=redraw){gRedraw=redraw;gDirty=1;gRetryAt=0;}
+    if(!window){OsAndroid_RenderClose();gDirty=1;}
+    else if(gDirty && gVisible && gCanvas && frame!=gLastFrame && OsAndroid_ClockNs()>=gRetryAt){
+        int result=OsAndroid_Render(window,redraw,gCanvas,gWidth,gHeight,gDamage,host->scaleMode);
+        gLastFrame=frame;
+        if(result>0){gDirty=0;gDamage=(AndroidDamage_t){0};gRetryAt=0;}
+        else if(result<0)gRetryAt=OsAndroid_ClockNs()+1000000000u;
+    }
+    if(window)ANativeWindow_release(window);
+    if(gQuit || destroyed){gQuit=0;if(gEvents.quit)gEvents.quit();return 1;}
+    if(gActive!=active || reset){
+        gActive=active;if(!active || reset)ResetInput();
+        if(gEvents.activate)gEvents.activate(active);
+    }
+    if(gClose){gClose=0;if(gEvents.close_request)gEvents.close_request();return 1;}
+    if(input)DispatchInput(&event);
+    if(!active && !input)OS_SleepMs(16);
+    return input;
 }
 
 void OS_SetEventHandlers(const OsEventHandlers_t* h)
@@ -362,6 +246,7 @@ int OS_WindowCreate(const OsWindowDesc_t* d)
 	gAlive = 1;
 	gQuit = gClose = gVisible = gActive = 0;
 	gRedraw = 0;
+	gLastFrame = gRetryAt = 0;
 	memset(gKeys, 0, sizeof gKeys);
 	OS_WindowSetTitle(d->title);
 	if(gEvents.created)
@@ -374,6 +259,11 @@ void OS_WindowDestroy(void)
 	if(!gAlive)
 		return;
 	gAlive = gVisible = 0;
+	OsAndroid_RenderClose();
+	{AndroidRenderStats_t st=OsAndroid_RenderStats();char log[240];
+	 snprintf(log,sizeof log,"EGL totals: frames=%llu full=%llu partial=%llu bytes=%llu errors=%llu",
+	 (unsigned long long)st.frames,(unsigned long long)st.full,(unsigned long long)st.partial,
+	 (unsigned long long)st.bytes,(unsigned long long)st.errors);OsAndroid_Log(log);}
 	free(gCanvas);
 	gCanvas = NULL;
 	gWidth = gHeight = 0;
@@ -402,7 +292,7 @@ void OS_WindowShow(int show)
 void OS_WindowSetTitle(const char* title)
 {
 	char utf8[512];
-	OS_SjisToUtf8(title ? title : "", utf8, sizeof utf8);
+	OsAndroid_ScriptToUtf8(title ? title : "", utf8, sizeof utf8);
 	if(utf8[0])
 		OsAndroid_Log(utf8);
 }
@@ -459,6 +349,7 @@ void OS_WindowFillBlack(void)
 	if(gCanvas)
 		memset(gCanvas, 0, (size_t)gWidth * gHeight * sizeof *gCanvas);
 	gDirty = 1;
+	gDamage=(AndroidDamage_t){0,0,gWidth,gHeight};
 }
 
 void OS_CursorSetShape(int shape) { BGI_UNUSED(shape); }

@@ -50,6 +50,7 @@
 #include "bgi/gfx/dispobj.h"
 #include "bgi/gfx/objects.h"
 #include "bgi/version.h"
+#include "../src/gfx/blit_lanes.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -611,6 +612,55 @@ static void TestVirtualVisibility(void)
 	DispObj_Dtor(&win);
 }
 
+/* Differential arithmetic checks for the packed-channel optimization. The
+ * reference works on one signed channel at a time, independently of its
+ * packed representation. Include every weight and transparent RGB bytes. */
+static void TestPackedBlends(void)
+{
+	uint32_t state=132;
+	int n,w,k;
+	for(n=0;n<10000;n++)
+	{
+		uint32_t a,b;
+		state=state*1664525u+1013904223u;a=state;
+		state=state*1664525u+1013904223u;b=state;
+		CHECK(Blit_PackBytes(Blit_ExpandBytes(a))==a);
+		for(w=0;w<=128;w++)
+		{
+			uint32_t expected=a&0xff000000u;
+			for(k=0;k<24;k+=8) {
+				int d=(a>>k)&255,s=(b>>k)&255;
+				expected|=(uint32_t)(d+(((s-d)*w)>>7))<<k;
+			}
+			CHECK(Blit_BlendRgb7(a,b,w)==expected);
+		}
+	}
+}
+
+static uint32_t SamplePixel(const Bmp_t* b,int x,int y)
+{
+	if(x<0 || x>=b->w || y<0 || y>=b->h)return 0;
+	return *(const uint32_t*)(b->pixels+y*b->pitch+x*4);
+}
+static void TestSmoothSample(void)
+{
+	Bmp_t src,dst;
+	int x,y,fx,fy,k;
+	Bmp_Alloc(&src,3,3,PM_ARGB32);Bmp_Alloc(&dst,1,1,PM_ARGB32);FillPattern(&src,18273);
+	for(y=-2;y<=3;y++)for(x=-2;x<=3;x++)for(fy=0;fy<16;fy++)for(fx=0;fx<16;fx++)
+	{
+		uint32_t samples[4]={SamplePixel(&src,x,y),SamplePixel(&src,x+1,y),SamplePixel(&src,x,y+1),SamplePixel(&src,x+1,y+1)},expected=0;
+		for(k=0;k<32;k+=8) {
+			int a=(samples[0]>>k)&255,b=(samples[1]>>k)&255,c=(samples[2]>>k)&255,d=(samples[3]>>k)&255;
+			int top=b+(((a-b)*(16-fx))>>4),bottom=d+(((c-d)*(16-fx))>>4);
+			expected|=(uint32_t)(bottom+(((top-bottom)*(16-fy))>>4))<<k;
+		}
+		Blit_XformCopy(&dst,0,0,&src,x*65536+fx*4096,y*65536+fy*4096,0,65536,65536,0,1);
+		CHECK(*(const uint32_t*)dst.pixels==expected);
+	}
+	Bmp_Free(&src);Bmp_Free(&dst);
+}
+
 // run every group; exit status 1 when any check failed
 int main(void)
 {
@@ -621,6 +671,8 @@ int main(void)
 	TestEffects(PM_RGB16);
 	TestClipping();
 	TestTransforms();
+	TestPackedBlends();
+	TestSmoothSample();
 	TestBicubic();
 	TestHalfSize();
 	TestColourSubtract();
