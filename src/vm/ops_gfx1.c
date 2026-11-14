@@ -97,6 +97,21 @@ static int Opcode_Gfx1_SetSizeLimitSelect(Thread_t* t)
 	return 0;
 }
 
+/* 91 0A: selector, value -> accepted. Verified against MakingLovers.exe
+ * (1.659.8): 48dc20 pops value then selector, 4089a0 stores only these
+ * two selectors (all 32-bit values accepted); native status 0/25 becomes
+ * script result 1/0. These are native raster backend settings, retained
+ * here; this renderer uses its own scalar/NEON sampling paths. */
+static uint32_t gRasterCompat[2];
+static int Opcode_Gfx1_SetRasterCompatibility(Thread_t* t)
+{
+    uint32_t value=Thread_Pop(t),selector=Thread_Pop(t);
+    int index=selector==0x01220000u?0:selector==0x80111600u?1:-1;
+    if(index>=0)gRasterCompat[index]=value;
+    Thread_Push(t,index>=0);
+    return 0;
+}
+
 /* 91 0D (1.547 on): on →
  * When set, a variable-pitch face (one EnumFontFamiliesEx reports as
  * such) gets no half-width glyph advance adjustment in that build's glyph
@@ -1371,6 +1386,7 @@ static int Opcode_Gfx1_SetKeyMap(Thread_t* t) // 91 BF: no, actions →
 void Vm_Optable91Init(void)
 {
 	static const OpEntry_t ops[] = {
+		{0x0A, Opcode_Gfx1_SetRasterCompatibility, GEN_FIRST, GEN_LAST},
 		{0x00, Opcode_Gfx1_SetPresentAlways, GEN_1_653, GEN_LAST},
 		{0x06, Opcode_Gfx1_SetGlobalOffset, GEN_1_616, GEN_LAST},
 		{0x55, Opcode_Gfx1_SpriteLinkMask, GEN_1_529, GEN_LAST},

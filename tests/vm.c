@@ -1530,6 +1530,18 @@ static void TestCompatibilityServices(void)
 	remove("bin/test_vm_external.tmp");
 }
 
+static void TestRasterCompatibility(void)
+{
+    Engine_SelectProfile("1.659");Vm_TablesInit();
+    for(int key=0;key<3;key++)for(int value=0;value<3;value++){
+        Asm_t a={0};uint32_t selector=key==0?0x01220000u:key==1?0x80111600u:0xdeadbeefu;
+        PushI32(&a,0x12345678u);PushI32(&a,selector);PushI32(&a,value==2?0xffffffffu:(uint32_t)value);
+        Op(&a,0x91);Op(&a,0x0a);Ret(&a);
+        CHECK(Run(&a)==4);CHECK(Depth()==2);CHECK(Top()==(uint32_t)(key<2));
+        CHECK(Thread_Pop(gT)==(uint32_t)(key<2));CHECK(Thread_Pop(gT)==0x12345678u);
+    }
+}
+
 int main(void)
 {
 	setenv("BGI_MSGBOX_STDERR", "1", 1); // error boxes go to stderr instead of a dialog
@@ -1552,6 +1564,7 @@ int main(void)
 	TestVectorNormalize();
 	TestFixedVectorsAndArrays();
 	TestModuleBounds();
+	TestRasterCompatibility();
 	Thread_Delete(gT);
 	OS_Shutdown();
 	if(gFails)
