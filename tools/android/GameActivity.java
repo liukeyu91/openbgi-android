@@ -35,6 +35,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private boolean ready, resumed, focused, surfaceReady, framePosted;
     private SurfaceView surface;
     private GameSettings settings;
+    private GameDataLock saveLock;
     private TouchInput touch;
     private InputKeys keys;
     private InputManager inputManager;
@@ -71,7 +72,14 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         super.onCreate(state);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        try { settings=GameSettings.load(GameSettings.activeGame(getFilesDir())); }
+        try {
+            File game=GameSettings.activeGame(getFilesDir());saveLock=GameDataLock.acquire(game);
+            File storage=game;
+            if(game.getName().equals("external")){
+                File base=getExternalFilesDir(null);if(base==null)throw new java.io.IOException("游戏目录不可用");storage=new File(base,"game");
+            }
+            SaveRestore.recover(storage);settings=GameSettings.load(game);
+        }
         catch(java.io.IOException error) { Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();engineFinished();return; }
         if(!settings.encodingReady()) {
             Toast.makeText(this,"文字编码尚未确定，请在游戏设置中选择。",Toast.LENGTH_LONG).show();engineFinished();return;
@@ -234,6 +242,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         resumed = false; if(audioFocus != null) audioFocus.close();
         surfaceReady=false;updateFrames();
         if(ready) { ready = false; nativeDestroy(); }
+        if(saveLock!=null){saveLock.close();saveLock=null;}
         if(messageDialog != null) messageDialog.dismiss();
         ui.removeCallbacksAndMessages(null);
         super.onDestroy();

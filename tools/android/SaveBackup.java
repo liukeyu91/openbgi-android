@@ -12,7 +12,7 @@ import java.util.zip.*;
 
 /** Read-only save snapshots. Archive paths are relative to the game directory. */
 final class SaveBackup {
-    static final int MAX_FILES=10000;
+    static final int MAX_FILES=10000, MAX_METADATA=4*1024*1024;
     static final long MAX_BYTES=512L*1024*1024;
     static final String MANIFEST="OpenBGI-save-backup.json",README="OpenBGI-save-backup.txt";
     interface Progress { void update(int done,int total); }
@@ -45,6 +45,15 @@ final class SaveBackup {
         String n=name.toLowerCase(Locale.ROOT);int dot=n.lastIndexOf('.');
         return dot>=0 && Arrays.asList(".arc",".pck","._bp",".exe",".dll",".mpg",".wmv",".mp4",".ttf",".otf").contains(n.substring(dot));
     }
+    static boolean allowedSavePath(String name){
+        if(name.isEmpty() || name.startsWith("/") || name.contains("\\") || name.indexOf('\0')>=0 || name.matches("^[A-Za-z]:.*"))return false;
+        String[] parts=name.split("/",-1);boolean folder=false;
+        for(int i=0;i<parts.length;i++){
+            if(parts[i].isEmpty() || parts[i].equals(".") || parts[i].equals(".."))return false;
+            if(i<parts.length-1){if(excluded(parts[i]))return false;if(saveFolder(parts[i]))folder=true;}
+        }
+        return !resource(parts[parts.length-1]) && (folder || namedSave(parts[parts.length-1]));
+    }
     private static List<Entry> inventory(File game)throws IOException {
         Path root=game.toPath().toAbsolutePath().normalize();
         if(!Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS))throw new IOException("游戏目录不存在");
@@ -69,7 +78,9 @@ final class SaveBackup {
                 return FileVisitResult.CONTINUE;
             }
         });
-        files.sort(Comparator.comparing(e->e.name));return files;
+        files.sort(Comparator.comparing(e->e.name));Set<String> names=new HashSet<>();
+        for(Entry entry:files)if(entry.name.length()>1024 || !allowedSavePath(entry.name) || !names.add(entry.name.toLowerCase(Locale.ROOT)))throw new IOException("存档文件路径有冲突，无法导出");
+        return files;
     }
     static int count(File game)throws IOException { return inventory(game).size(); }
     static String filename(String title){
@@ -127,8 +138,9 @@ final class SaveBackup {
                         .append(",\"bytes\":").append(bytes).append(",\"sha256\":").append(quoted(sha)).append('}');
                     if(progress!=null)progress.update(++done,files.size());else done++;
                 }
-                manifest.append("\n  ]\n}\n");put(zip,MANIFEST,manifest.toString().getBytes(StandardCharsets.UTF_8));
-                String help="OpenBGI 存档备份\n游戏："+title+"\n\n恢复：先退出游戏，将 ZIP 中的存档文件按原目录结构放回该游戏目录，覆盖前请保留原有存档。\n包含存档及全局进度；不包含游戏资源、应用设置和运行日志。应用暂不提供存档 ZIP 导入。\n";
+                manifest.append("\n  ]\n}\n");byte[] metadata=manifest.toString().getBytes(StandardCharsets.UTF_8);
+                if(metadata.length>MAX_METADATA)throw new IOException("存档文件列表过大");put(zip,MANIFEST,metadata);
+                String help="OpenBGI 存档备份\n游戏："+title+"\n\n恢复：先退出游戏，在同版本游戏的菜单中选择“导入存档”，选择本 ZIP，核对信息后确认覆盖。也可按原目录结构手动放回游戏目录。\n包含存档及全局进度；不包含游戏资源、应用设置和运行日志。\n";
                 put(zip,README,help.getBytes(StandardCharsets.UTF_8));
             }
             List<Entry> after=inventory(game);

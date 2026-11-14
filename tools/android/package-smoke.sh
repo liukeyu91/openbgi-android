@@ -30,7 +30,7 @@ trap 'exit 1' HUP INT TERM
 mkdir -p "$stage/classes"
 sh "$root/tools/android/generate-profiles.sh" "$stage/EngineProfiles.java"
 javac --release 8 -encoding UTF-8 -classpath "$platform" -d "$stage/classes" \
-    "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" "$root/tools/android/SaveBackup.java" \
+    "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" "$root/tools/android/SaveBackup.java" "$root/tools/android/SaveRestore.java" "$root/tools/android/GameDataLock.java" \
     "$root/tools/android/InitialTextRepair.java" "$root/tools/android/InitialTextRepairDialog.java" \
     "$root/tools/android/ArchiveTextSamples.java" "$root/tools/android/EncodingDetector.java" "$root/tools/android/EncodingPreview.java" "$root/tools/android/GameEncoding.java" \
     "$root/tools/android/ProgramCompatibility.java" "$root/tools/android/NativeProgramInspector.java" \

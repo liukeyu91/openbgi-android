@@ -22,7 +22,8 @@ public final class LauncherActivity extends Activity {
     private TextView status;
     private ProgressBar progress;
     private File coverTarget;
-    private String saveExportGame="";
+    private String saveExportGame="",saveImportGame="";
+    private SaveRestore.Prepared pendingRestore;
     private String search="",page="library",importStatus="正在读取目录…";
     private boolean byName;
     private boolean importing;
@@ -34,7 +35,8 @@ public final class LauncherActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if(state!=null){page=state.getString("page","library");search=state.getString("search","");byName=state.getBoolean("byName",false);
             String cover=state.getString("cover","");if(cover.matches("[a-z0-9-]{1,79}"))coverTarget=new File(games,cover);
-            String exporting=state.getString("saveExportGame","");if(exporting.matches("[a-z0-9-]{1,79}"))saveExportGame=exporting;}
+            String exporting=state.getString("saveExportGame","");if(exporting.matches("[a-z0-9-]{1,79}"))saveExportGame=exporting;
+            String restoring=state.getString("saveImportGame","");if(restoring.matches("[a-z0-9-]{1,79}"))saveImportGame=restoring;}
         try { migrate(); } catch(IOException error) { toast("旧版数据迁移失败："+error.getMessage()); }
         showLibrary();
     }
@@ -72,7 +74,7 @@ public final class LauncherActivity extends Activity {
     private int dp(float n){return Ui.dp(this,n);}
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);showLibrary();}
     @Override protected void onResume(){super.onResume();if(games!=null)showLibrary();}
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("search",search);state.putBoolean("byName",byName);state.putString("saveExportGame",saveExportGame);if(coverTarget!=null)state.putString("cover",coverTarget.getName());}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("search",search);state.putBoolean("byName",byName);state.putString("saveExportGame",saveExportGame);state.putString("saveImportGame",saveImportGame);if(coverTarget!=null)state.putString("cover",coverTarget.getName());}
     private void addGame(){
         if(importing){toast("请等待当前操作完成");return;}
         Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -88,7 +90,8 @@ public final class LauncherActivity extends Activity {
         if(engineRunning()){toast("请先存档并退出游戏，再导出存档");return;}
         importing=true;importStatus="正在查找存档…";showLibrary();
         new Thread(()->{
-            try{
+            try(GameDataLock lock=GameDataLock.acquire(dir)){
+                SaveRestore.recover(resourceDirectory(dir));
                 if(SaveBackup.count(resourceDirectory(dir))==0)throw new IOException("未找到可导出的存档或全局进度");
                 runOnUiThread(()->{
                     importing=false;if(isDestroyed() || isFinishing())return;showLibrary();
@@ -108,7 +111,8 @@ public final class LauncherActivity extends Activity {
         String name=title(dir),version=versionName();
         new Thread(()->{
             SaveBackup.Backup backup=null;
-            try{
+            try(GameDataLock lock=GameDataLock.acquire(dir)){
+                SaveRestore.recover(resourceDirectory(dir));
                 backup=SaveBackup.create(resourceDirectory(dir),getCacheDir(),name,version,(done,total)->runOnUiThread(()->{
                     importStatus="正在导出存档："+done+" / "+total;if(status!=null)status.setText(importStatus);
                 }));
@@ -124,6 +128,59 @@ public final class LauncherActivity extends Activity {
                 runOnUiThread(()->{importing=false;if(!isDestroyed()){showLibrary();toast("存档导出失败："+error.getMessage());}});
             }finally{if(backup!=null)backup.file.delete();}
         },"OpenBGI-SaveExport").start();
+    }
+    private void importSaves(File dir){
+        if(importing){toast("请等待当前操作完成");return;}
+        if(engineRunning()){toast("请先存档并退出游戏，再导入存档");return;}
+        saveImportGame=dir.getName();
+        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        picker.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/x-zip-compressed","application/octet-stream"});
+        try{startActivityForResult(picker,5);}catch(ActivityNotFoundException error){saveImportGame="";toast("无法打开系统文件选择器");}
+    }
+    private void prepareSaveRestore(Uri uri,File dir){
+        if(importing || engineRunning()){toast("请先退出游戏，并等待当前操作完成，再导入存档");return;}
+        importing=true;importStatus="正在校验存档备份…";showLibrary();
+        new Thread(()->{
+            SaveRestore.Prepared prepared=null;
+            try(InputStream in=getContentResolver().openInputStream(uri)){
+                if(in==null)throw new IOException("无法读取存档备份");
+                prepared=SaveRestore.prepare(in,getCacheDir());final SaveRestore.Prepared ready=prepared;
+                runOnUiThread(()->{
+                    if(isDestroyed() || isFinishing()){ready.close();return;}
+                    pendingRestore=ready;importStatus="存档备份校验完成，等待确认";showLibrary();
+                    String message="备份游戏："+ready.gameName+"\n目标游戏："+title(dir)+"\n文件："+ready.count+" 个（"+
+                        String.format(Locale.ROOT,"%.1f",ready.bytes/(1024.0*1024.0))+" MB）\n\n将覆盖同名存档和全局进度，备份以外的文件保留。请确认来自同版本游戏。";
+                    AlertDialog dialog=new AlertDialog.Builder(this).setTitle("导入存档").setMessage(message)
+                        .setNegativeButton("取消",null).setPositiveButton("确认导入",(d,w)->{
+                            pendingRestore=null;applySaveRestore(ready,dir);
+                        }).create();
+                    dialog.setOnDismissListener(d->{if(pendingRestore==ready){pendingRestore=null;ready.close();importing=false;if(!isDestroyed())showLibrary();}});
+                    dialog.show();Ui.style(dialog);
+                });
+                prepared=null;
+            }catch(Exception error){
+                runOnUiThread(()->{importing=false;if(!isDestroyed()){showLibrary();toast("存档导入失败："+error.getMessage());}});
+            }finally{if(prepared!=null)prepared.close();}
+        },"OpenBGI-SaveCheck").start();
+    }
+    private void applySaveRestore(SaveRestore.Prepared prepared,File dir){
+        importStatus="正在导入存档…";showLibrary();
+        new Thread(()->{
+            try(SaveRestore.Prepared restore=prepared;GameDataLock lock=GameDataLock.acquire(dir)){
+                if(engineRunning())throw new IOException("游戏正在运行，请退出后重新导入");
+                restore.apply(resourceDirectory(dir),(done,total)->runOnUiThread(()->{
+                    importStatus="正在导入存档："+done+" / "+total;if(status!=null)status.setText(importStatus);
+                }));
+                runOnUiThread(()->{importing=false;if(!isDestroyed()){showLibrary();toast("存档已导入，共 "+prepared.count+" 个文件");}});
+            }catch(Exception error){
+                runOnUiThread(()->{importing=false;if(!isDestroyed()){showLibrary();toast("存档导入失败："+error.getMessage());}});
+            }
+        },"OpenBGI-SaveImport").start();
+    }
+    @Override protected void onDestroy(){
+        if(pendingRestore!=null){pendingRestore.close();pendingRestore=null;}
+        super.onDestroy();
     }
     private void discardExport(Uri uri){try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     private LinearLayout nav(boolean rail){
@@ -225,7 +282,7 @@ public final class LauncherActivity extends Activity {
         infoCard("文字编码","导入后会抽样检测脚本文字。无法确定时，请在“游戏设置”中预览并选择编码。日文原版通常使用 SJIS，汉化版可能使用 GBK 或 UTF-8；混合编码和 EXE 内的补丁可能无法正确识别。保存设置后重启游戏。");
         infoCard("触摸与按键","单指点击模拟鼠标左键，双指点击或长按模拟右键。阅读模式中，上下滑动模拟滚轮；拖拽模式可按住左键移动。返回键发送 Esc。");
         infoCard("快进","展开游戏内快捷键，点击“快进”开始，再点“停止快进”结束。默认发送持续按住的 Ctrl，可在游戏设置中修改。点击画面、收起快捷键或离开游戏时停止；能否跳过未读内容取决于游戏设置。");
-        infoCard("导出存档","先存档并退出游戏，在游戏菜单中选择“导出存档”，保存 ZIP。备份包含存档和全局进度，保留原目录结构。恢复时需退出游戏，将文件按原路径放回同版本游戏目录；应用暂不提供 ZIP 存档导入。");
+        infoCard("存档备份","先存档并退出游戏。在游戏菜单中选择“导出存档”保存 ZIP，选择“导入存档”恢复应用生成的备份。导入前会校验文件并提示确认，覆盖同名存档，保留备份以外的文件。请使用同版本游戏的备份。");
         Button add=Ui.button(this,"添加游戏",true,this::addGame);content.addView(add,new LinearLayout.LayoutParams(-1,dp(50)));
     }
     private void showAbout(){
@@ -241,13 +298,14 @@ public final class LauncherActivity extends Activity {
     }
     private void gameMenu(File dir,String name) {
         if(importing)return;
-        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查","导出存档"},(d,which)->{
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查","导出存档","导入存档"},(d,which)->{
             if(which==0) play(dir);
             if(which==1) SettingsDialog.show(this,dir,name,this::showLibrary);
             if(which==2)rename(dir,name);
             if(which==3){coverTarget=dir;Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(pick,3);}catch(ActivityNotFoundException e){coverTarget=null;toast("无法打开图片选择器");}}
             if(which==5)checkCompatibility(dir);
             if(which==6)exportSaves(dir,name);
+            if(which==7)importSaves(dir);
             if(which==4 && engineRunning()) { toast("请先退出正在运行的游戏，再删除游戏"); return; }
             if(which==4) new AlertDialog.Builder(this).setTitle("删除“"+name+"”？").setMessage("将永久删除此游戏的应用内数据（含存档和设置）。导入源目录会保留。")
                 .setNegativeButton("取消",null).setPositiveButton("删除",(dialog,w)->new Thread(()->{
@@ -374,6 +432,14 @@ public final class LauncherActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==5){
+            String id=saveImportGame;saveImportGame="";
+            if(result==RESULT_OK && data!=null && data.getData()!=null){
+                if(id.matches("[a-z0-9-]{1,79}"))prepareSaveRestore(data.getData(),new File(games,id));
+                else toast("未找到需要导入存档的游戏，请重试");
+            }
+            return;
+        }
         if(request==4){
             String id=saveExportGame;saveExportGame="";
             if(result==RESULT_OK && data!=null && data.getData()!=null){
