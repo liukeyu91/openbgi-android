@@ -26,8 +26,7 @@ Android 版仍在开发中，不同作品的兼容性需要分别验证。
 ## 文档
 
 - [Android 使用与构建](tools/android/README.md)
-- [更新记录](docs/android-release-history.md)
-- [项目路线图](docs/android-roadmap.md)
+- [Android 概述](docs/android.md)
 - [引擎版本与游戏配置](docs/versions.md)
 - [GPL-2.0 许可证](LICENSE)
 
