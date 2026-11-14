@@ -160,8 +160,9 @@ public final class LauncherActivity extends Activity {
         LinearLayout details=Ui.column(this);details.setPadding(dp(14),dp(wide?10:12),dp(10),dp(wide?10:14));card.addView(details);
         LinearLayout top=Ui.row(this);top.setGravity(Gravity.TOP);TextView title=Ui.text(this,name,wide?14:16,Ui.INK,true);title.setMaxLines(2);title.setMinLines(2);title.setEllipsize(TextUtils.TruncateAt.END);
         top.addView(title,new LinearLayout.LayoutParams(0,-2,1));ImageView more=Ui.iconButton(this,"more","管理游戏："+name,()->gameMenu(dir,name));top.addView(more,new LinearLayout.LayoutParams(dp(38),dp(44)));details.addView(top);Ui.space(details,wide?4:8);
-        String meta;try{GameSettings s=GameSettings.load(dir);meta=s.encodingLabel()+"   ·   "+(s.profile.equals("auto")?"自动识别":s.profile);}catch(IOException e){meta="设置读取失败";}
+        String meta,compatibility;try{GameSettings s=GameSettings.load(dir);meta=s.encodingLabel()+"   ·   "+(s.profile.equals("auto")?"自动识别":s.profile);compatibility=ProgramCompatibility.cachedSummary(dir,resourceDirectory(dir),s.profile,versionName());}catch(IOException e){meta="设置读取失败";compatibility="兼容性：未检查";}
         TextView tag=Ui.text(this,meta,10,Ui.MUTED,false);tag.setMaxLines(1);tag.setEllipsize(TextUtils.TruncateAt.END);details.addView(tag);Ui.space(details,wide?8:14);
+        TextView check=Ui.text(this,compatibility,10,Ui.MUTED,false);check.setMaxLines(2);check.setEllipsize(TextUtils.TruncateAt.END);details.addView(check);Ui.space(details,wide?6:10);
         Button play=Ui.button(this,"开始游戏",false,()->{if(!importing)play(dir);});play.setTextColor(Ui.ACCENT);play.setTextSize(12);details.addView(play,new LinearLayout.LayoutParams(-1,dp(wide?40:44)));return card;
     }
     private void emptyLibrary(){
@@ -175,7 +176,7 @@ public final class LauncherActivity extends Activity {
     }
     private void showGuide(){
         content.addView(Ui.text(this,"使用说明",30,Ui.INK,true));Ui.space(content,8);content.addView(Ui.text(this,"导入游戏后，可分别设置文字编码和操作方式。",13,Ui.MUTED,false));Ui.space(content,24);
-        infoCard("导入游戏","选择已解压的完整游戏目录，包含 system.arc 或 ipl._bp 及其他资源文件。导入会复制全部文件和子目录，需要足够的手机存储空间。");
+        infoCard("导入游戏","选择已解压的完整游戏目录，包含 system.arc 或 ipl._bp 及其他资源文件。导入会复制全部文件和子目录，再检查程序指令并显示结果，需要足够的手机存储空间。");
         infoCard("文字编码","导入后会抽样检测脚本文字。无法确定时，请在“游戏设置”中预览并选择编码。日文原版通常使用 SJIS，汉化版可能使用 GBK 或 UTF-8；混合编码和 EXE 内的补丁可能无法正确识别。保存设置后重启游戏。");
         infoCard("触摸与按键","单指点击模拟鼠标左键，双指点击或长按模拟右键。阅读模式中，上下滑动模拟滚轮；拖拽模式可按住左键移动。返回键发送 Esc。");
         Button add=Ui.button(this,"添加游戏",true,this::addGame);content.addView(add,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -193,11 +194,12 @@ public final class LauncherActivity extends Activity {
     }
     private void gameMenu(File dir,String name) {
         if(importing)return;
-        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档"},(d,which)->{
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查"},(d,which)->{
             if(which==0) play(dir);
             if(which==1) SettingsDialog.show(this,dir,name,this::showLibrary);
             if(which==2)rename(dir,name);
             if(which==3){coverTarget=dir;Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(pick,3);}catch(ActivityNotFoundException e){coverTarget=null;toast("无法打开图片选择器");}}
+            if(which==5)checkCompatibility(dir);
             if(which==4 && engineRunning()) { toast("请先退出正在运行的游戏，再删除游戏"); return; }
             if(which==4) new AlertDialog.Builder(this).setTitle("删除“"+name+"”？").setMessage("将永久删除此游戏的应用内数据（含存档和设置）。导入源目录会保留。")
                 .setNegativeButton("取消",null).setPositiveButton("删除",(dialog,w)->new Thread(()->{
@@ -239,6 +241,47 @@ public final class LauncherActivity extends Activity {
         if(processes!=null)for(ActivityManager.RunningAppProcessInfo process:processes)
             if(process.processName.equals(getPackageName()+":engine"))return true;
         return false;
+    }
+    private File resourceDirectory(File dir) {
+        if(dir.getName().equals("external")){
+            File external=getExternalFilesDir(null);if(external!=null)return new File(external,"game");
+        }
+        return dir;
+    }
+    private ProgramCompatibility.Result scanCompatibility(File dir,String profile) {
+        File resources=resourceDirectory(dir);ProgramCompatibility.Result result;
+        try {
+            synchronized(NativeProgramInspector.class) {
+                result=ProgramCompatibility.scan(dir,resources,profile,new NativeProgramInspector(),(done,total)->{
+                    if(done%4!=0 && done!=total)return;
+                    runOnUiThread(()->{importStatus="正在检查程序："+done+" / "+total;if(status!=null)status.setText(importStatus);});
+                });
+            }
+        }catch(IOException|RuntimeException|LinkageError error){
+            result=new ProgramCompatibility.Result();result.error="无法完成检查："+error.getMessage();
+            android.util.Log.w("OpenBGI","Compatibility check failed",error);
+        }
+        try{ProgramCompatibility.save(dir,resources,profile,versionName(),result);}
+        catch(IOException error){result.error="无法保存检查结果："+error.getMessage();}
+        return result;
+    }
+    private void showCompatibility(ProgramCompatibility.Result result) {
+        TextView body=Ui.text(this,result.report(),13,Ui.INK,false);body.setTextIsSelectable(true);
+        int pad=dp(20);body.setPadding(pad,dp(12),pad,dp(20));
+        ScrollView scroll=new ScrollView(this);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("兼容性检查").setView(scroll).setPositiveButton("确定",null).create();
+        dialog.show();Ui.style(dialog);
+    }
+    private void checkCompatibility(File dir) {
+        if(importing)return;
+        importing=true;importStatus="正在检查程序…";showLibrary();
+        new Thread(()->{
+            ProgramCompatibility.Result result;
+            try{result=scanCompatibility(dir,GameSettings.load(dir).profile);}
+            catch(IOException error){result=new ProgramCompatibility.Result();result.error="无法读取游戏设置："+error.getMessage();}
+            final ProgramCompatibility.Result completed=result;
+            runOnUiThread(()->{importing=false;if(isDestroyed()||isFinishing())return;showLibrary();showCompatibility(completed);});
+        },"OpenBGI-Compatibility").start();
     }
     private void play(File dir) {
         if(importing)return;
@@ -311,7 +354,9 @@ public final class LauncherActivity extends Activity {
             runOnUiThread(()->{importStatus="正在检测文字编码…";if(status!=null)status.setText(importStatus);});
             GameSettings settings=GameEncoding.prepare(destination,destination);
             android.util.Log.i("OpenBGI",settings.encodingStatus());
-            runOnUiThread(()->{ importing=false;if(isDestroyed())return;showLibrary();toast("导入完成。"+settings.encodingStatus()); });
+            runOnUiThread(()->{importStatus="正在检查程序…";if(status!=null)status.setText(importStatus);});
+            ProgramCompatibility.Result compatibility=scanCompatibility(destination,settings.profile);
+            runOnUiThread(()->{ importing=false;if(isDestroyed())return;showLibrary();toast("导入完成。"+settings.encodingStatus());showCompatibility(compatibility); });
         } catch(Exception error) {
             if(!published)try { GameImport.remove(destination.toPath()); } catch(IOException ignored) {}
             android.util.Log.w("OpenBGI","Import failed",error);

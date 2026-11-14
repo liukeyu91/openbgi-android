@@ -33,6 +33,7 @@ javac --release 8 -encoding UTF-8 -classpath "$platform" -d "$stage/classes" \
     "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" \
     "$root/tools/android/InitialTextRepair.java" "$root/tools/android/InitialTextRepairDialog.java" \
     "$root/tools/android/ArchiveTextSamples.java" "$root/tools/android/EncodingDetector.java" "$root/tools/android/EncodingPreview.java" "$root/tools/android/GameEncoding.java" \
+    "$root/tools/android/ProgramCompatibility.java" "$root/tools/android/NativeProgramInspector.java" \
     "$stage/EngineProfiles.java" "$root/tools/android/TouchInput.java" "$root/tools/android/InputKeys.java" "$root/tools/android/GameSettings.java" "$root/tools/android/SettingsDialog.java" "$root/tools/android/Viewport.java" "$root/tools/android/AudioFocusController.java" "$root/tools/android/GameAudioFocus.java" "$root/tools/android/InputDialogs.java" "$root/tools/android/GameTextCodec.java" "$root/tools/android/TextInput.java" "$root/tools/android/GameActivity.java" "$root/tools/android/LauncherActivity.java" "$root/tools/android/GameImport.java" "$root/tools/android/CrashLogs.java"
 jar cf "$stage/launcher.jar" -C "$stage/classes" .
 java -cp "$d8" com.android.tools.r8.D8 --release --min-api 28 --lib "$platform" \

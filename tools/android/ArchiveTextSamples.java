@@ -152,9 +152,12 @@ final class ArchiveTextSamples {
         }
     }
     static byte[] decode(byte[] src)throws IOException {
+        return decode(src,MAX_FILE);
+    }
+    static byte[] decode(byte[] src,int maxFile)throws IOException {
         if(!magic(src,"DSC FORMAT 1.00\0"))return src;
         if(src.length<0x220)throw new IOException("DSC 头截断");
-        long n=u32(src,20),symbols=u32(src,24);if(n>MAX_FILE || symbols>n || n==0)throw new IOException("DSC 长度无效");
+        long n=u32(src,20),symbols=u32(src,24);if(n>maxFile || symbols>n || n==0)throw new IOException("DSC 长度无效");
         int key=(int)u32(src,16);List<Integer> codes=new ArrayList<>();
         for(int i=0;i<512;i++){
             long lo=20021L*(key&65535),hi=(20021L*(key>>>16)+346L*(key&0xffffffffL)+(lo>>>16))&65535;

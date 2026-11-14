@@ -54,6 +54,7 @@ typedef struct Dis
 	uint32_t* work;                 // the offsets still to follow
 	uint32_t workCount, workCap;    // its fill and capacity
 	int problems;                   // the "; problem:" lines written so far (the result of Dis_Program)
+	int failed;                     // allocation failure: stop analysis and release partial maps
 	FILE* out;                      // the listing
 	const DisOptions_t* opt;        // the caller's options
 } Dis_t;
@@ -65,8 +66,10 @@ static void Push(Dis_t* d, uint32_t off)
 		return;
 	if(d->workCount == d->workCap)
 	{
-		d->workCap = d->workCap ? d->workCap * 2 : 256;
-		d->work = (uint32_t*)realloc(d->work, d->workCap * sizeof *d->work);
+		uint32_t cap = d->workCap ? d->workCap * 2 : 256;
+		uint32_t* work = (uint32_t*)realloc(d->work, (size_t)cap * sizeof *d->work);
+		if(!work) { d->failed=1; d->problems++; return; }
+		d->workCap=cap; d->work=work;
 	}
 	d->work[d->workCount++] = off;
 }
@@ -106,7 +109,7 @@ static void Follow(Dis_t* d, uint32_t off)
 {
 	AsmInsn_t in;
 	uint32_t i;
-	while(off < d->size)
+	while(off < d->size && !d->failed)
 	{
 		if(d->kind[off] == K_CODE)
 			return; // joined a flow already followed
@@ -139,6 +142,11 @@ static void Follow(Dis_t* d, uint32_t off)
 		d->kind[off] = K_CODE;
 		for(i = off + 1; i < off + in.len; i++)
 			d->kind[i] = K_INSIDE;
+		if(in.targetKind && in.target > d->size)
+		{
+			if(d->out)fprintf(d->out,"; problem: target 0x%x at 0x%x is outside the program\n",(unsigned)in.target,(unsigned)off);
+			d->problems++; in.targetKind=0;
+		}
 		if(in.targetKind == 1)
 		{
 			// a push_code_off ("06") followed by a call ("16") names a subroutine
@@ -225,7 +233,7 @@ static void FindUnreferencedCode(Dis_t* d)
 	{
 		again = 0;
 		off = 0;
-		while(off < d->size)
+		while(off < d->size && !d->failed)
 		{
 			uint32_t end, reached;
 			if(d->kind[off] != K_UNKNOWN || (d->label[off] & L_DATA))
@@ -240,13 +248,13 @@ static void FindUnreferencedCode(Dis_t* d)
 			{
 				d->label[off] |= L_DEAD | (d->area[off] == 0x10 ? L_CALL : L_JUMP);
 				Push(d, off);
-				while(d->workCount)
+				while(d->workCount && !d->failed)
 					Follow(d, d->work[--d->workCount]);
 				again = 1; // the block's own branches may have reached more
 			}
 			off = end;
 		}
-	} while(again);
+	} while(again && !d->failed);
 }
 
 // ---- strings --------------------------------------------------------------------------------
@@ -388,7 +396,7 @@ static void WriteCode(Dis_t* d, uint32_t off, const AsmInsn_t* in)
 	char text[0x400], lbl[32], mn[128];
 	const char* comment = NULL;
 	LinePrefix(d, off, in->len);
-	if(in->targetKind)
+	if(in->targetKind && in->target <= d->size)
 	{ // the operand that is a target is printed as its label
 		Label(d, in->target, lbl, sizeof lbl);
 		Mnemonic(d, in, mn, sizeof mn);
@@ -512,9 +520,13 @@ static int Analyze(Dis_t* d, const uint8_t* file, uint32_t size, EngineGen_t gen
 	d->size = codeSize;
 	d->kind = (uint8_t*)calloc(codeSize + 1, 1); // one entry more than the area: a branch may target its end
 	d->label = (uint8_t*)calloc(codeSize + 1, 1);
+	if(!d->kind || !d->label)
+	{
+		free(d->kind);free(d->label);d->kind=d->label=NULL;d->problems++;return 0;
+	}
 	// the flows: from the entry, then from every target found on the way
 	Push(d, 0);
-	while(d->workCount)
+	while(d->workCount && !d->failed)
 		Follow(d, d->work[--d->workCount]);
 	FindUnreferencedCode(d);
 	for(i = 0; i < d->size; i++)
@@ -522,6 +534,7 @@ static int Analyze(Dis_t* d, const uint8_t* file, uint32_t size, EngineGen_t gen
 			d->kind[i] = K_DATA; // whatever no flow reached
 	free(d->work);
 	d->work = NULL;
+	if(d->failed) { free(d->kind);free(d->label);d->kind=d->label=NULL;return 0; }
 	return 1;
 }
 

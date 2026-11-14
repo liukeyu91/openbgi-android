@@ -13,6 +13,9 @@ Android 9 及以上的 ARM64 设备。应用只提供引擎，游戏资源需自
 导入会复制全部目录内容，需要足够的存储空间。编码自动检测无法确定时，可使用编码预览手动选择。
 更改设置后需重启游戏。游戏内快捷键的实际作用取决于游戏本身。
 
+导入完成后会显示程序指令检查结果。已有游戏可从卡片菜单选择“兼容性检查”重新扫描。
+检查列出 `._bp` 程序中的缺失指令、文件名和位置；无法完整识别时会注明。结果按游戏保存，静态检查不代表完整流程兼容。
+
 覆盖安装需使用相同包名和签名密钥；卸载会清除应用内数据。
 主应用与独立 UI Preview 的数据彼此独立。运行日志可在关于页导出。
 
@@ -60,6 +63,7 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 
 - `make test`：引擎测试。
 - `sh tools/android/tests/run-encoding-tests.sh`：编码检测与配置。
+- `sh tools/android/tests/run-compatibility-tests.sh`：程序收集、归档覆盖和检查结果。
 - `sh tools/android/tests/run-input-tests.sh`：输入、设置与坐标变换。
 - `sh tools/android/tests/run-text-repair-tests.sh`：文字转换与输入限制。
 
