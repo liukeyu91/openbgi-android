@@ -170,18 +170,37 @@ struct OsProcess
 // CreateProcess with the command line alone (no application name, the current directory and environment inherited); NULL when it fails
 OsProcess_t* OS_ProcessStart(const char* cmdLine)
 {
+	return OS_ProcessStartInDir(cmdLine, NULL, -1);
+}
+
+OsProcess_t* OS_ProcessStartInDir(const char* cmdLine, const char* dir, int show)
+{
 	STARTUPINFOW si;
 	OsProcess_t* p = (OsProcess_t*)calloc(1, sizeof *p);
-	WCHAR cmd[0x400];
+	WCHAR cmd[0x1000], workingDir[WIN32_WPATH];
 	memset(&si, 0, sizeof si);
 	si.cb = sizeof si;
+	if(show >= 0)
+	{
+		si.dwFlags = STARTF_USESHOWWINDOW;
+		si.wShowWindow = show ? SW_SHOW : SW_HIDE;
+	}
+	if(dir) Win32_ToWide(dir, workingDir, (int)BGI_COUNTOF(workingDir));
 	Win32_ToWide(cmdLine, cmd, (int)BGI_COUNTOF(cmd)); // a buffer of its own: CreateProcess may write into the command line
-	if(!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &p->pi))
+	if(!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, dir ? workingDir : NULL, &si, &p->pi))
 	{
 		free(p);
 		return NULL;
 	}
 	return p;
+}
+
+int OS_ProcessExitCode(OsProcess_t* p, uint32_t* code)
+{
+	DWORD result;
+	if(!p || !GetExitCodeProcess(p->pi.hProcess, &result)) return 0;
+	*code = result;
+	return 1;
 }
 
 void OS_ProcessWaitIdle(OsProcess_t* p)

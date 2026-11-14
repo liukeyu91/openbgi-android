@@ -729,16 +729,52 @@ static int Opcode_Sys81_FileSeek(Thread_t* t) // 81 2B (1.573 on): status, handl
 
 /* Archive entry names: a NULL buffer queries the required byte count;
  * otherwise pack the original names and store their count. Observed in
- * KanojoStep's anmdef._bp (1.636). No stack result. */
-static int Opcode_Sys81_ArchiveNames(Thread_t* t) // 81 39: buf, outSizeOrCount, path ->
+ * KanojoStep's anmdef._bp (1.636). The original also pushes the output
+ * pointer on success, zero on failure (including in Fureraba 1.616). */
+static int Opcode_Sys81_ArchiveNames(Thread_t* t) // 81 39: buf, outSizeOrCount, path -> outOrZero
 {
     const char* path = (const char*)PopPtr(t);
-    uint32_t* result = (uint32_t*)PopPtr(t);
+    uint32_t output = Thread_Pop(t);
+    uint32_t* result = (uint32_t*)ResolvePtr(output, t);
     char* buffer = (char*)PopPtr(t);
     char native[0x1000];
     OS_PathNative(path, native, sizeof native);
-    ArcRead_ListNames(native, buffer, result);
+    Thread_Push(t, ArcRead_ListNames(native, buffer, result) ? output : 0);
     return 0;
+}
+
+/* UTC SYSTEMTIME records: eight 16-bit fields, not FILETIME dwords. */
+static int Opcode_Sys81_GetFileTimes(Thread_t* t) // 81 2C: created, accessed, written, path -> ok
+{
+	const char* path = (const char*)PopPtr(t);
+	OsLocalTime_t* written = (OsLocalTime_t*)PopPtr(t);
+	OsLocalTime_t* accessed = (OsLocalTime_t*)PopPtr(t);
+	OsLocalTime_t* created = (OsLocalTime_t*)PopPtr(t);
+	Thread_Push(t, OS_FileGetTimes(path, created, accessed, written));
+	return 0;
+}
+
+static int Opcode_Sys81_SetFileTimes(Thread_t* t) // 81 2D: path, created, accessed, written -> ok
+{
+	const OsLocalTime_t* written = (const OsLocalTime_t*)PopPtr(t);
+	const OsLocalTime_t* accessed = (const OsLocalTime_t*)PopPtr(t);
+	const OsLocalTime_t* created = (const OsLocalTime_t*)PopPtr(t);
+	const char* path = (const char*)PopPtr(t);
+	Thread_Push(t, OS_FileSetTimes(path, created, accessed, written));
+	return 0;
+}
+
+static int Opcode_Sys81_RunProgramArgs(Thread_t* t) // 81 E0: exitCode, dir, file, command, show, message, hide -> ok
+{
+	int hide = (int)Thread_Pop(t);
+	const char* message = (const char*)PopPtr(t);
+	int show = (int)Thread_Pop(t);
+	const char* command = (const char*)PopPtr(t);
+	const char* file = (const char*)PopPtr(t);
+	const char* dir = (const char*)PopPtr(t);
+	uint32_t* exitCode = (uint32_t*)PopPtr(t);
+	Thread_Push(t, RunProgramArgs(exitCode, dir, file, command, show, message, hide));
+	return 0;
 }
 
 /* Fill vm_optable_81 for the selected engine profile; the entries name an
@@ -751,7 +787,10 @@ void Vm_Optable81Init(void)
 		{0x10, Opcode_Sys81_KeyRepeatNew, GEN_1_69_451, GEN_LAST},
 		{0x11, Opcode_Sys81_KeyboardState, GEN_1_69_472, GEN_LAST},
 		{0x1F, Opcode_Sys81_SetTweenKeyMask, GEN_1_69_451, GEN_LAST},
-		{0x39, Opcode_Sys81_ArchiveNames, GEN_1_636, GEN_LAST},
+		{0x39, Opcode_Sys81_ArchiveNames, GEN_FIRST, GEN_LAST},
+		{0x2C, Opcode_Sys81_GetFileTimes, GEN_FIRST, GEN_LAST},
+		{0x2D, Opcode_Sys81_SetFileTimes, GEN_FIRST, GEN_LAST},
+		{0xE0, Opcode_Sys81_RunProgramArgs, GEN_FIRST, GEN_LAST},
 		{0x3A, Opcode_Sys81_BrowseFolder, GEN_1_69_472, GEN_LAST},
 		{0x02, Opcode_Sys81_SetUiLanguage, GEN_1_662, GEN_LAST},
 		{0x03, Opcode_Sys81_GetUiLanguage, GEN_1_662, GEN_LAST},

@@ -53,7 +53,13 @@ int Compat_CheckProgram(const uint8_t* file, uint32_t size, CompatResult_t* resu
 		for(i=0;i<BGI_COUNTOF(tables);++i)if(tables[i].family == in.fam)
 		{
 			VmHandler_t handler=tables[i].table[in.op];
-			if((!handler || handler == Opcode_NotImplemented || in.foreign) && !seen[i][in.op])
+			int kind = (!handler || in.foreign) ? 2 : handler == Opcode_NotImplemented ? 1 : 0;
+#if defined(BGI_ANDROID) || defined(BGI_WASM)
+			/* A working VM failure branch does not make external Windows
+			 * programs available on Android or in a browser. */
+			if(!kind && in.fam == 0x81 && in.op == 0xe0) kind = 3;
+#endif
+			if(kind && !seen[i][in.op])
 			{
 				seen[i][in.op]=1; ++result->total;
 				if(result->count < COMPAT_MAX_ISSUES)
@@ -61,7 +67,7 @@ int Compat_CheckProgram(const uint8_t* file, uint32_t size, CompatResult_t* resu
 					CompatIssue_t* issue=&result->issues[result->count++];
 					issue->opcode=(uint32_t)(in.fam << 8) | (uint32_t)in.op;
 					issue->offset=off;
-					issue->kind=(!handler || in.foreign)?2:1;
+					issue->kind=kind;
 				}
 			}
 			break;

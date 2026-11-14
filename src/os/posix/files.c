@@ -133,6 +133,59 @@ int OS_FileSetTime(OsFile_t* f, uint32_t lo, uint32_t hi)
 	return futimens(fileno(f->f), ts) == 0;
 }
 
+// UTC calendar records for the script's file metadata services.
+static int ToSystemTime(const struct timespec* ts, OsLocalTime_t* out)
+{
+	struct tm tm;
+	if(!gmtime_r(&ts->tv_sec, &tm)) return 0;
+	out->year = (uint16_t)(tm.tm_year + 1900); out->month = (uint16_t)(tm.tm_mon + 1);
+	out->dayOfWeek = (uint16_t)tm.tm_wday; out->day = (uint16_t)tm.tm_mday;
+	out->hour = (uint16_t)tm.tm_hour; out->minute = (uint16_t)tm.tm_min;
+	out->second = (uint16_t)tm.tm_sec; out->millis = (uint16_t)(ts->tv_nsec / 1000000);
+	return 1;
+}
+
+static int FromSystemTime(const OsLocalTime_t* in, struct timespec* ts)
+{
+	struct tm tm = {0}, check;
+	if(in->year < 1601 || in->month < 1 || in->month > 12 || in->day < 1 || in->day > 31 ||
+		in->hour > 23 || in->minute > 59 || in->second > 59 || in->millis > 999) return 0;
+	tm.tm_year = in->year - 1900; tm.tm_mon = in->month - 1; tm.tm_mday = in->day;
+	tm.tm_hour = in->hour; tm.tm_min = in->minute; tm.tm_sec = in->second;
+	ts->tv_sec = timegm(&tm); ts->tv_nsec = (long)in->millis * 1000000;
+	return gmtime_r(&ts->tv_sec, &check) && check.tm_year == in->year - 1900 &&
+		check.tm_mon == in->month - 1 && check.tm_mday == in->day && check.tm_hour == in->hour &&
+		check.tm_min == in->minute && check.tm_sec == in->second;
+}
+
+int OS_FileGetTimes(const char* path, OsLocalTime_t* created, OsLocalTime_t* accessed, OsLocalTime_t* written)
+{
+	char native[PATH_MAX];
+	struct stat st;
+	OsLocalTime_t c, a, w;
+	OsPosix_Path(path, native, sizeof native);
+	if(stat(native, &st) || !S_ISREG(st.st_mode) || !ToSystemTime(&st.st_mtim, &c) ||
+		!ToSystemTime(&st.st_atim, &a) || !ToSystemTime(&st.st_mtim, &w)) return 0;
+	/* POSIX ctime is a metadata-change time, not a creation time. */
+	if(created) memcpy(created, &c, sizeof c);
+	if(accessed) memcpy(accessed, &a, sizeof a);
+	if(written) memcpy(written, &w, sizeof w);
+	return 1;
+}
+
+int OS_FileSetTimes(const char* path, const OsLocalTime_t* created, const OsLocalTime_t* accessed, const OsLocalTime_t* written)
+{
+	char native[PATH_MAX];
+	struct stat st;
+	struct timespec ts[2], unused;
+	OsPosix_Path(path, native, sizeof native);
+	if(stat(native, &st) || !S_ISREG(st.st_mode)) return 0;
+	ts[0] = st.st_atim; ts[1] = st.st_mtim;
+	if((created && !FromSystemTime(created, &unused)) || (accessed && !FromSystemTime(accessed, &ts[0])) ||
+		(written && !FromSystemTime(written, &ts[1]))) return 0;
+	return utimensat(AT_FDCWD, native, ts, 0) == 0;
+}
+
 // GetFileAttributes: directory, read-only (no owner write bit), hidden (a '.' name); OS_ATTR_NORMAL when none applies
 uint32_t OS_FileAttrs(const char* path)
 {

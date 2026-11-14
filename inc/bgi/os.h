@@ -246,6 +246,11 @@ typedef struct OsLocalTime
 	uint16_t year, month, dayOfWeek, day, hour, minute, second, millis; // GetLocalTime: month 1..12, dayOfWeek 0 = Sunday
 } OsLocalTime_t;
 void OS_LocalTime(OsLocalTime_t* t);
+/* UTC file timestamps for 81 2C/2D. NULL records are skipped. POSIX has
+ * no portable creation-time setter: reads use mtime as its fallback,
+ * writes apply access/write times and leave creation time to the OS. */
+int OS_FileGetTimes(const char* path, OsLocalTime_t* created, OsLocalTime_t* accessed, OsLocalTime_t* written);
+int OS_FileSetTimes(const char* path, const OsLocalTime_t* created, const OsLocalTime_t* accessed, const OsLocalTime_t* written);
 /* The main loop's idle step: a sleep of about half a millisecond that
  * gives the system a chance to run without losing a frame (the original
  * waits on a waitable timer; Sleep(1) stands in on Windows 9x).  OS_IdleInit
@@ -738,6 +743,8 @@ int OS_SetWallpaper(const char* path, int stretch, int tile);
  * handle without ending the process. */
 typedef struct OsProcess OsProcess_t;
 OsProcess_t* OS_ProcessStart(const char* cmdLine); // NULL when it could not be started
+OsProcess_t* OS_ProcessStartInDir(const char* cmdLine, const char* dir, int show);
+int OS_ProcessExitCode(OsProcess_t* p, uint32_t* code);
 void OS_ProcessWaitIdle(OsProcess_t* p);
 int OS_ProcessWait(OsProcess_t* p, uint32_t ms);
 void OS_ProcessClose(OsProcess_t* p);

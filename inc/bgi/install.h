@@ -41,6 +41,11 @@
 int RunProgram(const char* dir, const char* file, const char* msg,
 	int hideWindow, int wait, int allowRetry, int waitUninstaller);
 int ShellOpen(const char* path); // "80 E3": open a file or URL with its associated program (ShellExecute "open"); the OS layer's result
+/* 81 E0: explicit command line and working directory; wait and report the
+ * exit code. Android/browser cannot launch external programs: returns 0
+ * without changing exitCode. show controls the child's window, hide ours. */
+int RunProgramArgs(uint32_t* exitCode, const char* dir, const char* file,
+	const char* command, int show, const char* message, int hide);
 
 // ---- registration / machine identity (machine.c) ----------------------------
 int CheckRegistration(void);           // "80 EC": 1 when comap.dat holds the machine key, or with --no-disc-check

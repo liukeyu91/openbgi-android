@@ -27,6 +27,7 @@ int main(void)
 	uint8_t shortened[18]={16};
 	const char json[]="{\"games\":[{\"match\":\"CompatibilityFixture\",\"profile\":\"1.636\"}]}";
 	const uint8_t boot[]="CompatibilityFixture";
+	const uint8_t services[]={0x77,0x80,0x26,0x81,0x2c,0x81,0x2d,0x81,0x39,0x81,0xe0,0x17};
 	OS_Init();
 	CHECK(!Compat_Configure(NULL,"auto",NULL,0));
 	CHECK(!Compat_Configure(NULL,"not-a-profile",NULL,0));
@@ -46,6 +47,7 @@ int main(void)
 	CHECK(Check(missing,sizeof missing,&result) && result.total==1 && result.count==1);
 	CHECK(result.issues[0].opcode==0xd040 && result.issues[0].kind==1 && result.issues[0].offset==0);
 	CHECK(Compat_Configure(NULL,"1.616",NULL,0)!=NULL);
+	CHECK(Check(services,sizeof services,&result) && result.total==0 && result.instructions==7);
 	CHECK(Check(missing,sizeof missing,&result) && result.count==1 && result.issues[0].kind==2);
 	CHECK(Check(vector,sizeof vector,&result) && result.problems>0); /* cannot decode an older profile's undefined main opcode */
 	CHECK(!Compat_CheckProgram(NULL,0,&result));

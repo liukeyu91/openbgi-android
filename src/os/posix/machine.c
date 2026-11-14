@@ -191,16 +191,25 @@ struct OsProcess
 // the command line (Shift-JIS, converted) through "sh -c"; NULL when fork fails (a failed exec ends the child with 127)
 OsProcess_t* OS_ProcessStart(const char* cmdLine)
 {
+	return OS_ProcessStartInDir(cmdLine, NULL, 1);
+}
+
+OsProcess_t* OS_ProcessStartInDir(const char* cmdLine, const char* dir, int show)
+{
+	BGI_UNUSED(show);
 #ifdef BGI_ANDROID
 	BGI_UNUSED(cmdLine);
+	BGI_UNUSED(dir);
 	return NULL;
 #else
 	OsProcess_t* p = (OsProcess_t*)calloc(1, sizeof *p);
-	char utf[0x1000];
+	char utf[0x1000], native[PATH_MAX];
 	OsPosix_SjisToUtf8(cmdLine, utf, sizeof utf);
+	if(dir) OsPosix_Path(dir, native, sizeof native);
 	p->pid = fork();
 	if(p->pid == 0)
 	{
+		if(dir && chdir(native)) _exit(127);
 		execl("/bin/sh", "sh", "-c", utf, (char*)NULL);
 		_exit(127);
 	}
@@ -211,6 +220,13 @@ OsProcess_t* OS_ProcessStart(const char* cmdLine)
 	}
 	return p;
 #endif
+}
+
+int OS_ProcessExitCode(OsProcess_t* p, uint32_t* code)
+{
+	if(!p || !p->done) return 0;
+	*code = WIFEXITED(p->status) ? (uint32_t)WEXITSTATUS(p->status) : 128u + (uint32_t)WTERMSIG(p->status);
+	return 1;
 }
 
 void OS_ProcessWaitIdle(OsProcess_t* p)

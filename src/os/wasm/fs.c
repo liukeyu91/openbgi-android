@@ -895,6 +895,20 @@ int OS_FileSetTime(OsFile_t* f, uint32_t lo, uint32_t hi)
 }
 
 // the OS_ATTR_* bits of whichever side has the path, OS_INVALID_ATTRS when neither has
+/* Timestamp triples are not exposed by the asset-server protocol. */
+int OS_FileGetTimes(const char* path, OsLocalTime_t* created, OsLocalTime_t* accessed, OsLocalTime_t* written)
+{
+	BGI_UNUSED(path); BGI_UNUSED(created); BGI_UNUSED(accessed); BGI_UNUSED(written);
+	return 0;
+}
+
+int OS_FileSetTimes(const char* path, const OsLocalTime_t* created, const OsLocalTime_t* accessed, const OsLocalTime_t* written)
+{
+	BGI_UNUSED(path); BGI_UNUSED(created); BGI_UNUSED(accessed); BGI_UNUSED(written);
+	return 0;
+}
+
+// the OS_ATTR_* bits of whichever side has the path, OS_INVALID_ATTRS when neither has
 uint32_t OS_FileAttrs(const char* path)
 {
 	Lookup_t l;

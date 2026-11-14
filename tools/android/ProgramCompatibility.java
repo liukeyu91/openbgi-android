@@ -41,7 +41,8 @@ final class ProgramCompatibility {
             for(Finding finding:findings.values()){
                 if(shown++==MAX_DETAILS){text.append("\n\n其余结果未展开。");break;}
                 text.append("\n\n$").append(String.format(Locale.ROOT,finding.opcode>255?"%04X":"%02X",finding.opcode))
-                    .append(finding.kind==1?"：尚未实现":"：当前版本不支持");
+                    .append(finding.kind==1?"：尚未实现":finding.kind==3?"：当前平台无法启动外部程序":"：当前版本不支持");
+                if(finding.kind==3)text.append("\n指令已接入，启动失败会返回脚本；依赖外部 Windows EXE 的功能仍不可用。");
                 for(String location:finding.locations)text.append("\n").append(location);
                 if(finding.occurrences>finding.locations.size())text.append("\n另有 ").append(finding.occurrences-finding.locations.size()).append(" 个程序使用。");
             }

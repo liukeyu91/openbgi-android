@@ -27,6 +27,9 @@ public final class ProgramCompatibilityTest {
         return ProgramCompatibility.scan(dir.toFile(),dir.toFile(),profile,a,(done,total)->check(done>=0 && done<=total));
     }
     static void tests(Path root)throws Exception {
+        ProgramCompatibility.Result platform=new ProgramCompatibility.Result();platform.profile="1.616";
+        platform.findings.put(0x381e0,new ProgramCompatibility.Finding(0x81e0,3));
+        check(platform.report().contains("当前平台无法启动外部程序") && !platform.report().contains("尚未实现"));
         Path game=Files.createDirectory(root.resolve("game"));Files.createDirectory(game.resolve("Archive"));
         byte[] archive=EncodingProbeTest.archive(new String[]{"ipl._bp","scrgrp7._bp"},
             new byte[][]{EncodingProbeTest.dsc(program(0x17)),EncodingProbeTest.dsc(program(0x56))},true);

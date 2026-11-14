@@ -86,6 +86,43 @@ int RunProgram(const char* dir, const char* file, const char* msg, int hideWindo
 	return 1;
 }
 
+// "81 E0": wait for an external command and return its exit status.
+int RunProgramArgs(uint32_t* exitCode, const char* dir, const char* file,
+	const char* command, int show, const char* message, int hide)
+{
+	char path[0x1000], fallback[0x1004];
+	if(!file || !*file) return 0;
+	if(dir) snprintf(path, sizeof path, "%s\\%s", dir, file);
+	else snprintf(path, sizeof path, "%s%s", gBaseDir, file);
+	snprintf(fallback, sizeof fallback, "\"%s\"", path);
+#if defined(BGI_ANDROID) || defined(BGI_WASM)
+	/* Do not retry a Windows executable forever on an unsupported host. */
+	BGI_UNUSED(exitCode); BGI_UNUSED(command); BGI_UNUSED(show);
+	BGI_UNUSED(message); BGI_UNUSED(hide);
+	fprintf(stderr, "bgi: external program unavailable on this platform: %s\n", path);
+	return 0;
+#else
+	OsProcess_t* process;
+	int restore;
+	for(;;)
+	{
+		process = DriveReady(path) ? OS_ProcessStartInDir(command ? command : fallback, dir ? dir : gBaseDir, show) : NULL;
+		if(process) break;
+		if(!message) return 0;
+		if(MsgBox(message, MSG_NOTICE, OS_MB_OKCANCEL | OS_MB_ICONINFO) != OS_IDOK &&
+			MsgBox(MSG_ASK_ABORT, MSG_CONFIRM, OS_MB_YESNO | OS_MB_ICONQUESTION | OS_MB_DEFBUTTON2) == OS_IDYES) return 0;
+	}
+	restore = hide && gWindowAlive;
+	if(restore) ShowMainWindow(0);
+	OS_ProcessWaitIdle(process);
+	while(!OS_ProcessWait(process, 10)) PumpMessages();
+	if(exitCode) OS_ProcessExitCode(process, exitCode);
+	OS_ProcessClose(process);
+	if(restore) ShowMainWindow(1);
+	return 1;
+#endif
+}
+
 // "80 E3": open a file or URL with its associated program (ShellExecute "open"); the OS layer's result
 int ShellOpen(const char* path)
 {

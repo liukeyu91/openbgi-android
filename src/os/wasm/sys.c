@@ -350,6 +350,18 @@ OsProcess_t* OS_ProcessStart(const char* cmdLine)
 	return NULL;
 }
 
+OsProcess_t* OS_ProcessStartInDir(const char* cmdLine, const char* dir, int show)
+{
+	BGI_UNUSED(dir); BGI_UNUSED(show);
+	return OS_ProcessStart(cmdLine);
+}
+
+int OS_ProcessExitCode(OsProcess_t* p, uint32_t* code)
+{
+	BGI_UNUSED(p); BGI_UNUSED(code);
+	return 0;
+}
+
 void OS_ProcessWaitIdle(OsProcess_t* p)
 {
 	BGI_UNUSED(p);

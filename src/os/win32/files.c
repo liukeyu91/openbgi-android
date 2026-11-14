@@ -129,6 +129,43 @@ uint32_t OS_FileAttrs(const char* path)
 	return GetFileAttributesW(wide);
 }
 
+int OS_FileGetTimes(const char* path, OsLocalTime_t* created, OsLocalTime_t* accessed, OsLocalTime_t* written)
+{
+	FILETIME ft[3]; SYSTEMTIME st[3];
+	HANDLE h;
+	OsLocalTime_t* out[3] = {created, accessed, written};
+	int i, ok;
+	WPATH(wide, path);
+	h = CreateFileW(wide, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(h == INVALID_HANDLE_VALUE) return 0;
+	ok = GetFileTime(h, &ft[0], &ft[1], &ft[2]);
+	CloseHandle(h);
+	for(i = 0; ok && i < 3; ++i) ok = FileTimeToSystemTime(&ft[i], &st[i]);
+	if(ok) for(i = 0; i < 3; ++i) if(out[i]) memcpy(out[i], &st[i], sizeof *out[i]);
+	return ok != 0;
+}
+
+int OS_FileSetTimes(const char* path, const OsLocalTime_t* created, const OsLocalTime_t* accessed, const OsLocalTime_t* written)
+{
+	FILETIME ft[3]; SYSTEMTIME st;
+	const OsLocalTime_t* in[3] = {created, accessed, written};
+	HANDLE h;
+	int i, ok;
+	WPATH(wide, path);
+	for(i = 0; i < 3; ++i) if(in[i])
+	{
+		memcpy(&st, in[i], sizeof st);
+		if(!SystemTimeToFileTime(&st, &ft[i])) return 0;
+	}
+	h = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(h == INVALID_HANDLE_VALUE) return 0;
+	ok = SetFileTime(h, created ? &ft[0] : NULL, accessed ? &ft[1] : NULL, written ? &ft[2] : NULL);
+	CloseHandle(h);
+	return ok != 0;
+}
+
 int OS_FileSetAttrs(const char* path, uint32_t attrs)
 {
 	WPATH(wide, path);

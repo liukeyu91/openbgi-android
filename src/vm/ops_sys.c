@@ -2374,7 +2374,7 @@ void Vm_Optable80Init(void)
 		{0x21, Opcode_Sys_Gfree, GEN_FIRST, GEN_LAST},
 		{0x24, Opcode_Sys_CountFiles, GEN_FIRST, GEN_LAST},
 		{0x25, Opcode_Sys_ListFiles, GEN_FIRST, GEN_LAST},
-        {0x26, Opcode_Sys_ListDirectories, GEN_1_636, GEN_LAST},
+        {0x26, Opcode_Sys_ListDirectories, GEN_FIRST, GEN_LAST},
 		{0x27, Opcode_Sys_MoveFile, GEN_1_494, GEN_LAST},
 		{0x28, Opcode_Sys_Mkdir, GEN_FIRST, GEN_LAST},
 		{0x29, Opcode_Sys_Rmdir, GEN_FIRST, GEN_LAST},

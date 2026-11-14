@@ -60,6 +60,8 @@
 #include "bgi/gfx/text.h"
 #include "bgi/os.h"
 #include "bgi/version.h"
+#include "bgi/gfx.h"
+#include "bgi/install.h"
 
 #include <stdio.h>
 #include <math.h>
@@ -1172,7 +1174,9 @@ static void TestFiles(void)
             PushI32(&a, 42);
             for(j = 0; j < 3; ++j)PushI32(&a, query[j]);
             A8(&a, 0x81); A8(&a, 0x39);
-            CHECK(Eval(&a) == 42);
+            Ret(&a);
+            CHECK(Run(&a) == 4 && Depth() == 2);
+            CHECK(Thread_Pop(gT) == query[1] && Top() == 42);
             memcpy(&size, d + 0x210, 4);
             CHECK(size == (mode ? 2 : 17));
             if(mode)CHECK(memcmp(d + 0x600, "MixedName\0Second\0", 17) == 0 && d[0x611] == 0xa5);
@@ -1456,6 +1460,76 @@ static void TestModuleBounds(void)
 	Thread_Delete(t);
 }
 
+static void TestCompatibilityServices(void)
+{
+	const char* profiles[] = {"1.616", "1.636"};
+	int i;
+	uint8_t* d = gT->data;
+	Gfx_t fake = {0}, *keep = gGfx;
+	printf("compatibility services\n");
+	for(i = 0; i < 2; ++i)
+	{
+		CHECK(Engine_SelectProfile(profiles[i])); Vm_TablesInit();
+		Asm_t a = {{0}, 0};
+		uint32_t query[] = {0, 0, DataPtr(0x580), 0};
+		uint32_t get[] = {DataPtr(0x600), DataPtr(0x610), DataPtr(0x620), DataPtr(0x580)};
+		uint32_t set[] = {DataPtr(0x580), DataPtr(0x600), DataPtr(0x610), DataPtr(0x620)};
+		OsLocalTime_t timestamp = {2024, 2, 4, 29, 13, 14, 15, 123}, actual;
+		fake.spriteCount = 13; gGfx = &fake;
+		PushI32(&a, 42); PushI32(&a, 0); A8(&a, 0x77); Ret(&a);
+		CHECK(Run(&a) == 4 && Depth() == 2 && Thread_Pop(gT) == 13 && Top() == 42);
+		a.len = 0; PushI32(&a, 8); A8(&a, 0x77); CHECK(Eval(&a) == 0xffffffffu);
+		gGfx = keep;
+		CHECK(OS_DirCreate("bin/test_vm_compat") || (OS_FileAttrs("bin/test_vm_compat") & OS_ATTR_DIRECTORY));
+		CHECK(OS_DirCreate("bin/test_vm_compat/MixedName") || (OS_FileAttrs("bin/test_vm_compat/MixedName") & OS_ATTR_DIRECTORY));
+		strcpy((char*)d + 0x580, "bin/test_vm_compat/*.*");
+		CHECK(Call(0x80, 0x26, query, 4) == 10);
+		query[0] = DataPtr(0x600); query[1] = 9;
+		memset(d + 0x600, 0xa5, 16);
+		CHECK(Call(0x80, 0x26, query, 4) == 0xffffffffu && d[0x609] == 0xa5);
+		query[1] = 10;
+		CHECK(Call(0x80, 0x26, query, 4) == 1 && !strcmp((char*)d + 0x600, "MixedName"));
+		CHECK(OS_DirRemove("bin/test_vm_compat/MixedName"));
+		CHECK(OS_DirRemove("bin/test_vm_compat"));
+		strcpy((char*)d + 0x580, "bin/test_vm_timestamp.tmp");
+		remove((char*)d + 0x580);
+		memcpy(d + 0x600, &timestamp, sizeof timestamp);
+		memcpy(d + 0x610, &timestamp, sizeof timestamp);
+		memcpy(d + 0x620, &timestamp, sizeof timestamp);
+		CHECK(Call(0x81, 0x2d, set, 4) == 0 && OS_FileAttrs((char*)d + 0x580) == OS_INVALID_ATTRS);
+		Spit((char*)d + 0x580, "timestamp contents");
+		CHECK(Call(0x81, 0x2d, set, 4) == 1);
+		memset(d + 0x600, 0xa5, 49);
+		CHECK(Call(0x81, 0x2c, get, 4) == 1 && d[0x630] == 0xa5);
+		memcpy(&actual, d + 0x620, sizeof actual);
+		/* Some host filesystems expose timestamps only to whole seconds. */
+		CHECK(actual.millis == timestamp.millis || actual.millis == 0);
+		actual.millis = timestamp.millis;
+		CHECK(!memcmp(&actual, &timestamp, sizeof actual));
+		/* Invalid calendar dates must not be normalized and written. */
+		timestamp.day = 30; memcpy(d + 0x620, &timestamp, sizeof timestamp);
+		CHECK(Call(0x81, 0x2d, set, 4) == 0);
+		CHECK(!strcmp(Slurp((char*)d + 0x580), "timestamp contents"));
+		remove((char*)d + 0x580);
+		memset(d + 0x600, 0xa5, 48);
+		CHECK(Call(0x81, 0x2c, get, 4) == 0 && d[0x600] == 0xa5 && d[0x62f] == 0xa5);
+		query[0] = 0; query[1] = DataPtr(0x610); query[2] = DataPtr(0x580);
+		CHECK(Call(0x81, 0x39, query, 3) == 0);
+	}
+	/* Exercise the seven-operand ABI, working directory and exit result. */
+	strcpy((char*)d + 0x580, "C:\\bin");
+	strcpy((char*)d + 0x600, "test_vm_external.tmp");
+	strcpy((char*)d + 0x680, "printf ok > test_vm_external.tmp; exit 7");
+	Spit("bin/test_vm_external.tmp", "placeholder");
+	{
+		const uint32_t args[] = {DataPtr(0x210), DataPtr(0x580), DataPtr(0x600), DataPtr(0x680), 0, 0, 0};
+		CHECK(Call(0x81, 0xe0, args, 7) == 1);
+		CHECK(!strcmp(Slurp("bin/test_vm_external.tmp"), "ok"));
+		CHECK(*(uint32_t*)(d + 0x210) == 7);
+	}
+	remove("bin/test_vm_external.tmp");
+}
+
 int main(void)
 {
 	setenv("BGI_MSGBOX_STDERR", "1", 1); // error boxes go to stderr instead of a dialog
@@ -1474,6 +1548,7 @@ int main(void)
 	TestLaterBuilds();
 	TestBorrower();
 	TestFiles();
+	TestCompatibilityServices();
 	TestVectorNormalize();
 	TestFixedVectorsAndArrays();
 	TestModuleBounds();

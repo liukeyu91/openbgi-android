@@ -7,7 +7,7 @@
 #define COMPAT_MAX_PROGRAM (8u * 1024u * 1024u)
 typedef struct CompatIssue {
 	uint32_t opcode, offset;
-	int kind; /* 1: defined but unimplemented; 2: undefined in the profile */
+	int kind; /* 1: unimplemented; 2: undefined in profile; 3: unavailable on host */
 } CompatIssue_t;
 typedef struct CompatResult {
 	uint32_t instructions, problems, total;

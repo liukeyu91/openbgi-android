@@ -1192,6 +1192,33 @@ static int Opcode_WatchAdd(Thread_t* t) // 75: addr, size, name → ok
 
 // ---- debugging message boxes -----------------------------------------------
 
+/* 77 queries the live graphics-object counts (Fureraba 1.616 and
+ * KanojoStep 1.636). Unsupported class selectors return -1. The video
+ * texture class has no live objects in this implementation. */
+static int Opcode_ObjectCount(Thread_t* t) // 77: class -> count
+{
+	uint32_t kind = Thread_Pop(t), n = 0xffffffffu;
+	if(kind <= 7 || kind == 16 || kind == 17)
+	{
+		n = 0;
+		if(gGfx) switch(kind)
+		{
+			case 0: n = gGfx->spriteCount; break;
+			case 1: n = gGfx->filterCount; break;
+			case 2: n = gGfx->effectorCount; break;
+			case 3: n = gGfx->mapCount; break;
+			case 4: break; /* video textures */
+			case 5: n = gGfx->windowCount; break;
+			case 6: n = gGfx->particleCount; break;
+			case 7: n = gGfx->rainCount; break;
+			case 16: n = gGfx->knobCount; break;
+			case 17: n = gGfx->groupCount; break;
+		}
+	}
+	Thread_Push(t, n);
+	return 0;
+}
+
 /* a system-modal yes / no question box with the script's text; `flag`
  * selects the default button (yes when non-zero, no otherwise).  Pushes 1
  * when "yes" was chosen. */
@@ -1571,6 +1598,7 @@ void Vm_OptableMainInit(void)
 		{0x71, Opcode_Lfree, GEN_FIRST, GEN_LAST},
 		{0x74, Opcode_WatchMode, GEN_FIRST, GEN_LAST},
 		{0x75, Opcode_WatchAdd, GEN_FIRST, GEN_LAST},
+		{0x77, Opcode_ObjectCount, GEN_FIRST, GEN_LAST},
 		{0x78, Opcode_ConfirmBox, GEN_FIRST, GEN_LAST},
 		{0x79, Opcode_DebugMsg, GEN_FIRST, GEN_LAST},
 		{0x7a, Opcode_DebugNum, GEN_FIRST, GEN_LAST},
