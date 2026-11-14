@@ -1301,6 +1301,84 @@ static void NormalizeAt(uint32_t dst, uint32_t src)
 	CHECK(Eval(&a) == 0x12345678);
 }
 
+static uint32_t BaseCall(uint32_t opcode, const uint32_t* args, int count, int pushes)
+{
+	Asm_t a={{0},0};int i;
+	PushI32(&a,0x12345678);
+	for(i=0;i<count;i++)PushI32(&a,args[i]);
+	Op(&a,opcode);Ret(&a);
+	CHECK(Run(&a)==4);CHECK(Depth()==(uint32_t)(1+pushes));CHECK(gT->stack[0]==0x12345678);
+	return Top();
+}
+
+static void TestFixedVectorsAndArrays(void)
+{
+	static const struct { int32_t a,b;uint32_t product; } products[]={
+		{98304,-32768,(uint32_t)-49152},{-1,1,0xffffffffu},{-1,-1,0},
+		{INT32_MIN,65536,0x80000000u},{INT32_MAX,65536,0x7fffffffu},{INT32_MIN,INT32_MIN,0}
+	};
+	static const struct { int32_t a,b;uint32_t quotient; } divisions[]={
+		{196608,131072,98304},{65536,196608,21845},{-65536,196608,(uint32_t)-21845},
+		{123456,0,0},{65536,65535,65536},{63,65536,0},{64,65536,64},
+		{INT32_MIN,-1,0x80000000u}
+	};
+	uint8_t* d=gT->data;size_t i;
+	const uint32_t len[]={3,4,12}, negative[]={-3u,-4u,0}, large[]={0x80000000u,0,0};
+	const uint32_t av[]={0xffffffffu,0x7fffffffu,3,4}, bv[]={1,1,0xffffffffu,0xffffffffu};
+	const uint32_t added[]={0,0x80000000u,2,3}, subtracted[]={0xfffffffeu,0x7ffffffeu,4,5};
+	const int32_t va[]={65536,131072,196608,262144}, vb[]={131072,131072,131072,131072};
+	const int32_t smear[]={131072,262144,524288,1048576}, divided[]={32768,65536,98304,131072};
+	uint32_t args[4];
+	puts("fixed vectors and arrays");
+	CHECK(Engine_SelectProfile("1.553"));Vm_TablesInit();CHECK(!vm_optable_main[0x44]);
+	CHECK(Engine_SelectProfile("1.573"));Vm_TablesInit();CHECK(vm_optable_main[0x44]!=Opcode_NotImplemented && !vm_optable_main[0x64]);
+	CHECK(Engine_SelectProfile("1.588"));Vm_TablesInit();CHECK(vm_optable_main[0x64]!=Opcode_NotImplemented && !vm_optable_main[0x56]);
+	CHECK(Engine_SelectProfile("1.636"));Vm_TablesInit();
+	const uint32_t binary[]={DataPtr(0x201),DataPtr(0x301),DataPtr(0x401)};
+	const uint32_t overlap[]={DataPtr(0x305),DataPtr(0x301),DataPtr(0x401)};
+	const uint32_t scale[]={DataPtr(0x305),DataPtr(0x301),131072};
+	const uint32_t fill[]={DataPtr(0x601),3,3,DataPtr(0x701)};
+	const uint32_t find[]={DataPtr(0x601),3,3,DataPtr(0x701)};
+	for(i=0x56;i<=0x5f;i++)if(i!=0x5c)CHECK(vm_optable_main[i] && vm_optable_main[i]!=Opcode_NotImplemented);
+	CHECK(!vm_optable_main[0x5c]);
+	CHECK(BaseCall(0x44,len,3,1)==13);CHECK(BaseCall(0x44,negative,3,1)==5);CHECK(BaseCall(0x44,large,3,1)==0x80000000u);
+	for(i=0;i<BGI_COUNTOF(products);i++){
+		args[0]=(uint32_t)products[i].a;args[1]=(uint32_t)products[i].b;
+		CHECK(BaseCall(0x56,args,2,1)==products[i].product);
+	}
+	for(i=0;i<BGI_COUNTOF(divisions);i++){
+		args[0]=(uint32_t)divisions[i].a;args[1]=(uint32_t)divisions[i].b;
+		CHECK(BaseCall(0x57,args,2,1)==divisions[i].quotient);
+	}
+	memcpy(d+0x301,av,16);memcpy(d+0x401,bv,16);BaseCall(0x58,overlap,3,0);CHECK(!memcmp(d+0x305,added,16));
+	memcpy(d+0x301,av,16);BaseCall(0x59,binary,3,0);CHECK(!memcmp(d+0x201,subtracted,16));
+	memcpy(d+0x301,va,16);memcpy(d+0x401,vb,16);BaseCall(0x5a,overlap,3,0);CHECK(!memcmp(d+0x305,smear,16));
+	memcpy(d+0x301,va,16);BaseCall(0x5b,overlap,3,0);CHECK(!memcmp(d+0x305,divided,16));
+	memcpy(d+0x301,va,16);BaseCall(0x5e,scale,3,0);CHECK(!memcmp(d+0x305,smear,16));
+	memcpy(d+0x301,va,16);BaseCall(0x5f,scale,3,0);CHECK(!memcmp(d+0x305,divided,16));
+	memcpy(args,scale,sizeof scale);args[2]=0;BaseCall(0x5f,args,3,0);
+	CHECK(!memcmp(d+0x305,(uint32_t[4]){0,0,0,0},16));
+	memcpy(d+0x301,va,16);memset(d+0x401,0,16);BaseCall(0x5b,binary,3,0);
+	CHECK(!memcmp(d+0x201,(uint32_t[4]){0,0,0,0},16));
+	memcpy(d+0x301,(int32_t[4]){-65536,196608,65536,INT32_MIN},16);
+	memcpy(d+0x401,(int32_t[4]){196608,-131072,0,-1},16);
+	BaseCall(0x5b,binary,3,0);
+	CHECK(!memcmp(d+0x201,(int32_t[4]){-21845,-98304,0,INT32_MIN},16));
+	memset(d+0x600,0xa5,12);memcpy(d+0x701,"abc",3);BaseCall(0x64,fill,4,0);
+	CHECK(!memcmp(d+0x601,"abcabcabc",9) && d[0x600]==0xa5 && d[0x60a]==0xa5);
+	CHECK(BaseCall(0x65,find,4,1)==0);
+	memcpy(d+0x601,"123456abc",9);CHECK(BaseCall(0x65,find,4,1)==2);
+	memcpy(d+0x701,"xyz",3);CHECK(BaseCall(0x65,find,4,1)==0xffffffffu);
+	memcpy(args,find,sizeof args);args[2]=0;CHECK(BaseCall(0x65,args,4,1)==0xffffffffu);
+	args[1]=0;args[2]=3;CHECK(BaseCall(0x65,args,4,1)==0);
+	memcpy(args,fill,sizeof args);args[2]=0;BaseCall(0x64,args,4,0);CHECK(!memcmp(d+0x601,"123456abc",9));
+	// A source inside the destination is re-read after each overlapping memmove.
+	memcpy(d+0x601,"abcdefghi",9);
+	args[0]=DataPtr(0x601);args[1]=3;args[2]=3;args[3]=DataPtr(0x602);
+	BaseCall(0x64,args,4,0);CHECK(!memcmp(d+0x601,"bcdcddcdc",9));
+	CHECK(Engine_SelectProfile("1.69/444"));Vm_TablesInit();
+}
+
 static void TestVectorNormalize(void)
 {
 	static const struct { int32_t in[4], out[4]; } cases[] = {
@@ -1362,6 +1440,7 @@ int main(void)
 	TestBorrower();
 	TestFiles();
 	TestVectorNormalize();
+	TestFixedVectorsAndArrays();
 	Thread_Delete(gT);
 	OS_Shutdown();
 	if(gFails)

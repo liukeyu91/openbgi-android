@@ -468,6 +468,113 @@ static uint32_t VectorFixed(float value)
 	return result;
 }
 
+static uint32_t FixedMultiply(int32_t a, int32_t b)
+{
+	/* The low dword of the signed 64-bit product shifted right by 16. */
+	return (uint32_t)((uint64_t)((int64_t)a * b) >> 16);
+}
+
+static uint32_t FixedDivide(int32_t a, int32_t b)
+{
+	/* Portable division replaces the original SSE reciprocal refinement. */
+	float numerator = (float)a * (1.0f / 65536.0f);
+	float denominator = (float)b * (1.0f / 65536.0f);
+	return b ? VectorFixed(numerator / denominator) : 0;
+}
+
+static int Opcode_Fixmul(Thread_t* t) // 56 (1.636 on): a, b → product
+{
+	int32_t b = (int32_t)Thread_Pop(t), a = (int32_t)Thread_Pop(t);
+	Thread_Push(t, FixedMultiply(a, b));
+	return 0;
+}
+
+static int Opcode_Fixdiv(Thread_t* t) // 57 (1.636 on): a, b → quotient
+{
+	int32_t b = (int32_t)Thread_Pop(t), a = (int32_t)Thread_Pop(t);
+	Thread_Push(t, FixedDivide(a, b));
+	return 0;
+}
+
+/* The original SIMD add, subtract and divide read both 16-byte vectors
+ * before writing. Its component multiply and scalar multiply instead
+ * read/write each lane in ascending order, observable on partial overlap. */
+static void VectorBinary(Thread_t* t, int op)
+{
+	const uint8_t* b = (const uint8_t*)PopPtr(t);
+	const uint8_t* a = (const uint8_t*)PopPtr(t);
+	uint8_t* dst = (uint8_t*)PopPtr(t);
+	uint32_t av[4], bv[4], result[4];
+	int i;
+	if(op == 2)
+	{
+		for(i = 0; i < 4; i++)
+		{
+			int32_t x, y;
+			uint32_t value;
+			memcpy(&x, a + i * 4, 4);
+			memcpy(&y, b + i * 4, 4);
+			value = FixedMultiply(x, y);
+			memcpy(dst + i * 4, &value, 4);
+		}
+		return;
+	}
+	memcpy(av, a, sizeof av);
+	memcpy(bv, b, sizeof bv);
+	for(i = 0; i < 4; i++)
+		result[i] = op == 0 ? av[i] + bv[i] : op == 1 ? av[i] - bv[i] : FixedDivide((int32_t)av[i], (int32_t)bv[i]);
+	memcpy(dst, result, sizeof result);
+}
+static int Opcode_Vadd(Thread_t* t) // 58 (1.636 on): dst, a, b →
+{
+	VectorBinary(t, 0);
+	return 0;
+}
+static int Opcode_Vsub(Thread_t* t) // 59 (1.636 on): dst, a, b →
+{
+	VectorBinary(t, 1);
+	return 0;
+}
+static int Opcode_Vfixmul(Thread_t* t) // 5A (1.636 on): dst, a, b →
+{
+	VectorBinary(t, 2);
+	return 0;
+}
+static int Opcode_Vfixdiv(Thread_t* t) // 5B (1.636 on): dst, a, b →
+{
+	VectorBinary(t, 3);
+	return 0;
+}
+static int Opcode_Vscale(Thread_t* t) // 5E (1.636 on): dst, src, scale →
+{
+	int32_t scale = (int32_t)Thread_Pop(t);
+	const uint8_t* src = (const uint8_t*)PopPtr(t);
+	uint8_t* dst = (uint8_t*)PopPtr(t);
+	int i;
+	for(i = 0; i < 4; i++)
+	{
+		int32_t value;
+		uint32_t result;
+		memcpy(&value, src + i * 4, 4);
+		result = FixedMultiply(value, scale);
+		memcpy(dst + i * 4, &result, 4);
+	}
+	return 0;
+}
+static int Opcode_Vdivs(Thread_t* t) // 5F (1.636 on): dst, src, divisor →
+{
+	int32_t divisor = (int32_t)Thread_Pop(t), input[4];
+	const void* src = PopPtr(t);
+	void* dst = PopPtr(t);
+	uint32_t result[4];
+	int i;
+	memcpy(input, src, sizeof input);
+	for(i = 0; i < 4; i++)
+		result[i] = FixedDivide(input[i], divisor);
+	memcpy(dst, result, sizeof result);
+	return 0;
+}
+
 /* 1.636 on: normalise xyz and put the original length in the fourth cell,
  * ignoring the input's fourth cell. Both vectors occupy 16 bytes. Read
  * before writing, including when the ranges overlap or are unaligned.
@@ -500,6 +607,15 @@ static int Opcode_VectorNormalize(Thread_t* t) // 5D (1.636 on): dst, src →
 	return 0;
 }
 
+static int Opcode_VecLen(Thread_t* t) // 44 (1.573 on): x, y, z → length
+{
+	double z = (int32_t)Thread_Pop(t), y = (int32_t)Thread_Pop(t), x = (int32_t)Thread_Pop(t);
+	volatile double xx = x * x, yy = y * y, zz = z * z, sum = xx + yy;
+	sum = sum + zz;
+	Thread_Push(t, (uint32_t)(uint64_t)sqrt(sum));
+	return 0;
+}
+
 // 1.69 build 472 on: put the string on the clipboard as CF_TEXT; 1 when done
 static int Opcode_ClipboardSet(Thread_t* t) // 7E (1.69/472 on): text → ok
 {
@@ -524,6 +640,30 @@ static int Opcode_Memclr(Thread_t* t) // 61: dst, n →
 	uint32_t n = Thread_Pop(t);
 	void* dst = PopPtr(t);
 	memset(dst, 0, n);
+	return 0;
+}
+
+static int Opcode_ArrayFill(Thread_t* t) // 64 (1.588 on): dst, size, count, value →
+{
+	const void* value = PopPtr(t);
+	uint32_t count = Thread_Pop(t), size = Thread_Pop(t), i;
+	uint8_t* dst = (uint8_t*)PopPtr(t);
+	for(i = 0; i < count; i++, dst += size)
+		memmove(dst, value, size);
+	return 0;
+}
+static int Opcode_ArrayFind(Thread_t* t) // 65 (1.588 on): array, size, count, value → index
+{
+	const void* value = PopPtr(t);
+	uint32_t count = Thread_Pop(t), size = Thread_Pop(t), i;
+	const uint8_t* array = (const uint8_t*)PopPtr(t);
+	for(i = 0; i < count; i++, array += size)
+		if(!memcmp(array, value, size))
+		{
+			Thread_Push(t, i);
+			return 0;
+		}
+	Thread_Push(t, 0xffffffffu);
 	return 0;
 }
 
@@ -1393,6 +1533,7 @@ void Vm_OptableMainInit(void)
 		{0x40, Opcode_Select, GEN_FIRST, GEN_LAST},
 		{0x42, Opcode_Muldiv, GEN_FIRST, GEN_LAST},
 		{0x43, Opcode_Atan2, GEN_1_69_472, GEN_LAST},
+		{0x44, Opcode_VecLen, GEN_1_573, GEN_LAST},
 		{0x48, Opcode_Sin, GEN_FIRST, GEN_LAST},
 		{0x49, Opcode_Cos, GEN_FIRST, GEN_LAST},
 		{0x50, Opcode_Add64, GEN_1_69_472, GEN_LAST},
@@ -1400,11 +1541,21 @@ void Vm_OptableMainInit(void)
 		{0x52, Opcode_Mul64, GEN_1_69_472, GEN_LAST},
 		{0x53, Opcode_Div64, GEN_1_69_472, GEN_LAST},
 		{0x54, Opcode_Mod64, GEN_1_69_472, GEN_LAST},
+		{0x56, Opcode_Fixmul, GEN_1_636, GEN_LAST},
+		{0x57, Opcode_Fixdiv, GEN_1_636, GEN_LAST},
+		{0x58, Opcode_Vadd, GEN_1_636, GEN_LAST},
+		{0x59, Opcode_Vsub, GEN_1_636, GEN_LAST},
+		{0x5a, Opcode_Vfixmul, GEN_1_636, GEN_LAST},
+		{0x5b, Opcode_Vfixdiv, GEN_1_636, GEN_LAST},
 		{0x5d, Opcode_VectorNormalize, GEN_1_636, GEN_LAST},
+		{0x5e, Opcode_Vscale, GEN_1_636, GEN_LAST},
+		{0x5f, Opcode_Vdivs, GEN_1_636, GEN_LAST},
 		{0x60, Opcode_Memcpy, GEN_FIRST, GEN_LAST},
 		{0x61, Opcode_Memclr, GEN_FIRST, GEN_LAST},
 		{0x62, Opcode_Memset, GEN_FIRST, GEN_LAST},
 		{0x63, Opcode_Memcmp, GEN_FIRST, GEN_LAST},
+		{0x64, Opcode_ArrayFill, GEN_1_588, GEN_LAST},
+		{0x65, Opcode_ArrayFind, GEN_1_588, GEN_LAST},
 		{0x66, Opcode_Strstr, GEN_1_529, GEN_LAST},
 		{0x67, Opcode_Strreplace, GEN_FIRST, GEN_LAST},
 		{0x68, Opcode_Strlen, GEN_FIRST, GEN_LAST},

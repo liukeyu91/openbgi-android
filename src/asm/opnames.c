@@ -517,6 +517,7 @@ const AsmOpName_t kAsmOpNames[] = {
 	{0x91, 0x9f, GEN_1_529, GEN_LAST, "text_strip_tags"},
 	{0x91, 0xb8, GEN_FIRST, GEN_LAST, "spr_panel_create"},
 	{0x91, 0xba, GEN_FIRST, GEN_LAST, "spr_panel_start"},
+	{0x91, 0xbb, GEN_1_529, GEN_LAST, "spr_panel_set_bitmap"},
 	{0x91, 0xbf, GEN_FIRST, GEN_LAST, "set_key_map"},
 	{0x91, 0xdb, GEN_1_588, GEN_LAST, "knob_drag_handle"},
 	{0x91, 0xf0, GEN_1_69_451, GEN_LAST, "video_texture_open"},

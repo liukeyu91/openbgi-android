@@ -1343,6 +1343,14 @@ static int Opcode_Gfx1_SprPanelStart(Thread_t* t) // 91 BA: id, desc → r
 	return 0;
 }
 
+static int Opcode_Gfx1_SprPanelSetBitmap(Thread_t* t) // 91 BB (1.529 on): id, group, button, bitmap → r
+{
+	int bitmap = (int)Thread_Pop(t), button = (int)Thread_Pop(t), group = (int)Thread_Pop(t);
+	uint32_t id = Thread_Pop(t);
+	Thread_Push(t, (uint32_t)SprPanel_SetBitmap(id, group, button, bitmap));
+	return 0;
+}
+
 // define user key map `no` (4 .. 7) of the panels: 24 actions, one per standard-key bit; a bad number is a script error
 static int Opcode_Gfx1_SetKeyMap(Thread_t* t) // 91 BF: no, actions →
 {
@@ -1451,6 +1459,7 @@ void Vm_Optable91Init(void)
 		{0x9D, Opcode_Gfx1_BmpDrawTextStyled, GEN_FIRST, GEN_LAST},
 		{0xB8, Opcode_Gfx1_SprPanelCreate, GEN_FIRST, GEN_LAST},
 		{0xBA, Opcode_Gfx1_SprPanelStart, GEN_FIRST, GEN_LAST},
+		{0xBB, Opcode_Gfx1_SprPanelSetBitmap, GEN_1_529, GEN_LAST},
 		{0xBF, Opcode_Gfx1_SetKeyMap, GEN_FIRST, GEN_LAST},
 		{0xDB, Opcode_Gfx1_KnobDragHandle, GEN_1_588, GEN_LAST},
 	};

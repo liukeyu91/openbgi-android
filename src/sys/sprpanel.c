@@ -489,6 +489,22 @@ static void SpritePanel_ShowSub(SpritePanel_t* sp, int sub, int no)
 	ObjProc_MarkDirty(&sp->b.p);
 }
 
+/* Replace only the displayed picture, leaving the animation and state
+ * pictures intact. A later focus/selection/frame update can replace it
+ * again. Undrawn buttons accept the request without creating a sprite;
+ * a missing bitmap is ignored, as by the original window call. */
+uint32_t SpritePanel_SetBitmap(ButtonPanel_t* p, int group, int button, int bitmap)
+{
+	SpritePanel_t* sp = (SpritePanel_t*)p;
+	if((uint32_t)group >= (uint32_t)sp->desc.groupCount || !sp->desc.groups)
+		return 0x80000001u;
+	if((uint32_t)button >= (uint32_t)SGROUPS(sp)[group].count)
+		return 0x80000002u;
+	if(sp->states[group][button].hasBitmap)
+		SpritePanel_ShowSub(sp, sp->states[group][button].sub, bitmap);
+	return 0;
+}
+
 // is button (g, i) the focused one (the one under the pointer)?
 static int SpriteIsFocused(ButtonPanel_t* p, int g, int i)
 {

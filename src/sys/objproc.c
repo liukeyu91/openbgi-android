@@ -394,6 +394,22 @@ int SprPanel_Start(uint32_t id, const void* desc, struct Thread* t)
 	return r;
 }
 
+// "91 BB": replace one sprite-panel button's current picture.
+int SprPanel_SetBitmap(uint32_t id, int group, int button, int bitmap)
+{
+	ObjProc_t* p = SubObj_FindPanel(id);
+	if(!p)
+		return 1;
+	if(!ButtonPanel_IsSprite((ButtonPanel_t*)p))
+		return 4;
+	switch(SpritePanel_SetBitmap((ButtonPanel_t*)p, group, button, bitmap))
+	{
+		case 0x80000001u: return 2;
+		case 0x80000002u: return 3;
+		default: return 0;
+	}
+}
+
 // "90 BC": the panel's state into six words at `out` (ButtonPanel_GetState); 1 when `id` is a panel
 int SubObj_GetCursor(int32_t out[6], uint32_t id)
 {

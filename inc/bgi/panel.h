@@ -361,6 +361,7 @@ ButtonPanel_t* ButtonPanel_New(struct Window* win);                  // allocate
 ButtonPanel_t* SpritePanel_New(struct Window* win);                  // allocate a sprite panel on win
 uint32_t ButtonPanel_Start(ButtonPanel_t* p, const PanelDesc_t* d);  // "90 BA": 0 ok / 0x80000001 bad group count / 0x80000002 bad button count
 uint32_t SpritePanel_Start(ButtonPanel_t* p, const SpriteDesc_t* d); // "91 BA": the same results
+uint32_t SpritePanel_SetBitmap(ButtonPanel_t* p, int group, int button, int bitmap); // "91 BB": 0 ok / 0x80000001 bad group / 0x80000002 bad button
 uint32_t Panel_Paint(struct Window* w, const PanelDesc_t* d);        // "90 B6": paint without a panel; the same results
 uint32_t SpritePanel_Paint(struct Window* w, const SpriteDesc_t* d); // "90 B7"
 
@@ -371,6 +372,7 @@ void SpritePanel_FreeDesc(SpriteDesc_t* d);
 int SpritePanel_CopyDesc(SpriteDesc_t** out, const SpriteDescScript_t* d, struct Thread* t); // the same results
 int Panel_Start(uint32_t id, const void* desc, struct Thread* t);                            // "90 BA": 0 ok / 1 no panel with that id / 2, 3 as CopyDesc / 4 a sprite panel
 int SprPanel_Start(uint32_t id, const void* desc, struct Thread* t);                         // "91 BA": the same, 4 for a button panel
+int SprPanel_SetBitmap(uint32_t id, int group, int button, int bitmap);                      // "91 BB": 0 ok / 1 no panel / 2 bad group / 3 bad button / 4 wrong panel kind
 int SubObj_GetCursor(int32_t out[6], uint32_t id);                                           // "90 BC": ButtonPanel_GetState; 1 when id is a panel
 int SubObj_GetGroup(int32_t* out, uint32_t id);                                              // "90 BD": the current group (-1 none); 1 when id is a panel
 int SubObj_GetSelections(int32_t* out, uint32_t id);                                         // "90 BE": ButtonPanel_GetSelections; 1 when id is a panel

@@ -21,6 +21,7 @@ int main(void)
 	const uint8_t vector[]={0x5d,0x17}, immediate[]={0x02,0x5d,0,0,0,0x17};
 	const uint8_t data[]={0x05,4,0,0x17,'a',0x5d,'b',0,0};
 	const uint8_t missing[]={0xd0,0x40,0xd0,0x40,0x17};
+	const uint8_t expanded[]={0x44,0x56,0x57,0x58,0x59,0x5a,0x5b,0x5e,0x5f,0x64,0x65,0x91,0xbb,0x17};
 	const uint8_t farJump[]={0x06,0xff,0x7f,0x16,0x17}, negativeData[]={0x05,0xff,0xff,0x17};
 	uint8_t bad[16]={16};
 	const char json[]="{\"games\":[{\"match\":\"CompatibilityFixture\",\"profile\":\"1.636\"}]}";
@@ -30,6 +31,7 @@ int main(void)
 	CHECK(!Compat_Configure(NULL,"not-a-profile",NULL,0));
 	CHECK(Compat_Configure(NULL,"1.636",NULL,0)!=NULL);
 	CHECK(Check(vector,sizeof vector,&result) && result.count==0 && result.instructions==2);
+	CHECK(Check(expanded,sizeof expanded,&result) && result.total==0 && result.problems==0 && result.instructions==13);
 	keep=vm_optable_main[0x5d];vm_optable_main[0x5d]=Opcode_NotImplemented;
 	CHECK(Check(vector,sizeof vector,&result) && result.count==1 && result.total==1);
 	CHECK(result.issues[0].opcode==0x5d && result.issues[0].offset==0 && result.issues[0].kind==1);
