@@ -26,6 +26,7 @@ Android 版仍在开发中，不同作品的兼容性需要分别验证。
 
 ## 文档
 
+- [更新记录](CHANGELOG.md)
 - [Android 使用与构建](tools/android/README.md)
 - [Android 概述](docs/android.md)
 - [引擎版本与游戏配置](docs/versions.md)
