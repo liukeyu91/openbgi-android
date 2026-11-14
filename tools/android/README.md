@@ -1,54 +1,26 @@
-# OpenBGI for Android 0.10.5-preview
+# OpenBGI for Android
 
-Import and first launch now sample scene strings to resolve automatic encoding.
-Uncertain or mixed results require a manual choice before starting the VM.
-Previously saved manual settings are retained. The native engine is unchanged
-from 0.10.3. This version has not been installed on a device; see
-[release notes](../../docs/android-fixes-0.10.5.md).
-Earlier portrait-transition measurements and remaining issues are recorded in
-[0.10.3 device validation](../../docs/android-device-validation-0.10.3.md).
+Android host for OpenBGI, using Activity + SurfaceView + JNI.
+Supports ARM64 devices running Android 9 or newer. Game resources are supplied
+by the player and are not bundled with the application.
 
-Users who imported games into **OpenBGI UI Preview** need the in-place update
-for `org.openbgi.uipreview`, built by `tools/android/package-ui-preview.sh`.
-It preserves that package's data and signing key; it does not share games with
-`org.openbgi.port`. Neither APK bundles game resources or creates demo entries.
+The launcher provides a game library, directory import, per-game settings,
+search, sorting and user-selected covers. The main application and independent
+UI Preview package keep separate data and signing keys.
 
-Native library UI: illustrated cover cards, direct launch, search, recent/name
-sorting, per-game rename and user-selected covers. Settings are grouped into
-text/compatibility, display/input and optional key mappings; Cancel does not save.
-The library adapts between a bottom navigation bar and a landscape side rail.
-Guide, project information and crash-log export have their own pages. In-game
-shortcuts use a compact, collapsible overlay.
+## Text input
 
-Game resources are supplied by the player. User covers are copied to each game's
-`.openbgi/cover.jpg`; game titles and last-opened timestamps remain app metadata.
-No cover or game resources are downloaded or bundled. See
-[UI release notes and validation limits](../../docs/android-ui-0.10.md).
+Script text fields use Android input controls. Long-press a supported field
+and choose **初始文字编码** to preview its original bytes as SJIS, GBK or UTF-8.
+A valid selection replaces that field using the game's selected encoding.
+Input remains subject to the script's byte and character limits.
 
-This preview also reserves the edit session before asynchronously opening the
-Android keyboard. This prevents immediate B0 23 polls from dismissing a new field.
-Real-game black regions and mixed menu encodings remain unresolved. Game-level
-validation is left to the user's requested play testing; UI checks do not replace it.
-
-## Earlier input work
-
-Partially validated on Xiaomi Mi 8 / Android 10. Long-press a native text field,
-then select **初始文字编码** in the explicit operation dialog to reinterpret its
-original initial bytes as SJIS, GBK or UTF-8. A valid explicit selection replaces
-only that field, encoded using the current game's existing encoding. It does
-not press Enter, switch the game encoding or rewrite old saves.
-Candidates that cannot round-trip through the target encoding, exceed the field
-byte limit or violate its character filter are rejected instead of truncated.
-Numeric-only form fields do not expose this action. See
-[device evidence and limitations](../../docs/android-device-validation-0.9.1.md).
-Select-all/copy/cut/paste delegate to EditText. Nine input-host checks and
-controlled fault/log-cap checks pass; both games load existing saves.
-Real-game surname/comment entry still has a partial black-screen blocker;
-IME first-frame repaint and mixed menu encodings remain open.
+Release-specific changes and test results are linked from the
+[Android update history](../../docs/android-release-history.md).
 
 ## Install and import
 
-ARM64, Android 9 or newer. Install over 0.2/0.3 using the same signing key;
+ARM64, Android 9 or newer. Upgrade using the same package and signing key;
 do not uninstall if you want to retain app-local saves.
 
 The launcher lists imported games. Choose **添加游戏** and select the
@@ -117,7 +89,7 @@ game before switching or deleting. Deletion prompts explicitly because it also
 deletes that entry's app-local saves. The legacy external source directory is
 retained when deleting its library entry.
 
-The launcher provides **导出崩溃日志** even before importing a game. It exports
+The launcher provides **导出运行日志** even before importing a game. It exports
 engine logs, Java exceptions, native fatal signal records and available Android
 11+ system exit information. Recorded fatal native signals exit directly to
 avoid handler recursion and do not guarantee a system tombstone/full stack.
