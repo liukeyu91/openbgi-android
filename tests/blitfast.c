@@ -150,9 +150,46 @@ static void PartialOverlapBuffers(void)
     }
 }
 
+static uint32_t ArgbOver(uint32_t d,uint32_t s,int level)
+{
+    if(level>=256 || !(s>>24))return d;
+    if(level<=0 && (s>>24)==255)return s;
+    unsigned sa=level<=0?s>>24:(unsigned)(((uint64_t)s*(unsigned)(256-level))>>32);
+    unsigned t=((256-sa)*(d>>24))>>8,ra=sa+t;
+    if(!ra)ra=1;
+    unsigned fs=(sa<<8)/ra,fd=(t<<8)/ra;uint32_t out=ra<<24;
+    for(unsigned c=0;c<24;c+=8)out|=((Byte(s,c)*fs+Byte(d,c)*fd)>>8)<<c;
+    return out;
+}
+static void ArgbOverChecks(void)
+{
+    const int levels[]={0,1,127,255};
+    for(test=0;test<65536;test++)for(unsigned colour=0;colour<3;colour++){
+        uint32_t s=((test>>8)<<24)|(colour==0?0:colour==1?0xffffff:Rnd()&0xffffff);
+        uint32_t d=((test&255)<<24)|(Rnd()&0xffffff);
+        for(unsigned j=0;j<sizeof levels/sizeof levels[0];j++){
+            uint32_t value=d;Bmp_t source=Pixel(&s,PM_ARGB32),dest=Pixel(&value,PM_ARGB32);
+            Blit_Blend(&dest,&source,levels[j]);CHECK(value==ArgbOver(d,s,levels[j]));
+        }
+    }
+    for(test=0;test<1000;test++){
+        uint32_t data[128],reference[128];
+        for(unsigned i=0;i<128;i++)data[i]=reference[i]=Rnd();
+        int delta=(int)(test%7)-3,level=(int)(Rnd()%257);
+        for(unsigned y=0;y<3;y++)for(unsigned x=0;x<13;x++){
+            unsigned src=4+y*24+x,dst=src+delta;
+            reference[dst]=ArgbOver(reference[dst],reference[src],level);
+        }
+        Bmp_t source=Pixel(data+4,PM_ARGB32),dest=Pixel(data+4+delta,PM_ARGB32);
+        source.w=dest.w=13;source.h=dest.h=3;source.pitch=dest.pitch=24*4;
+        Blit_Blend(&dest,&source,level);CHECK(!memcmp(data,reference,sizeof data));
+    }
+}
+
 int main(void)
 {
-    Pixels();Buffers();AlphaBuffers();PartialOverlapBuffers();
+    Pixels();Buffers();AlphaBuffers();PartialOverlapBuffers();ArgbOverChecks();
     puts("PASS blitfast: 300000 pixels, 4000 cross-fade, 4000 alpha and 3000 partially overlapping buffers");
+    puts("PASS ARGB over: 786432 alpha-pair/colour/level cases and 1000 overlapping buffers");
     return 0;
 }

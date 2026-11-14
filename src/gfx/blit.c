@@ -173,7 +173,6 @@ static void AlphaCopy32_To2(Bmp_t* dst, const Bmp_t* src)
 		{
 			uint32_t sv = s[x], dv = d[x];
 			unsigned sa = sv >> 24, da, t, ra, fs, fd;
-			int i, out;
 			if(!(sv & 0xff000000u))
 				continue;
 			if(sa == 0xff)
@@ -186,13 +185,7 @@ static void AlphaCopy32_To2(Bmp_t* dst, const Bmp_t* src)
 			ra = t + sa;                  // resulting alpha
 			fs = (sa << 8) / ra;
 			fd = (t << 8) / ra;
-			out = (int)(ra << 24);
-			for(i = 0; i < 24; i += 8)
-			{
-				unsigned sc = (sv >> i) & 0xff, dc = (dv >> i) & 0xff;
-				out |= (int)(((sc * fs + dc * fd) >> 8) & 0xff) << i;
-			}
-			d[x] = (uint32_t)out;
+			d[x] = (ra << 24) | Blit_WeightedRgb8(dv, sv, fs, fd);
 		}
 	}
 }
@@ -336,9 +329,8 @@ static void Blend32_2to2(Bmp_t* dst, const Bmp_t* src, int level)
 		uint32_t* d = (uint32_t*)ROW(dst, y);
 		for(x = 0; x < src->w; x++)
 		{
-			uint32_t sv = s[x], dv = d[x], out;
+			uint32_t sv = s[x], dv = d[x];
 			unsigned sa, da, t, ra, fs, fd;
-			int i;
 			if(!(sv & 0xff000000u))
 				continue;
 			// mul by inv, high dword: (A * inv) >> 8 including the carry
@@ -351,14 +343,7 @@ static void Blend32_2to2(Bmp_t* dst, const Bmp_t* src, int level)
 				ra++;
 			fs = (sa << 8) / ra;
 			fd = (t << 8) / ra;
-			out = 0;
-			for(i = 0; i < 24; i += 8)
-			{
-				unsigned sc = (sv >> i) & 0xff, dc = (dv >> i) & 0xff;
-				out |= (((sc * fs + dc * fd) >> 8) & 0xff) << i;
-			}
-			out |= (uint32_t)Sat8((int)ra) << 24;
-			d[x] = out;
+			d[x] = ((uint32_t)Sat8((int)ra) << 24) | Blit_WeightedRgb8(dv, sv, fs, fd);
 		}
 	}
 }

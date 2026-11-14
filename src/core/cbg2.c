@@ -82,13 +82,52 @@ static uint32_t ReadBits(Bits_t* b, uint32_t n)
 	return v;
 }
 
-// the leaf reached from the root, a set bit taking the right child
-static uint32_t ReadSymbol(Bits_t* b, const CbgNode_t* nodes, uint32_t root, uint32_t leaves)
+typedef struct Huffman
 {
-	uint32_t node = root;
-	while(node >= leaves && node != 0xffffffffu)
-		node = ReadBits(b, 1) ? nodes[node].right : nodes[node].left;
-	return node < leaves ? node : 0;
+	const CbgNode_t* nodes;
+	uint32_t root, leaves;
+	struct { uint16_t symbol; uint8_t bits; } prefix[256];
+} Huffman_t;
+
+static void PrepareHuffman(Huffman_t* h, const CbgNode_t* nodes, uint32_t root, uint32_t leaves)
+{
+	uint32_t key;
+	h->nodes = nodes;
+	h->root = root;
+	h->leaves = leaves;
+	for(key = 0; key < 256; key++)
+	{
+		uint32_t node = root;
+		unsigned bits = 0;
+		while(node >= leaves && node != 0xffffffffu && bits < 8)
+		{
+			node = key & (0x80u >> bits) ? nodes[node].right : nodes[node].left;
+			bits++;
+		}
+		h->prefix[key].symbol = (uint16_t)node;
+		h->prefix[key].bits = node < leaves ? (uint8_t)bits : 0;
+	}
+}
+
+// Resolve short codes from the current byte only; never prefetch a next byte.
+static uint32_t ReadSymbol(Bits_t* b, const Huffman_t* h)
+{
+	uint32_t node = h->root;
+	if(node < h->leaves)
+		return node;
+	if(b->pos < b->len)
+	{
+		unsigned key = (uint8_t)(b->p[b->pos] << b->bit), bits = h->prefix[key].bits;
+		if(bits && bits <= 8 - b->bit)
+		{
+			b->bit += bits;
+			if(b->bit == 8) { b->bit = 0; b->pos++; }
+			return h->prefix[key].symbol;
+		}
+	}
+	while(node >= h->leaves && node != 0xffffffffu)
+		node = ReadBits(b, 1) ? h->nodes[node].right : h->nodes[node].left;
+	return node < h->leaves ? node : 0;
 }
 
 // 7 bits per byte, low group first; the length in *len
@@ -184,13 +223,13 @@ static int BuildTree(CbgNode_t* nodes, const uint32_t* weights, uint32_t leaves)
 /* the DC values: one difference per block, one predictor across the band
  * (the original keeps the low 16 bits); the AC stream starts at the next
  * byte boundary */
-static void DecodeDc(int16_t* coef, uint32_t count, Bits_t* b, const CbgNode_t* nodes, uint32_t root)
+static void DecodeDc(int16_t* coef, uint32_t count, Bits_t* b, const Huffman_t* h)
 {
 	int32_t pred = 0;
 	uint32_t i;
 	for(i = 0; i < count && b->pos < b->len; i += 64)
 	{
-		uint32_t s = ReadSymbol(b, nodes, root, DC_SYMBOLS);
+		uint32_t s = ReadSymbol(b, h);
 		uint32_t raw = ReadBits(b, s);
 		pred = (int16_t)(pred + SignExtend(raw, s));
 		coef[i] = (int16_t)pred;
@@ -203,7 +242,7 @@ static void DecodeDc(int16_t* coef, uint32_t count, Bits_t* b, const CbgNode_t* 
 }
 
 // the AC values of every block in zigzag order: run / size symbols, 0 ends the block, 0x0F skips sixteen
-static void DecodeAc(int16_t* coef, uint32_t count, Bits_t* b, const CbgNode_t* nodes, uint32_t root)
+static void DecodeAc(int16_t* coef, uint32_t count, Bits_t* b, const Huffman_t* h)
 {
 	uint32_t i;
 	for(i = 0; i < count && b->pos < b->len; i += 64)
@@ -211,7 +250,7 @@ static void DecodeAc(int16_t* coef, uint32_t count, Bits_t* b, const CbgNode_t* 
 		uint32_t k = 1;
 		while(k < 64)
 		{
-			uint32_t s = ReadSymbol(b, nodes, root, AC_SYMBOLS), size;
+			uint32_t s = ReadSymbol(b, h), size;
 			if(s == 0)
 				break;
 			if(s == 0x0f)
@@ -419,6 +458,31 @@ static void AlphaLz(uint8_t* buf, uint32_t bufLen, int pitch, const uint8_t* s, 
 
 // ---- the decoder ------------------------------------------------------------------------------
 
+// Remove padded columns without a variable-size memcpy call per pixel.
+static void CopyPixels(uint8_t* dst, const uint8_t* src, uint32_t w, uint32_t h, uint32_t padW, uint32_t bpp)
+{
+	uint32_t y, x, bytes = bpp / 8;
+	for(y = 0; y < h; y++)
+	{
+		const uint8_t* row = src + (size_t)y * padW * 4;
+		if(bytes == 4)
+		{
+			memcpy(dst, row, (size_t)w * 4);
+			dst += (size_t)w * 4;
+		}
+		else if(bytes == 3)
+		{
+			for(x = 0; x < w; x++, row += 4, dst += 3)
+			{
+				dst[0] = row[0];dst[1] = row[1];dst[2] = row[2];
+			}
+		}
+		else
+			for(x = 0; x < w; x++, row += 4, dst += bytes)
+				memcpy(dst, row, bytes);
+	}
+}
+
 uint32_t Cbg2_Decode(const void* src, void* dst)
 {
 	const CbgHeader_t* h = (const CbgHeader_t*)src;
@@ -433,6 +497,7 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 	uint32_t streamLen;
 	float q[2][64];
 	CbgNode_t *dcNodes, *acNodes;
+	Huffman_t dcDecoder, acDecoder;
 	int dcRoot, acRoot;
 	int16_t* coef;
 	uint8_t* buf;
@@ -468,6 +533,8 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 	}
 	dcNodes = (CbgNode_t*)BGI_Alloc(sizeof(CbgNode_t) * (2 * DC_SYMBOLS - 1));
 	dcRoot = BuildTree(dcNodes, weights, DC_SYMBOLS);
+	if(dcRoot >= 0)
+		PrepareHuffman(&dcDecoder, dcNodes, (uint32_t)dcRoot, DC_SYMBOLS);
 	for(i = 0; i < AC_SYMBOLS; i++)
 	{
 		uint32_t len;
@@ -476,6 +543,8 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 	}
 	acNodes = (CbgNode_t*)BGI_Alloc(sizeof(CbgNode_t) * (2 * AC_SYMBOLS - 1));
 	acRoot = BuildTree(acNodes, weights, AC_SYMBOLS);
+	if(acRoot >= 0)
+		PrepareHuffman(&acDecoder, acNodes, (uint32_t)acRoot, AC_SYMBOLS);
 	offsets = stream + n; // rows + 1 little-endian u32, relative to `stream`
 
 	memcpy(dst, s + 0x10, 0x10); // the in-memory image header, as for version 1
@@ -501,13 +570,13 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 		b.pos = 0;
 		b.bit = 0;
 		if(dcRoot >= 0)
-			DecodeDc(coef, count, &b, dcNodes, (uint32_t)dcRoot);
+			DecodeDc(coef, count, &b, &dcDecoder);
 		if(acRoot >= 0)
 		{
 			b.p += b.pos;
 			b.len = b.len > b.pos ? b.len - b.pos : 0;
 			b.pos = 0;
-			DecodeAc(coef, count, &b, acNodes, (uint32_t)acRoot);
+			DecodeAc(coef, count, &b, &acDecoder);
 		}
 		for(c = 0; c < cols; c++)
 		{
@@ -532,19 +601,7 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 				buf[i] = 0xff;
 	}
 
-	{ // the padded 32-bit rows to the tightly packed output
-		uint8_t* d = (uint8_t*)dst + 0x10;
-		uint32_t y, x, bytes = bpp / 8;
-		for(y = 0; y < hgt; y++)
-		{
-			const uint8_t* row = buf + y * padW * 4;
-			for(x = 0; x < w; x++, row += 4)
-			{
-				memcpy(d, row, bytes);
-				d += bytes;
-			}
-		}
-	}
+	CopyPixels((uint8_t*)dst + 0x10, buf, w, hgt, padW, bpp);
 	BGI_Free(coef);
 	BGI_Free(buf);
 	BGI_Free(acNodes);

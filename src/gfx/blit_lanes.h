@@ -26,4 +26,14 @@ static inline uint32_t Blit_BlendRgb7(uint32_t dst,uint32_t src,unsigned weight)
     uint32_t g=(((src&0xff00u)*weight+(dst&0xff00u)*inv)>>7)&0xff00u;
     return (dst&0xff000000u)|br|g;
 }
+
+/* Two independent 8.8 weights, whose sum is at most 256. Keep each
+ * channel's floor separately, including when the weights sum to 255. */
+static inline uint32_t Blit_WeightedRgb8(uint32_t dst,uint32_t src,unsigned sourceWeight,unsigned destWeight)
+{
+    const uint32_t rb=0x00ff00ffu;
+    uint32_t br=(((src&rb)*sourceWeight+(dst&rb)*destWeight)>>8)&rb;
+    uint32_t g=(((src&0xff00u)*sourceWeight+(dst&0xff00u)*destWeight)>>8)&0xff00u;
+    return br|g;
+}
 #endif

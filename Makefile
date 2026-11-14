@@ -300,6 +300,9 @@ bin/test_cbgcache$(EXE): tests/cbgcache.c $(LIB_OBJ) | bin
 bin/test_cbgfast$(EXE): tests/cbgfast.c src/core/cbg.c $(LIB_OBJ) | bin
 	$(CC) $(CFLAGS) -o $@ $< $(filter-out obj/$(PLATFORM)/core/cbg.o,$(LIB_OBJ)) $(LDLIBS)
 
+bin/test_cbg2fast$(EXE): tests/cbg2fast.c src/core/cbg2.c $(LIB_OBJ) | bin
+	$(CC) $(CFLAGS) -o $@ $< $(filter-out obj/$(PLATFORM)/core/cbg2.o,$(LIB_OBJ)) $(LDLIBS)
+
 # the WebAssembly file layer on the host, against the mock server of the test
 # (built apart: it defines the OS_File* functions the platform's back end has too)
 WASMFS_SRC := tests/wasmfs.c src/os/wasm/fs.c src/os/wasm/sjis.c src/os/wasm/host.c src/os/os_common.c \
