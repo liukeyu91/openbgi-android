@@ -7,6 +7,8 @@ final class InputKeys {
     interface Sink { void key(int action,int vk,int repeat); }
     private final Sink sink;
     private final Map<Long,Integer> held=new HashMap<>(); private final int[] refs=new int[256];
+    private int shortcutHeld;
+    private static final int SHORTCUT_DEVICE=Integer.MIN_VALUE,SHORTCUT_CODE=Integer.MIN_VALUE;
     InputKeys(Sink sink){this.sink=sink;}
     static int map(int key,boolean swapAB){
         if(key>=29 && key<=54)return 0x41+key-29; // A..Z
@@ -41,6 +43,14 @@ final class InputKeys {
         physical(device,-5,0x11,leftTrigger>.5f,0);physical(device,-6,0x11,rightTrigger>.5f,0);
     }
     void tap(int vk){if(vk<=0 || vk>=256)return;sink.key(0,vk,refs[vk]>0?1:0);if(refs[vk]==0)sink.key(1,vk,0);}
+    boolean toggleShortcut(int vk){
+        if(vk<=0 || vk>=256)return false;
+        boolean enable=shortcutHeld!=vk;releaseShortcut();
+        if(enable){physical(SHORTCUT_DEVICE,SHORTCUT_CODE,vk,true,0);shortcutHeld=vk;}
+        return enable;
+    }
+    boolean shortcutHeld(){return shortcutHeld!=0;}
+    void releaseShortcut(){if(shortcutHeld!=0){physical(SHORTCUT_DEVICE,SHORTCUT_CODE,shortcutHeld,false,0);shortcutHeld=0;}}
     void releaseDevice(int device){
         Iterator<Map.Entry<Long,Integer>> it=held.entrySet().iterator();
         while(it.hasNext()){
@@ -48,5 +58,5 @@ final class InputKeys {
             if((int)(e.getKey()>>32)==device){int vk=e.getValue();it.remove();if(--refs[vk]==0)sink.key(1,vk,0);}
         }
     }
-    void clear(){held.clear();for(int vk=1;vk<refs.length;vk++)if(refs[vk]>0){refs[vk]=0;sink.key(1,vk,0);}}
+    void clear(){held.clear();shortcutHeld=0;for(int vk=1;vk<refs.length;vk++)if(refs[vk]>0){refs[vk]=0;sink.key(1,vk,0);}}
 }

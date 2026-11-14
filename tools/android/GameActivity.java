@@ -42,6 +42,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private GameAudioFocus audioFocus;
     private LinearLayout interruption;
     private TextView interruptionText;
+    private Button skipButton;
     private TextInput textInput;
     private AlertDialog messageDialog;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -131,6 +132,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private boolean handleTouch(MotionEvent e) {
         if(!ready || !resumed || !focused || audioFocus==null || !audioFocus.running())return true;
         int action=e.getActionMasked();
+        if(action==MotionEvent.ACTION_DOWN)stopFastForward();
         if(action==MotionEvent.ACTION_DOWN && textInput!=null)textInput.commit();
         int w=surface.getWidth(),h=surface.getHeight();
         if(e.isFromSource(InputDevice.SOURCE_MOUSE)) {
@@ -152,13 +154,25 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
     private void cancelInput() {
         if(touch!=null)touch.cancel();if(keys!=null)keys.clear();mouseButtons=0;
+        updateSkipButton();
         if(ready && surface!=null)nativePointer(TouchInput.CANCEL,0,0,0,0,surface.getWidth(),surface.getHeight());
     }
     private void shortcut(int vk) {
         if(!ready || !resumed || audioFocus==null || !audioFocus.running())return;
+        stopFastForward();
         if(textInput!=null)textInput.pause();
         if(vk!=0)keys.tap(vk);
         else nativePointer(TouchInput.WHEEL,0,surface.getWidth()/2f,surface.getHeight()/2f,1,surface.getWidth(),surface.getHeight());
+    }
+    private void updateSkipButton(){
+        if(skipButton!=null){boolean on=keys!=null && keys.shortcutHeld();skipButton.setText(on?"停止快进":"快进");skipButton.setSelected(on);
+            skipButton.setBackground(Ui.touch(this,on?0xe091452d:0xe0246f5d,12));}
+    }
+    private void stopFastForward(){if(keys!=null)keys.releaseShortcut();updateSkipButton();}
+    private void toggleFastForward(){
+        if(!ready || !resumed || !focused || keys==null || audioFocus==null || !audioFocus.running())return;
+        if(textInput!=null)textInput.pause();
+        keys.toggleShortcut(settings.skipKey);updateSkipButton();
     }
     private void addVirtualKeys(FrameLayout root) {
         LinearLayout container=Ui.column(this);
@@ -173,7 +187,9 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             final int code=codes[i];Button button=Ui.button(this,names[i],false,()->shortcut(code));button.setTextSize(12);button.setTextColor(0xfff5f5f0);button.setBackground(Ui.touch(this,0xe0246f5d,12));
             LinearLayout.LayoutParams keyParams=new LinearLayout.LayoutParams(-2,Ui.dp(this,48));keyParams.rightMargin=Ui.dp(this,6);row.addView(button,keyParams);
         }
-        toggle.setOnClickListener(v->{boolean open=scroll.getVisibility()!=View.VISIBLE;scroll.setVisibility(open?View.VISIBLE:View.GONE);toggle.setText(open?"收起快捷键  ⌃":"快捷键  ⌄");});
+        skipButton=Ui.button(this,"快进",false,this::toggleFastForward);skipButton.setTextSize(12);skipButton.setTextColor(0xfff5f5f0);
+        skipButton.setBackground(Ui.touch(this,0xe0246f5d,12));row.addView(skipButton,new LinearLayout.LayoutParams(-2,Ui.dp(this,48)));
+        toggle.setOnClickListener(v->{boolean open=scroll.getVisibility()!=View.VISIBLE;if(!open)stopFastForward();scroll.setVisibility(open?View.VISIBLE:View.GONE);toggle.setText(open?"收起快捷键  ⌃":"快捷键  ⌄");});
         FrameLayout.LayoutParams floating=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT);floating.setMargins(Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12),0);root.addView(container,floating);
     }
     @Override public void onInputDeviceAdded(int deviceId) {}
@@ -231,6 +247,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         if(resumed && audioFocus != null && !audioFocus.running()) return super.dispatchKeyEvent(event);
         if(textInput != null && textInput.hasFocus()) return super.dispatchKeyEvent(event);
         int vk=InputKeys.map(event.getKeyCode(),settings!=null && settings.swapAB);
+        if(event.getAction()==KeyEvent.ACTION_DOWN && vk!=0 && (settings==null || vk!=settings.skipKey))stopFastForward();
         if(ready && !focused && vk!=0)return true;
         if(ready && vk!=0 && (event.getAction()==KeyEvent.ACTION_DOWN || event.getAction()==KeyEvent.ACTION_UP)){
             keys.physical(event.getDeviceId(),event.getKeyCode(),vk,event.getAction()==KeyEvent.ACTION_DOWN,event.getRepeatCount());return true;
@@ -239,6 +256,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
     @Override public void onBackPressed() {
         if(resumed && audioFocus != null && !audioFocus.running()) return;
+        stopFastForward();
         if(textInput != null && textInput.hasFocus()) textInput.pause();
         else if(ready) keys.tap(0x1b);
     }

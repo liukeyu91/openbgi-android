@@ -44,13 +44,24 @@ public final class InputContractTest {
         e.events.clear();k.physical(-1,66,13,true,0);k.tap(13);check(e.events.equals(Arrays.asList("k0:13:0","k0:13:1")));k.clear();check(e.events.get(2).equals("k1:13:0"));
         e.events.clear();k.physical(0,66,13,false,0);k.physical(0,99,256,true,0);k.tap(0);check(e.events.isEmpty());
         k.axes(0,-1,0,0,0,0,0);k.axes(0,1,0,0,0,0,0);k.clear();check(e.events.equals(Arrays.asList("k0:37:0","k1:37:0","k0:39:0","k1:39:0")));
+        e.events.clear();check(k.toggleShortcut(17) && k.shortcutHeld());check(e.events.equals(Arrays.asList("k0:17:0")));
+        check(!k.toggleShortcut(17) && !k.shortcutHeld());check(e.events.equals(Arrays.asList("k0:17:0","k1:17:0")));
+        e.events.clear();k.physical(3,113,17,true,0);k.toggleShortcut(17);k.releaseShortcut();check(e.events.equals(Arrays.asList("k0:17:0")));
+        k.physical(3,113,17,false,0);check(e.events.equals(Arrays.asList("k0:17:0","k1:17:0")));
+        e.events.clear();k.toggleShortcut(17);k.physical(3,113,17,true,0);k.physical(3,113,17,false,0);
+        check(e.events.equals(Arrays.asList("k0:17:0")));k.clear();check(!k.shortcutHeld() && e.events.equals(Arrays.asList("k0:17:0","k1:17:0")));
+        e.events.clear();k.toggleShortcut(17);k.toggleShortcut(65);k.releaseShortcut();
+        check(e.events.equals(Arrays.asList("k0:17:0","k1:17:0","k0:65:0","k1:65:0")));
+        e.events.clear();check(!k.toggleShortcut(0) && !k.toggleShortcut(256) && !k.shortcutHeld() && e.events.isEmpty());
     }
     static void settings() throws Exception {
         Path root=Files.createTempDirectory("openbgi-input-settings-");File a=root.resolve("游戏 A").toFile(),b=root.resolve("game B").toFile();
         Files.createDirectories(new File(a,".openbgi").toPath());Files.write(new File(a,".openbgi/encoding.txt").toPath(),"gbk".getBytes(StandardCharsets.UTF_8));
         GameSettings s=GameSettings.load(a);check(s.encoding.equals("gbk") && s.profile.equals("auto") && s.scale==0 && s.virtualKeys);
-        s.profile="1.616";s.scale=2;s.touch=1;s.virtualKeys=false;s.swapAB=true;s.saveKey=116;s.loadKey=120;s.backlogKey=33;s.save(a);
+        check(s.skipKey==17);
+        s.profile="1.616";s.scale=2;s.touch=1;s.virtualKeys=false;s.swapAB=true;s.saveKey=116;s.loadKey=120;s.backlogKey=33;s.skipKey=65;s.save(a);
         GameSettings v=GameSettings.load(a);check(v.profile.equals("1.616") && v.scale==2 && v.touch==1 && !v.virtualKeys && v.swapAB && v.saveKey==116 && v.loadKey==120 && v.backlogKey==33);
+        check(v.skipKey==65 && GameSettings.load(b).skipKey==17);
         check(!new File(a,".openbgi/settings.ini.tmp").exists());check(GameSettings.load(b).encoding.equals("sjis"));
         GameSettings.load(b).save(b);check(GameSettings.load(a).scale==2 && GameSettings.load(b).scale==0);
         v.encoding="utf8";check(GameSettings.load(a).encoding.equals("gbk")); // cancelled edit never writes
@@ -59,6 +70,10 @@ public final class InputContractTest {
         check(Arrays.equals(before,Files.readAllBytes(new File(a,".openbgi/settings.ini").toPath())));
         Files.write(new File(a,".openbgi/settings.ini").toPath(),"encoding=bad\nprofile=1.616 --bad\nscale=99\nmenuKey=0\nvirtualKeys=bad\n".getBytes(StandardCharsets.UTF_8));
         s=GameSettings.load(a);check(s.encoding.equals("gbk") && s.profile.equals("auto") && s.scale==0 && s.menuKey==27 && s.virtualKeys);
+        check(s.skipKey==17);
+        Files.write(new File(a,".openbgi/settings.ini").toPath(),"skipKey=999\n".getBytes(StandardCharsets.UTF_8));
+        check(GameSettings.load(a).skipKey==17);s.skipKey=0;
+        try{s.save(a);throw new AssertionError("bad skip key accepted");}catch(IOException expected){checks++;}
         check(new String(Files.readAllBytes(new File(a,".openbgi/encoding.txt").toPath()),StandardCharsets.UTF_8).equals("gbk"));
         File files=root.resolve("files").toFile();files.mkdirs();Files.write(new File(files,"active-game.txt").toPath(),"../escape".getBytes(StandardCharsets.UTF_8));
         try{GameSettings.activeGame(files);throw new AssertionError("path escaped");}catch(IOException expected){checks++;}

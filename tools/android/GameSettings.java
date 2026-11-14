@@ -12,7 +12,7 @@ final class GameSettings {
     boolean automaticEncoding = true;
     String encodingDetection = "";
     int encodingDetectorVersion;
-    int scale, touch, saveKey = 0x53, loadKey = 0x4c, backlogKey, menuKey = 0x1b;
+    int scale, touch, saveKey = 0x53, loadKey = 0x4c, backlogKey, menuKey = 0x1b, skipKey = 0x11;
     boolean virtualKeys = true, swapAB;
     private static boolean member(String s, String[] options) { return Arrays.asList(options).contains(s); }
     private static int number(Properties p, String key, int fallback, int min, int max) {
@@ -49,6 +49,7 @@ final class GameSettings {
         s.scale = number(p,"scale",0,0,2); s.touch = number(p,"touch",0,0,1);
         s.saveKey = number(p,"saveKey",0x53,1,255); s.loadKey = number(p,"loadKey",0x4c,1,255);
         s.backlogKey = number(p,"backlogKey",0,0,255); s.menuKey = number(p,"menuKey",0x1b,1,255);
+        s.skipKey = number(p,"skipKey",0x11,1,255);
         s.virtualKeys = bool(p,"virtualKeys",true); s.swapAB = bool(p,"swapAB",false);
         return s;
     }
@@ -84,7 +85,7 @@ final class GameSettings {
     void save(File game) throws IOException {
         if(!member(encoding,new String[]{"sjis","gbk","utf8"}) || !member(profile,EngineProfiles.NAMES) ||
             scale < 0 || scale > 2 || touch < 0 || touch > 1 || saveKey < 1 || saveKey > 255 ||
-            loadKey < 1 || loadKey > 255 || backlogKey < 0 || backlogKey > 255 || menuKey < 1 || menuKey > 255)
+            loadKey < 1 || loadKey > 255 || backlogKey < 0 || backlogKey > 255 || menuKey < 1 || menuKey > 255 || skipKey < 1 || skipKey > 255)
             throw new IOException("无效的游戏设置");
         File config = new File(game,".openbgi"); Files.createDirectories(config.toPath());
         Properties p = new Properties();
@@ -95,6 +96,7 @@ final class GameSettings {
         p.setProperty("scale",Integer.toString(scale)); p.setProperty("touch",Integer.toString(touch));
         p.setProperty("saveKey",Integer.toString(saveKey)); p.setProperty("loadKey",Integer.toString(loadKey));
         p.setProperty("backlogKey",Integer.toString(backlogKey)); p.setProperty("menuKey",Integer.toString(menuKey));
+        p.setProperty("skipKey",Integer.toString(skipKey));
         p.setProperty("virtualKeys",Boolean.toString(virtualKeys)); p.setProperty("swapAB",Boolean.toString(swapAB));
         Path file = new File(config,"settings.ini").toPath(), temp = file.resolveSibling("settings.ini.tmp");
         try {
