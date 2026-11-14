@@ -449,6 +449,57 @@ static int Opcode_Mod64(Thread_t* t) // 54 (1.69/472 on): dst, a, b →
 	return 0;
 }
 
+/* The later vector operations use signed 16.16 cells. Float conversion
+ * rounds using the current mode, then snaps fractions within 64 units of
+ * an integer to that integer. Keep unsigned arithmetic for negative cells
+ * and the x86 conversion's indefinite result on overflow. */
+static uint32_t VectorFixed(float value)
+{
+	float scaled = value * 65536.0f;
+	uint32_t result, whole, fraction;
+	if(!(scaled >= -2147483648.0f && scaled < 2147483648.0f))
+		result = 0x80000000u;
+	else
+		result = (uint32_t)(int32_t)nearbyintf(scaled);
+	whole = result & 0xffff0000u;
+	fraction = result - whole;
+	if(fraction < 64) return whole;
+	if(fraction > 0xffc0) return whole + 0x10000u;
+	return result;
+}
+
+/* 1.636 on: normalise xyz and put the original length in the fourth cell,
+ * ignoring the input's fourth cell. Both vectors occupy 16 bytes. Read
+ * before writing, including when the ranges overlap or are unaligned.
+ * The original uses single-precision reciprocal-square-root refinement;
+ * sqrtf supplies a portable reciprocal, with the same fixed-cell rounding. */
+static int Opcode_VectorNormalize(Thread_t* t) // 5D (1.636 on): dst, src →
+{
+	const void* src = PopPtr(t);
+	void* dst = PopPtr(t);
+	int32_t input[4];
+	uint32_t output[4] = {0, 0, 0, 0};
+	float x, y, z, inverse;
+	volatile float xx, yy, zz, sum;
+	memcpy(input, src, sizeof input);
+	x = (float)input[0] * (1.0f / 65536.0f);
+	y = (float)input[1] * (1.0f / 65536.0f);
+	z = (float)input[2] * (1.0f / 65536.0f);
+	xx = x * x; yy = y * y; zz = z * z;
+	sum = zz + yy;
+	sum = sum + xx;
+	if(sum > 0.0f)
+	{
+		inverse = 1.0f / sqrtf(sum);
+		output[0] = VectorFixed(x * inverse);
+		output[1] = VectorFixed(y * inverse);
+		output[2] = VectorFixed(z * inverse);
+		output[3] = VectorFixed(sum * inverse);
+	}
+	memcpy(dst, output, sizeof output);
+	return 0;
+}
+
 // 1.69 build 472 on: put the string on the clipboard as CF_TEXT; 1 when done
 static int Opcode_ClipboardSet(Thread_t* t) // 7E (1.69/472 on): text → ok
 {
@@ -1349,6 +1400,7 @@ void Vm_OptableMainInit(void)
 		{0x52, Opcode_Mul64, GEN_1_69_472, GEN_LAST},
 		{0x53, Opcode_Div64, GEN_1_69_472, GEN_LAST},
 		{0x54, Opcode_Mod64, GEN_1_69_472, GEN_LAST},
+		{0x5d, Opcode_VectorNormalize, GEN_1_636, GEN_LAST},
 		{0x60, Opcode_Memcpy, GEN_FIRST, GEN_LAST},
 		{0x61, Opcode_Memclr, GEN_FIRST, GEN_LAST},
 		{0x62, Opcode_Memset, GEN_FIRST, GEN_LAST},

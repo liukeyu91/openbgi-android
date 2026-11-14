@@ -57,6 +57,7 @@ const AsmOpStack_t kAsmOpStack[] = {
 	{0x00, 0x52, GEN_1_69_472, GEN_LAST, 3, 0},
 	{0x00, 0x53, GEN_1_69_472, GEN_LAST, 3, 0},
 	{0x00, 0x54, GEN_1_69_472, GEN_LAST, 3, 0},
+	{0x00, 0x5d, GEN_1_636, GEN_LAST, 2, 0},
 	{0x00, 0x60, GEN_FIRST, GEN_LAST, 3, 0},
 	{0x00, 0x61, GEN_FIRST, GEN_LAST, 2, 0},
 	{0x00, 0x62, GEN_FIRST, GEN_LAST, 3, 0},

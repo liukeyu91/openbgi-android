@@ -756,6 +756,7 @@ const AsmOpName_t kAsmOpNames[] = {
 	{0x0, 0x52, GEN_1_69_472, GEN_LAST, "mul64"},
 	{0x0, 0x53, GEN_1_69_472, GEN_LAST, "div64"},
 	{0x0, 0x54, GEN_1_69_472, GEN_LAST, "mod64"},
+	{0x0, 0x5d, GEN_1_636, GEN_LAST, "vector_normalize"},
 	{0x0, 0x56, GEN_FIRST, GEN_LAST, "fixmul"},
 	{0x0, 0x57, GEN_FIRST, GEN_LAST, "fixdiv"},
 	{0x0, 0x58, GEN_FIRST, GEN_LAST, "vadd"},

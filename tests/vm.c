@@ -1291,6 +1291,57 @@ static void TestFiles(void)
 	Vm_TablesInit();
 }
 
+static void NormalizeAt(uint32_t dst, uint32_t src)
+{
+	Asm_t a = {{0}, 0};
+	PushI32(&a, 0x12345678); // sentinel below the two consumed pointers
+	PushI32(&a, DataPtr(dst));
+	PushI32(&a, DataPtr(src));
+	Op(&a, 0x5d);
+	CHECK(Eval(&a) == 0x12345678);
+}
+
+static void TestVectorNormalize(void)
+{
+	static const struct { int32_t in[4], out[4]; } cases[] = {
+		{{0,0,0,123456}, {0,0,0,0}},
+		{{65536,0,0,99}, {65536,0,0,65536}},
+		{{0,-131072,0,65536}, {0,-65536,0,131072}},
+		{{0,0,32768,-1}, {0,0,65536,32768}},
+		{{196608,262144,0,0}, {39322,52429,0,327680}},
+		{{-196608,0,262144,0}, {-39322,0,52429,327680}},
+		{{0,0,1,123}, {0,0,65536,0}},
+		{{INT32_MIN,0,0,0}, {-65536,0,0,INT32_MIN}},
+		{{65536,1,0,0}, {65536,0,0,65536}},
+		{{65536,64,0,0}, {65536,64,0,65536}},
+		{{65536,-64,0,0}, {65536,-64,0,65536}}
+	};
+	size_t i;
+	CHECK(Engine_SelectProfile("1.616")); Vm_TablesInit();
+	CHECK(vm_optable_main[0x5d] == NULL);
+	CHECK(Engine_SelectProfile("1.636")); Vm_TablesInit();
+	CHECK(vm_optable_main[0x5d] && vm_optable_main[0x5d] != Opcode_NotImplemented);
+	for(i = 0; i < BGI_COUNTOF(cases); ++i)
+	{
+		uint32_t offsets[][2] = {{0x200,0x300},{0x301,0x301},{0x305,0x301}};
+		size_t j;
+		for(j = 0; j < BGI_COUNTOF(offsets); ++j)
+		{
+			uint8_t* data = gT->data;
+			uint32_t dst = offsets[j][0], src = offsets[j][1];
+			memset(data + 0x1ff, 0xa5, 0x120);
+			memcpy(data + src, cases[i].in, 16);
+			NormalizeAt(dst, src);
+			CHECK(!memcmp(data + dst, cases[i].out, 16));
+			CHECK(data[dst-1] == (dst == src+4 ? ((const uint8_t*)cases[i].in)[3] : 0xa5));
+			CHECK(data[dst+16] == 0xa5);
+		}
+	}
+	CHECK(Engine_SelectProfile("1.667")); Vm_TablesInit();
+	CHECK(vm_optable_main[0x5d] && vm_optable_main[0x5d] != Opcode_NotImplemented);
+	CHECK(Engine_SelectProfile("1.69/444")); Vm_TablesInit();
+}
+
 // make the thread, run every group; exit status 1 when any check failed
 int main(void)
 {
@@ -1310,6 +1361,7 @@ int main(void)
 	TestLaterBuilds();
 	TestBorrower();
 	TestFiles();
+	TestVectorNormalize();
 	Thread_Delete(gT);
 	OS_Shutdown();
 	if(gFails)
