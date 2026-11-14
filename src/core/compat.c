@@ -35,9 +35,11 @@ int Compat_CheckProgram(const uint8_t* file, uint32_t size, CompatResult_t* resu
 	DisMap_t map;
 	uint32_t off;
 	memset(result,0,sizeof *result);
-	/* Refuse damaged headers rather than the disassembler's recovery mode. */
+	/* Bound the declared extent too. Shortened translation files may retain
+	 * their original size: analyze the available bytes and report the header
+	 * discrepancy through Dis_Analyze instead of skipping the whole module. */
 	if(!file || size < 16 || size > COMPAT_MAX_PROGRAM || Read32(file) != 16 ||
-		!Read32(file+4) || Read32(file+4) > size-16)
+		size == 16 || !Read32(file+4) || Read32(file+4) > COMPAT_MAX_PROGRAM)
 		return 0;
 	if(!Dis_Analyze(file,size,gEngine->gen,NULL,&map))return 0;
 	result->problems = (uint32_t)map.problems;

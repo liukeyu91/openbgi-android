@@ -170,10 +170,10 @@ static inline uint32_t Thread_GetId(Thread_t* t)
 
 // drop every module record; the code area counts as empty afterwards
 void Thread_FreeModules(Thread_t* t);
-/* append the program `file` (a "._bp" image with a ProgramHeader_t) to the
- * code area under `name` and return the offset of its first byte, or
- * 0x80000000 when the code area has no room for it ("80 40", "80 44") */
-uint32_t Thread_LoadModule(Thread_t* t, const void* file, const char* name);
+/* Append `fileSize` bytes of a "._bp" image under `name`. Keep the declared
+ * module extent; a missing tail is zeroed without reading beyond the file.
+ * Returns the module base, or 0x80000000 for an invalid header or no room. */
+uint32_t Thread_LoadModule(Thread_t* t, const void* file, uint32_t fileSize, const char* name);
 // drop the module loaded last ("80 41"); the number left, or 0x80000001 when there was none
 uint32_t Thread_UnloadLastModule(Thread_t* t);
 /* the module records as an array, most recently loaded first, into *out

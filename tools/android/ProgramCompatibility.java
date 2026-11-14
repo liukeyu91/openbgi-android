@@ -25,6 +25,7 @@ final class ProgramCompatibility {
     static final class Result {
         String profile="",error="";int programs,checked,skipped,problems;long instructions;boolean limited;
         final SortedMap<Integer,Finding> findings=new TreeMap<>();
+        final List<String> problemLocations=new ArrayList<>();
         String summary(){
             if(!error.isEmpty() || profile.isEmpty())return "检查未完成";
             if(!findings.isEmpty())return "发现 "+findings.size()+" 种缺失或不支持的指令";
@@ -45,7 +46,10 @@ final class ProgramCompatibility {
                 if(finding.occurrences>finding.locations.size())text.append("\n另有 ").append(finding.occurrences-finding.locations.size()).append(" 个程序使用。");
             }
             if(skipped>0)text.append("\n\n未能读取或分析 ").append(skipped).append(" 个程序。");
-            if(problems>0)text.append("\n有 ").append(problems).append(" 个程序包含无法完整识别的代码。");
+            if(problems>0){
+                text.append("\n有 ").append(problems).append(" 个程序的文件头或代码存在异常。");
+                for(String location:problemLocations)text.append("\n").append(location);
+            }
             if(limited)text.append("\n部分资源未纳入检查，结果不完整。");
             text.append("\n\n检查范围为导入资源中的 ._bp 程序。动态加载、Windows EXE 内的资源和其他脚本格式不在此检查范围。\n静态检查不代表完整流程兼容。");
             return text.toString();
@@ -140,7 +144,15 @@ final class ProgramCompatibility {
                 if(result==null || result.length<5 || result[0]!=1){r.skipped++;continue;}
                 int count=result[4];
                 if(count<0 || count>64 || result.length!=5+count*3)throw new IOException("无效的检查结果");
-                r.checked++;r.instructions+=result[1];if(result[2]>0)r.problems++;
+                r.checked++;r.instructions+=result[1];
+                if(result[2]>0){
+                    r.problems++;
+                    if(r.problemLocations.size()<8){
+                        String source=entry.source;
+                        if(source.length()>480)source=source.substring(0,128)+"…"+source.substring(source.length()-350);
+                        r.problemLocations.add(source);
+                    }
+                }
                 if(result[3]>count)r.limited=true;
                 for(int i=0;i<count;i++){
                     int opcode=result[5+i*3],offset=result[6+i*3],kind=result[7+i*3],key=(kind<<16)|opcode;

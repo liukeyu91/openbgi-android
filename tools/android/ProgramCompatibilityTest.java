@@ -19,6 +19,7 @@ public final class ProgramCompatibilityTest {
         }
         public int[] analyze(byte[] data){
             analyzed++;if(data.length<18 || data[0]!=16)return new int[]{0,0,0,0,0};
+            if(data[4]>data.length-16)return new int[]{1,2,1,0,0};
             return data[16]==0x56?new int[]{1,2,0,1,1,0x56,0,1}:new int[]{1,2,0,0,0};
         }
     }
@@ -61,6 +62,12 @@ public final class ProgramCompatibilityTest {
         Files.write(broken.resolve("invalid.arc"),new byte[]{1,2,3});result=scan(broken,"1.636",new Analyzer());check(result.limited);
         Path pack=Files.createDirectory(root.resolve("pack"));Files.write(pack.resolve("system.arc"),EncodingProbeTest.archive(new String[]{"ipl._bp"},new byte[][]{program(0x17)},false));
         check(scan(pack,"auto",new Analyzer()).checked==1);
+        Path shortened=Files.createDirectory(root.resolve("shortened"));byte[] shortFile=program(0x17);
+        EncodingProbeTest.put(shortFile,4,32);Files.write(shortened.resolve("shortened._bp"),shortFile);
+        result=scan(shortened,"1.636",new Analyzer());
+        check(result.checked==1 && result.skipped==0 && result.problems==1 && result.findings.isEmpty());
+        check(result.report().contains("文件头或代码存在异常") && result.report().contains("shortened._bp"));
+        check(result.summary().equals("检查不完整"));
         Thread.currentThread().interrupt();
         try{scan(game,"auto",new Analyzer());throw new AssertionError("Cancellation ignored");}catch(InterruptedIOException expected){checks++;}finally{Thread.interrupted();}
         Path config=Files.createDirectory(root.resolve("external-entry"));

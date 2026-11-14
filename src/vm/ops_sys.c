@@ -820,7 +820,7 @@ static int Opcode_Sys_LoadProgram(Thread_t* t) // 80 40: arc, name → base
 	uint32_t n = LoadFile(image, arc, name);
 	if(n != 0)
 	{
-		uint32_t base = Thread_LoadModule(t, image, name);
+		uint32_t base = Thread_LoadModule(t, image, n, name);
 		if(base == 0x80000000u)
 			SYS_ERROR(t, MSG_CODE_AREA_FULL, arc, name);
 		Thread_Push(t, base);

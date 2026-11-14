@@ -29,6 +29,7 @@ typedef struct UserOp // 8 bytes: one registered slot
 {
 	char* name;     // heap copy of the file name
 	uint8_t* image; // copy of the loaded program
+	uint32_t size;  // actual image length, including its header
 } UserOp_t;
 
 #define USEROP_SLOTS 0xf0                // slots 00 .. EF; F0 .. FF are the management sub-opcodes
@@ -77,6 +78,7 @@ static int UserOp_Register(uint32_t slot, const char* arc, const char* name)
 		UserOp_t* u = (UserOp_t*)BGI_Alloc(sizeof(UserOp_t));
 		gUserOps[slot] = u;
 		u->name = BGI_Strdup(name);
+		u->size = n;
 		u->image = (uint8_t*)BGI_Alloc(n);
 		memcpy(u->image, buf, n);
 	}
@@ -165,13 +167,13 @@ int Opcode_User(Thread_t* t)
 		sprintf(msg, MSG_UNDEF_USEROP, sub);
 		ScriptError(msg, t);
 	}
-	base = Thread_LoadModule(t, mediation, "Mediation program");
+	base = Thread_LoadModule(t, mediation, sizeof mediation, "Mediation program");
 	if(base == 0x80000000u)
 	{
 		sprintf(msg, MSG_USEROP_CODE_FULL, sub);
 		ScriptError(msg, t);
 	}
-	if(Thread_LoadModule(t, gUserOps[sub]->image, gUserOps[sub]->name) == 0x80000000u)
+	if(Thread_LoadModule(t, gUserOps[sub]->image, gUserOps[sub]->size, gUserOps[sub]->name) == 0x80000000u)
 	{
 		sprintf(msg, MSG_USEROP_CODE_FULL, sub);
 		ScriptError(msg, t);

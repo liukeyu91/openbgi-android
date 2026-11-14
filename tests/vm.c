@@ -973,7 +973,7 @@ static void TestBorrower(void)
 	memset(prog, 0, sizeof prog);
 	h->codeOffset = 16;
 	h->codeSize = 0x40;
-	CHECK(Thread_LoadModule(l, prog, "lender") == 0 && l->codeUsed == 0x40);
+	CHECK(Thread_LoadModule(l, prog, sizeof prog, "lender") == 0 && l->codeUsed == 0x40);
 	CHECK(Thread_SpawnBorrower(l, 0x40, 0x400, 0x300, 0x10, &a) == 0);
 	CHECK(a->lender == l && a->code == l->code && a->data == l->data && a->heap == l->heap);
 	CHECK(a->codeBase == 0xc00 && a->codeUsed == 0xc00 && a->codeSize == 0x1000);
@@ -985,8 +985,8 @@ static void TestBorrower(void)
 	CHECK(l->codeSize == 0xa00 && l->dataSize == 0xc00 && l->loanCount == 2);
 	CHECK(Thread_SpawnBorrower(l, 0x40, 0x9c1, 0x10, 0, &g) == 2 && g == NULL);                      // into the lender's module
 	CHECK(Thread_SpawnBorrower(l, 0x40, 0x10, 0xc01, 0, &g) == 3 && g == NULL && l->loanCount == 2); // more data than is left
-	CHECK(Thread_LoadModule(a, prog, "borrower") == 0xc00 && a->codeUsed == 0xc40);
-	CHECK(Thread_LoadModule(l, prog, "lender2") == 0x40); // the lender's own loads stay below its loans
+	CHECK(Thread_LoadModule(a, prog, sizeof prog, "borrower") == 0xc00 && a->codeUsed == 0xc40);
+	CHECK(Thread_LoadModule(l, prog, sizeof prog, "lender2") == 0x40); // the lender's own loads stay below its loans
 
 	// a call and the returns of a borrower: its frames are in the lender's data area
 	s.len = 0;
@@ -1026,7 +1026,7 @@ static void TestBorrower(void)
 	CHECK(l->next && l->next->codeBase == 0xe00 && l->next->ip == 0x10);
 	// "80 41": a borrower may unload its last module (its main program is the lender's), the lender may not
 	g = l->next;
-	CHECK(Thread_LoadModule(g, prog, "sub") == 0xe00);
+	CHECK(Thread_LoadModule(g, prog, sizeof prog, "sub") == 0xe00);
 	s.len = 0;
 	A8(&s, 0x80);
 	A8(&s, 0x41);
@@ -1037,7 +1037,7 @@ static void TestBorrower(void)
 	Thread_SetIP(g, 0x100);
 	g->sp = 0;
 	CHECK(Step(g) == 4 && g->sp == 2 && g->stack[0] == 0 && g->stack[1] == 0x80000001u && g->codeUsed == 0xe00);
-	CHECK(Thread_LoadModule(l, prog, "main") != 0x80000000u);
+	CHECK(Thread_LoadModule(l, prog, sizeof prog, "main") != 0x80000000u);
 	if(BGI_TRY(f))
 	{
 		RunOn(l, &s);
@@ -1421,6 +1421,41 @@ static void TestVectorNormalize(void)
 }
 
 // make the thread, run every group; exit status 1 when any check failed
+static void TestModuleBounds(void)
+{
+	Thread_t* t = Thread_New(16, 128, 128);
+	uint8_t file[32] = {0};
+	ProgramHeader_t header = {16, 32};
+	uint32_t i;
+	puts("module file bounds");
+	memcpy(file, &header, sizeof header);
+	file[16] = 0x17;file[17] = 0x12;file[18] = 0x34;
+	memset(file + 19, 0xcc, sizeof file - 19);
+	memset(t->code, 0xa5, 128);
+	CHECK(Thread_LoadModule(t, file, 19, "shortened") == 0);
+	CHECK(t->moduleCount == 1 && t->codeUsed == 32 && t->modules->size == 32);
+	CHECK(!memcmp(t->code, file + 16, 3));
+	for(i = 3; i < 32; i++)CHECK(t->code[i] == 0);
+	CHECK(t->code[32] == 0xa5);
+	header.codeSize = 4;memcpy(file, &header, sizeof header);
+	CHECK(Thread_LoadModule(t, file, sizeof file, "next") == 32 && t->codeUsed == 36);
+	CHECK(!memcmp(t->code + 32, file + 16, 4) && t->code[36] == 0xa5);
+	CHECK(Thread_LoadModule(t, NULL, 16, "null") == 0x80000000u);
+	CHECK(Thread_LoadModule(t, file, 7, "short header") == 0x80000000u);
+	header.codeOffset = 0xffffffffu;memcpy(file, &header, sizeof header);
+	CHECK(Thread_LoadModule(t, file, sizeof file, "offset") == 0x80000000u);
+	header.codeOffset = 32;memcpy(file, &header, sizeof header);
+	CHECK(Thread_LoadModule(t, file, sizeof file, "empty") == 0x80000000u);
+	header.codeOffset = 16;header.codeSize = 0xffffffffu;memcpy(file, &header, sizeof header);
+	CHECK(Thread_LoadModule(t, file, sizeof file, "overflow") == 0x80000000u);
+	header.codeSize = 0;memcpy(file, &header, sizeof header);
+	CHECK(Thread_LoadModule(t, file, sizeof file, "no code") == 0x80000000u);
+	CHECK(t->moduleCount == 2 && t->codeUsed == 36);
+	CHECK(Thread_UnloadLastModule(t) == 1 && t->codeUsed == 32);
+	CHECK(Thread_UnloadLastModule(t) == 0 && t->codeUsed == 0);
+	Thread_Delete(t);
+}
+
 int main(void)
 {
 	setenv("BGI_MSGBOX_STDERR", "1", 1); // error boxes go to stderr instead of a dialog
@@ -1441,6 +1476,7 @@ int main(void)
 	TestFiles();
 	TestVectorNormalize();
 	TestFixedVectorsAndArrays();
+	TestModuleBounds();
 	Thread_Delete(gT);
 	OS_Shutdown();
 	if(gFails)

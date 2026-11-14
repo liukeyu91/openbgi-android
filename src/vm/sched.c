@@ -69,9 +69,11 @@ uint32_t SpawnThread(const char* arc, const char* name, uint32_t stackEntries,
 {
 	uint8_t* image = (uint8_t*)BGI_Alloc(0x20000);
 	uint32_t id = 0;
+	uint32_t size;
 	char msg[0x104];
 
-	if(LoadFile(image, arc, name) == 0)
+	size = LoadFile(image, arc, name);
+	if(size == 0)
 	{
 		sprintf(msg, MSG_PROGRAM_NOT_FOUND, arc, name);
 		BGI_Free(image);
@@ -80,7 +82,7 @@ uint32_t SpawnThread(const char* arc, const char* name, uint32_t stackEntries,
 	else
 	{
 		Thread_t* t = Thread_SpawnChild(parent, stackEntries, codeSize, dataSize);
-		if(Thread_LoadModule(t, image, name) == 0x80000000u)
+		if(Thread_LoadModule(t, image, size, name) == 0x80000000u)
 		{
 			sprintf(msg, MSG_THREAD_CODE_FULL, arc, name);
 			BGI_Free(image);

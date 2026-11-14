@@ -24,6 +24,7 @@ int main(void)
 	const uint8_t expanded[]={0x44,0x56,0x57,0x58,0x59,0x5a,0x5b,0x5e,0x5f,0x64,0x65,0x91,0xbb,0x17};
 	const uint8_t farJump[]={0x06,0xff,0x7f,0x16,0x17}, negativeData[]={0x05,0xff,0xff,0x17};
 	uint8_t bad[16]={16};
+	uint8_t shortened[18]={16};
 	const char json[]="{\"games\":[{\"match\":\"CompatibilityFixture\",\"profile\":\"1.636\"}]}";
 	const uint8_t boot[]="CompatibilityFixture";
 	OS_Init();
@@ -32,6 +33,8 @@ int main(void)
 	CHECK(Compat_Configure(NULL,"1.636",NULL,0)!=NULL);
 	CHECK(Check(vector,sizeof vector,&result) && result.count==0 && result.instructions==2);
 	CHECK(Check(expanded,sizeof expanded,&result) && result.total==0 && result.problems==0 && result.instructions==13);
+	Put32(shortened+4,32);shortened[16]=0x5d;shortened[17]=0x17;
+	CHECK(Compat_CheckProgram(shortened,sizeof shortened,&result) && result.total==0 && result.instructions==2 && result.problems==1);
 	keep=vm_optable_main[0x5d];vm_optable_main[0x5d]=Opcode_NotImplemented;
 	CHECK(Check(vector,sizeof vector,&result) && result.count==1 && result.total==1);
 	CHECK(result.issues[0].opcode==0x5d && result.issues[0].offset==0 && result.issues[0].kind==1);

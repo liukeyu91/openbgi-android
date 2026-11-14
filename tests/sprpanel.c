@@ -9,6 +9,7 @@
 #include "bgi/gfx/sprite.h"
 #include "bgi/gfx/window.h"
 #include "bgi/os.h"
+#include "bgi/input.h"
 #include "bgi/panel.h"
 #include "bgi/version.h"
 #include "bgi/vm.h"
@@ -120,6 +121,34 @@ int main(void)
 	CHECK(!w->sub[1] && !p->p.dirty);
 	CHECK(SubObj_Delete(id));
 	CHECK(Change(t, id, 0, 0, 1) == 1);
+	{
+		PanelButton_t choices[2] = {{0}};
+		PanelGroup_t group = {0};
+		PanelDesc_t choiceDesc = {0};
+		int mouse[2];
+		ButtonPanel_t* choicePanel = (ButtonPanel_t*)SubObj_Find(otherId);
+		for(i = 0; i < 2; i++)
+		{
+			choices[i].enabled = 1;
+			choices[i].y = i * 16;
+			choices[i].bmpNormal = 0;
+			choices[i].bmpSelected = 1;
+			choices[i].bmpFocus = choices[i].hitMaskBmp = -1;
+		}
+		group.count = 2;group.columns = 1;group.buttons = choices;
+		group.selected = -1;group.selectable = group.hoverSelects = 1;group.linkId = -1;
+		choiceDesc.groupCount = 1;choiceDesc.groups = &group;choiceDesc.currentGroup = 0;
+		choiceDesc.modal = 1;choiceDesc.inputMask = 0x2c2;choiceDesc.keyMap = 1;choiceDesc.selectOnDecide = 1;
+		Input_ResetLayers();
+		GetMouseClientPos(mouse);
+		CHECK(mouse[0] == 0 && mouse[1] == 0); // no OS window in this test
+		CHECK(ButtonPanel_Start(choicePanel, &choiceDesc) == 0);
+		CHECK(choicePanel->groups[0].selected == -1);
+		choicePanel->focus = -1; // pointer arrival and click in the same update
+		choicePanel->input = 1;
+		CHECK(ButtonPanel_Update(choicePanel) == 1);
+		CHECK(choicePanel->decidedGroup == 0 && choicePanel->decidedIndex == 0 && choicePanel->decidedFlag == 1);
+	}
 	Panel_DeleteAll();
 	Thread_Delete(t);
 	Gfx_Destroy();

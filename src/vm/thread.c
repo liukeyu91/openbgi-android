@@ -534,22 +534,39 @@ void Thread_FreeModules(Thread_t* t)
  * thread, the user-defined instructions of userop.c).  `file` is the image
  * of a "._bp" file: its ProgramHeader_t says where the code starts and how
  * long it is; `name` is kept (copied) for error messages and the trace.
- * Returns the offset of the module's first byte in the code area, or
- * 0x80000000 when the room left in the area is too small for it.
+ * Some translated modules retain a larger codeSize after strings shrink.
+ * Preserve that extent for module offsets and saves, but zero the absent
+ * tail instead of copying bytes outside the loaded file. Returns the base
+ * offset, or 0x80000000 for an invalid header or insufficient code space.
  */
-uint32_t Thread_LoadModule(Thread_t* t, const void* file, const char* name)
+uint32_t Thread_LoadModule(Thread_t* t, const void* file, uint32_t fileSize, const char* name)
 {
-	const ProgramHeader_t* h = (const ProgramHeader_t*)file;
+	ProgramHeader_t header;
+	const ProgramHeader_t* h = &header;
+	uint32_t available;
 	ModuleNode_t* m;
-	if(t->codeUsed + h->codeSize > t->codeSize)
+	if(!file || fileSize < 16)
 		return 0x80000000u;
+	memcpy(&header, file, sizeof header);
+	if(h->codeOffset < 16 || h->codeOffset >= fileSize || !h->codeSize ||
+		t->codeUsed > t->codeSize || h->codeSize > t->codeSize - t->codeUsed)
+		return 0x80000000u;
+	available = fileSize - h->codeOffset;
+	if(available > h->codeSize)
+		available = h->codeSize;
 	m = (ModuleNode_t*)BGI_Alloc(sizeof(ModuleNode_t));
 	m->name = BGI_Strdup(name);
 	m->size = h->codeSize;
 	m->base = t->codeUsed;
 	m->next = t->modules;
 	t->modules = m;
-	memcpy(t->code + m->base, (const uint8_t*)file + h->codeOffset, h->codeSize);
+	memcpy(t->code + m->base, (const uint8_t*)file + h->codeOffset, available);
+	if(available < h->codeSize)
+	{
+		memset(t->code + m->base + available, 0, h->codeSize - available);
+		fprintf(stderr, "bgi: program %s declares %u bytes, file has %u; missing tail zeroed\n",
+			name, (unsigned)h->codeSize, (unsigned)available);
+	}
 	t->codeUsed += h->codeSize;
 	t->moduleCount++;
 	Dbg_Log("thread %u: module %s at %x (%u bytes)", (unsigned)t->id, name, (unsigned)m->base, (unsigned)m->size);
