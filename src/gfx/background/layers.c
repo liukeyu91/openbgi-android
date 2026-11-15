@@ -234,9 +234,11 @@ static int Bg12_SetParam(DispObj_t* o, int no, int a, int c)
 	Bg12_t* b = (Bg12_t*)o;
 	switch(no)
 	{
+		case 0x41: b->layer[b->current].angle = a; return 0;
 		case 0x80: Bg12_LayerSetCentreDelta(b, b->current, a, c); return 0;
 		case 0x81: Bg12_LayerSetAngleDelta(b, b->current, a); return 0;
 		case 0x82: Bg12_LayerSetScaleDelta(b, b->current, a, c); return 0;
+		case 0x8e: b->layer[b->current].centreCurve = a; return 0;
 		case 0x8f: Bg12_LayerSetCurves(b, b->current, a, c); return 0;
 		default: return DispObj_SetParam(o, no, a, c);
 	}
@@ -278,8 +280,9 @@ static int Bg12_Render(Background_t* bg, Bmp_t* dst, const Rect_t* local)
 		t = DispObj_GetProgress(&b->bg.obj, 1);
 		x = (int32_t)((uint32_t)L.x - ((uint32_t)local->l << 16)); // relative to the dirty part
 		y = (int32_t)((uint32_t)L.y - ((uint32_t)local->t << 16));
-		cx = L.cx + MulShr(L.dcx, (uint32_t)t, 24); // the progress is 8.16: the full delta at 0x100
-		cy = L.cy + MulShr(L.dcy, (uint32_t)t, 24);
+		int32_t centre = Ease(t, L.centreCurve);
+		cx = L.cx + MulShr(L.dcx, (uint32_t)centre, 16); // the progress is 8.16: the full delta at 0x100
+		cy = L.cy + MulShr(L.dcy, (uint32_t)centre, 16);
 		angle = L.angle + (int32_t)(((int64_t)Ease(t, L.angleCurve) * (int64_t)L.dAngle) >> 16);
 		{
 			int32_t e = Ease(t, L.scaleCurve);

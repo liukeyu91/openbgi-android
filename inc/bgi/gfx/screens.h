@@ -66,14 +66,22 @@ typedef struct ParticleScreen
 {
 	DispObj_t obj;
 	ParticleEngine_t* engine; // owned
-	Bmp_t surf;               // w x h, screen mode with alpha, owned
-	int32_t cx, cy;           // projection centre on the surface, pixels
-	int32_t rectLimit;        // from this many dirty rectangles on a redraw invalidates the whole layer; default 0x1000
-	int32_t flip;             // which rectangle list is current
-	int32_t rectCount[2];     // rectangles in each list
-	Rect_t rects[2][4096];    // the rectangles the particles touched, previous and current frame
+	struct ParticleLayer* layers;
+	int layerCount;
+	Bmp_t surf;            // w x h, screen mode with alpha, owned
+	int32_t cx, cy;        // projection centre on the surface, pixels
+	int32_t rectLimit;     // from this many dirty rectangles on a redraw invalidates the whole layer; default 0x1000
+	int32_t flip;          // which rectangle list is current
+	int32_t rectCount[2];  // rectangles in each list
+	Rect_t rects[2][4096]; // the rectangles the particles touched, previous and current frame
 } ParticleScreen_t;
 
+struct Compositor;
+int ParticleScreen_SetLayers(ParticleScreen_t* p, struct Compositor* comp, int count, const int32_t* depths, const int32_t* priorities);
+void ParticleScreen_ClearLayers(ParticleScreen_t* p);
+void ParticleScreen_UpdateLayers(ParticleScreen_t* p);
+void ParticleScreen_RedrawLayers(ParticleScreen_t* p);
+int ParticleEngine_RenderRange(ParticleEngine_t* e, Bmp_t* dst, int cx, int cy, int32_t* count, Rect_t* rectangles, int32_t nearZ, int32_t farZ);
 extern const DispObjVtbl_t ParticleScreen_Vtbl;
 
 void ParticleScreen_Ctor(ParticleScreen_t* p, int slotId);

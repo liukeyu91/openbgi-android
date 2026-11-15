@@ -116,6 +116,7 @@ int Text_LayoutCoreV(RichState_t* rich, int32_t* outLines, const char* str, int 
 		}
 
 		node = Layout_NewNode(delay);
+		node->emHeight = size;
 		len = TextGetChar(&code, p); // (every vertical cell is a full square: the width flag is not needed)
 		Bmp_Fill(&view, NULL, 0);
 		Text_PaintGlyph(&view, &g, (int)code, fi.font, colour);

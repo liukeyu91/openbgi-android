@@ -99,6 +99,8 @@ typedef struct EngineProfile
 	uint32_t heapLimit; // size limit of the local heap ("70"), bytes
 	uint32_t bootCode;  // size of the boot thread's code area, bytes
 	uint32_t bootData;  // ... and of its data area
+	int seSlots;        // 0: 64 slots, 128: extended sound slots
+	int screenModes;    // 0: generation default, 16: extended 1.659.8 display table
 } EngineProfile_t;
 
 extern const EngineProfile_t* gEngine; // the selected profile, never NULL

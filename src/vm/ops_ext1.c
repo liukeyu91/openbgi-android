@@ -92,6 +92,25 @@ static int Opcode_Ext1_PtclSetDraw(Thread_t* t) // C0 05: handle, x, y, effect, 
 	return 0;
 }
 
+/* C0 06: handle, count, depth-widths, priority-offsets -> . */
+static int Opcode_Ext1_PtclSetLayers(Thread_t* t)
+{
+	const int32_t* priorities = (const int32_t*)PopPtr(t);
+	const int32_t* depths = (const int32_t*)PopPtr(t);
+	int count = (int)Thread_Pop(t);
+	uint32_t handle = Thread_Pop(t);
+	ParticleScreen_t* screen = (ParticleScreen_t*)Gfx_FindParticle(gGfx, handle);
+	if(!screen)
+		ScriptError(MSG_BAD_PTCL_HANDLE, t);
+	int result = ParticleScreen_SetLayers(screen, gGfx->comp, count, depths, priorities);
+	if(result == 7)
+		EXT_ERROR(t, "Invalid particle layer count: %d", count);
+	if(result == 8)
+		for(int i = 0; i < count; i++)
+			CheckPriority((uint32_t)screen->obj.priority + (uint32_t)priorities[i], t);
+	return 0;
+}
+
 // repaint the screen's surface from the current particle state
 static int Opcode_Ext1_PtclRedraw(Thread_t* t) // C0 08: handle →
 {
@@ -696,6 +715,7 @@ static int Opcode_Ext1_LoadBwef(Thread_t* t) // C0 F0: out, &count, arc, name, b
 void Vm_OptableC0Init(void)
 {
 	static const OpEntry_t ops[] = {
+		{0x06, Opcode_Ext1_PtclSetLayers, GEN_FIRST, GEN_LAST},
 		{0x00, Opcode_Ext1_PtclCreate, GEN_FIRST, GEN_LAST},
 		{0x01, Opcode_Ext1_PtclDelete, GEN_FIRST, GEN_LAST},
 		{0x04, Opcode_Ext1_PtclShow, GEN_FIRST, GEN_LAST},

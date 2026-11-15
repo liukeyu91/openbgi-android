@@ -166,6 +166,7 @@ typedef struct RichChar // one laid-out glyph
 	char* rubyWord;     // set on the base character of a ruby word: the word
 	int32_t rubyExtent; // width (height) the reading needs, pixels
 	int32_t kind;       // 0 normal, 1 shifted small (vertical), 2 ruby
+	int32_t emHeight;   // font height before shadow/ruby expansion
 	int32_t srcOfs;     // (OpenBGI) the byte offset in the laid-out string of the character this glyph is for
 	struct RichChar* next;
 } RichChar_t;
@@ -176,6 +177,10 @@ typedef struct RichState // the output of a layout
 	RichChar_t* head;   // the nodes in reading order
 } RichState_t;
 
+void TextMetrics_Capture(const RichState_t* rich, int lines, int defaultHeight, int vertical);
+uint32_t TextMetrics_Save(void);
+int TextMetrics_Take(int32_t* out, uint32_t token);
+void TextMetrics_Clear(void);
 void RichState_Free(RichState_t* r);
 int FontInfo_GlyphW(const FontInfo_t* fi); // size * widthPct / 100
 int Text_RubySize(int size);               // max(4, size * pct / 100)

@@ -35,7 +35,8 @@
 #include "bgi/common.h"
 
 #define WM_BGM_CHANNELS 0x10 // music channels
-#define WM_SE_SLOTS     0x40 // sound effect slots
+#define WM_SE_SLOTS     0x80 // storage capacity; active range follows the engine profile
+int Wm_SeSlotCount(void);
 
 int Wm_Init(void); // start the library and the audio device; 0, 1 already started, 5 no device
 /* An extra source mixed with the channels: `fn` adds its stereo 16-bit

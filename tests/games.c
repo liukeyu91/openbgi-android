@@ -68,7 +68,7 @@ static void TestDefaults(void)
 	EngineGame_t g;
 	int n;
 	Engine_ResetGames();
-	CHECK(Engine_ProfileCount() == GEN_COUNT);
+	CHECK(Engine_ProfileCount() == (GEN_COUNT + 1));
 	CHECK(ProfileNamed("1.69/444") != NULL && ProfileNamed("1.69/444")->gen == GEN_1_69_444);
 	CHECK(ProfileNamed("1.669") != NULL && ProfileNamed("1.669")->tagShift == 26 && ProfileNamed("1.669")->bootCode == 0x800000);
 	CHECK(Engine_SelectProfile("1.553") && gEngine->gen == GEN_1_553 && gEngine->compat == 169);
@@ -81,10 +81,10 @@ static void TestDefaults(void)
 		ProfileNamed("1.636")->bootCode == 0x800000 && ProfileNamed("1.616")->bootCode == 0x80000);
 	CHECK(Engine_DetectGame((const uint8_t*)"x\0SenNoHatouTsukisomeNoKouki\0", 29) != NULL && gEngine->gen == GEN_1_636);
 	{
-        const uint8_t making[]="MakingLoversFullHD";
-        CHECK(Engine_DetectGame(making,sizeof making)!=NULL && gEngine->gen==GEN_1_659);
-        CHECK(!strcmp(Engine_ProductName(),"MakingLoversFullHD"));
-    }
+		const uint8_t making[] = "MakingLoversFullHD";
+		CHECK(Engine_DetectGame(making, sizeof making) != NULL && gEngine->gen == GEN_1_659 && gEngine->screenModes == 16);
+		CHECK(!strcmp(Engine_ProductName(), "MakingLoversFullHD"));
+	}
 	CHECK(Engine_GameAt(0, &g) && strcmp(g.match, "NurseryRhymeTrial") == 0 && strcmp(g.product, "NurseryRhyme") == 0);
 	CHECK(Engine_GameAt(1, &g) && strcmp(g.product, g.match) == 0 && strcmp(g.name, g.match) == 0 && g.directory == NULL);
 	CHECK(!Engine_GameAt(n, &g));
@@ -97,7 +97,7 @@ static void TestDefaults(void)
 	CHECK(Engine_SaveGamesJson(gPath));
 	Engine_SelectProfile("1.58");
 	CHECK(Engine_LoadGamesJson(gPath) == n);
-	CHECK(Engine_ProfileCount() == GEN_COUNT && strcmp(gEngine->name, "1.58") == 0); // the selection survives a reload
+	CHECK(Engine_ProfileCount() == (GEN_COUNT + 1) && strcmp(gEngine->name, "1.58") == 0); // the selection survives a reload
 	CHECK(ProfileNamed("1.64") != NULL && ProfileNamed("1.64")->dynCount == 192 && ProfileNamed("1.64")->heapLimit == 0x1000000);
 	CHECK(Engine_GameAt(n - 1, &g) && strcmp(g.match, "HarukaAonoHanayomeni") == 0 && strcmp(g.profile, "1.669") == 0);
 }
@@ -114,7 +114,7 @@ static void TestProfiles(void)
 	Engine_ResetGames();
 	// the file's entries come first, then the built-in games it lacks (all of them here)
 	CHECK(Engine_LoadGamesJson(gPath) == 1 + gDefaultGames);
-	CHECK(Engine_ProfileCount() == GEN_COUNT + 1); // "mine" and "1.669" of the file, then the other built-in profiles
+	CHECK(Engine_ProfileCount() == (GEN_COUNT + 1) + 1); // "mine" and "1.669" of the file, then the other built-in profiles
 	p = ProfileNamed("mine");
 	CHECK(p != NULL && p->gen == GEN_1_553 && p->heapLimit == 1234 && p->tagShift == 26 && p->dynCount == 0 && p->bootCode == 0x80000);
 	p = Engine_ProfileAt(0);
@@ -128,12 +128,12 @@ static void TestProfiles(void)
 	CHECK(Engine_LoadGamesJson(gPath) == 1 + gDefaultGames && strcmp(gEngine->name, "mine") == 0);
 	WriteText("{ \"profiles\": [ { \"name\": \"other\", \"generation\": \"1.58\" } ], \"games\": [] }\n");
 	CHECK(Engine_LoadGamesJson(gPath) == gDefaultGames); // no game entries of its own: the built-in ones
-	CHECK(Engine_ProfileCount() == GEN_COUNT + 1 && strcmp(gEngine->name, "other") == 0);
+	CHECK(Engine_ProfileCount() == (GEN_COUNT + 1) + 1 && strcmp(gEngine->name, "other") == 0);
 	// an empty profiles list keeps the built-in table
 	Engine_ResetGames();
 	WriteText("{ \"profiles\": [ { \"name\": \"bad\", \"generation\": \"none\" } ], \"games\": [] }\n");
 	Engine_LoadGamesJson(gPath);
-	CHECK(Engine_ProfileCount() == GEN_COUNT);
+	CHECK(Engine_ProfileCount() == (GEN_COUNT + 1));
 }
 
 static void TestGames(void)
@@ -214,18 +214,18 @@ static void TestErrors(void)
 
 static void TestAndroidSelection(void)
 {
-    static const uint8_t fureraba[] = "FriendToLoverHD";
-    static const uint8_t second[] = "NurseryRhyme";
-    WriteText("{\"games\":[{\"match\":\"FriendToLoverHD\",\"profile\":\"1.616\",\"product\":\"FriendToLoverHD\"}]}");
-    CHECK(Engine_LoadGamesJson(gPath)>0);
-    CHECK(Engine_DetectGame(fureraba,sizeof fureraba)!=NULL);
-    CHECK(strcmp(gEngine->name,"1.616")==0);
-    CHECK(strcmp(Engine_ProductName(),"FriendToLoverHD")==0);
-    CHECK(Engine_DetectGame(second,sizeof second)!=NULL);
-    CHECK(strcmp(gEngine->name,"1.64")==0);
-    CHECK(Engine_Main("--list-engines --text-encoding=gbk")==0 && gTextGbk && !gTextUtf8);
-    CHECK(Engine_Main("--list-engines --text-encoding=utf8")==0 && !gTextGbk && gTextUtf8);
-    CHECK(Engine_Main("--list-engines --text-encoding=sjis")==0 && !gTextGbk && !gTextUtf8);
+	static const uint8_t fureraba[] = "FriendToLoverHD";
+	static const uint8_t second[] = "NurseryRhyme";
+	WriteText("{\"games\":[{\"match\":\"FriendToLoverHD\",\"profile\":\"1.616\",\"product\":\"FriendToLoverHD\"}]}");
+	CHECK(Engine_LoadGamesJson(gPath) > 0);
+	CHECK(Engine_DetectGame(fureraba, sizeof fureraba) != NULL);
+	CHECK(strcmp(gEngine->name, "1.616") == 0);
+	CHECK(strcmp(Engine_ProductName(), "FriendToLoverHD") == 0);
+	CHECK(Engine_DetectGame(second, sizeof second) != NULL);
+	CHECK(strcmp(gEngine->name, "1.64") == 0);
+	CHECK(Engine_Main("--list-engines --text-encoding=gbk") == 0 && gTextGbk && !gTextUtf8);
+	CHECK(Engine_Main("--list-engines --text-encoding=utf8") == 0 && !gTextGbk && gTextUtf8);
+	CHECK(Engine_Main("--list-engines --text-encoding=sjis") == 0 && !gTextGbk && !gTextUtf8);
 }
 
 int main(void)

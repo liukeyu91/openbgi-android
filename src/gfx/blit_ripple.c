@@ -48,19 +48,66 @@ static void Ripple_Copy(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, 
 	}
 }
 
+// The smooth variant samples each neighbour inside the source rectangle,
+// using the top four fractional bits and two successive interpolations.
+static uint32_t RippleSample(const Bmp_t* full, int x, int y)
+{
+	if(x < 0 || y < 0 || x >= full->w || y >= full->h)
+		return 0;
+	return ((const uint32_t*)ROW(full, y))[x];
+}
+static void Ripple_Smooth(Bmp_t* dst, const Bmp_t* crop, const Bmp_t* full, const Bmp_t* vec, const uint32_t* table)
+{
+	ptrdiff_t offset = crop->pixels - full->pixels;
+	int ox = (int)(offset % full->pitch) / 4, oy = (int)(offset / full->pitch);
+	for(int y = 0; y < crop->h; y++)
+	{
+		const uint8_t* vp = ROW(vec, y);
+		uint32_t* out = (uint32_t*)ROW(dst, y);
+		for(int x = 0; x < crop->w; x++, vp += 6)
+		{
+			unsigned ring = (unsigned)(vp[4] | vp[5] << 8);
+			uint32_t t = table[ring];
+			int dx = (int16_t)(vp[0] | vp[1] << 8) * (int16_t)t;
+			int dy = (int16_t)(vp[2] | vp[3] << 8) * (int16_t)(t >> 16);
+			int sx = ox + x + (dx >> 16), sy = oy + y + (dy >> 16);
+			int fx = ((uint32_t)dx >> 12) & 15, fy = ((uint32_t)dy >> 12) & 15;
+			uint32_t a = RippleSample(full, sx, sy), b = RippleSample(full, sx + 1, sy);
+			uint32_t c = RippleSample(full, sx, sy + 1), d = RippleSample(full, sx + 1, sy + 1), pixel = 0;
+			for(int lane = 0; lane < 32; lane += 8)
+			{
+				int av = (a >> lane) & 255, bv = (b >> lane) & 255, cv = (c >> lane) & 255, dv = (d >> lane) & 255;
+				int top = av + (((bv - av) * fx) >> 4), bottom = cv + (((dv - cv) * fx) >> 4);
+				pixel |= (uint32_t)(top + (((bottom - top) * fy) >> 4)) << lane;
+			}
+			out[x] = pixel;
+		}
+	}
+}
+
 /* Write srcCrop (a view into srcFull) read through the ripple into dst, a
  * picture of the same mode.  0 ok, 0xc the map is not PM_VECDIST or not
  * the view's size, 1 the modes differ.  Only 32-bit pictures are drawn;
  * other matching modes return 0 untouched. */
-int Blit_Ripple(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table)
+int Blit_RippleEx(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table, int smooth)
 {
 	if(vecdist->mode != PM_VECDIST || srcCrop->w != vecdist->w || srcCrop->h != vecdist->h)
 		return 0xc;
 	if(dst->mode != srcCrop->mode)
 		return 1;
 	if(srcCrop->mode == PM_RGB32 || srcCrop->mode == PM_ARGB32)
-		Ripple_Copy(dst, srcCrop, srcFull, vecdist, (const uint32_t*)table);
+	{
+		if(smooth)
+			Ripple_Smooth(dst, srcCrop, srcFull, vecdist, (const uint32_t*)table);
+		else
+			Ripple_Copy(dst, srcCrop, srcFull, vecdist, (const uint32_t*)table);
+	}
 	return 0;
+}
+
+int Blit_Ripple(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table)
+{
+	return Blit_RippleEx(dst, srcCrop, srcFull, vecdist, table, 0);
 }
 
 // wrap a sample address into the source memory (the blending variants wrap instead of reading 0)

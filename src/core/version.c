@@ -36,12 +36,12 @@
 /* the boot thread's code and data areas (the SpawnThread of the boot
  * program): 256 KB each up to build 444, 512 KB of code
  * from build 472, 8 MB of code and 4 MB of data from 1.636 */
-#define BOOT_A   0x40000, 0x40000
-#define BOOT_B   0x80000, 0x40000
-#define BOOT_C   0x800000, 0x400000
+#define BOOT_A   0x40000, 0x40000, 0, 0
+#define BOOT_B   0x80000, 0x40000, 0, 0
+#define BOOT_C   0x800000, 0x400000, 0, 0
 
 // the built-in profiles: one per generation, named after it
-static const EngineProfile_t kDefaultProfiles[GEN_COUNT] = {
+static const EngineProfile_t kDefaultProfiles[GEN_COUNT + 1] = {
 	// name        generation    compat layout    boot areas
 	{"1.58", GEN_1_58, 158, LAYOUT_A, BOOT_A},
 	{"1.64", GEN_1_64, 164, LAYOUT_A, BOOT_A},
@@ -66,6 +66,7 @@ static const EngineProfile_t kDefaultProfiles[GEN_COUNT] = {
 	{"1.662", GEN_1_662, 172, LAYOUT_D, BOOT_C},
 	{"1.667", GEN_1_667, 172, LAYOUT_D, BOOT_C},
 	{"1.669", GEN_1_669, 172, LAYOUT_D, BOOT_C},
+	{"1.659.8", GEN_1_659, 172, LAYOUT_D, 0x800000, 0x400000, 128, 16},
 };
 
 /* the profiles in use: the built-in ones, or those of games.json (the
@@ -79,13 +80,13 @@ const EngineProfile_t* gEngine = &kDefaultProfiles[GEN_1_69_444]; // the referen
 static void ProfilesReset(void)
 {
 	int i;
-	for(i = 0; i < GEN_COUNT; i++)
+	for(i = 0; i < (int)BGI_COUNTOF(kDefaultProfiles); i++)
 	{
 		gProfiles[i] = kDefaultProfiles[i];
 		snprintf(gProfileNames[i], sizeof gProfileNames[i], "%s", kDefaultProfiles[i].name);
 		gProfiles[i].name = gProfileNames[i];
 	}
-	gProfileCount = GEN_COUNT;
+	gProfileCount = BGI_COUNTOF(kDefaultProfiles);
 	gEngine = &gProfiles[GEN_1_69_444];
 }
 
@@ -191,7 +192,7 @@ static const struct
 	{"YoakemaeyoriRuriironaPS2Win10", "1.659", NULL},
 	{"YoakemaeyoriRuriironaMCWin10", "1.659", NULL},
 	{"MadoiShirokinoKamikakushi", "1.659", NULL},
-	{"MakingLoversFullHD", "1.659", NULL},
+	{"MakingLoversFullHD", "1.659.8", NULL},
 	{"Yumahorome", "1.662", NULL},
 	{"ArcanaAlchemia", "1.667", NULL},
 	{"HarukaAonoHanayomeni", "1.669", NULL},
@@ -353,6 +354,12 @@ static int LoadProfiles(const JsonNode_t* list, const char* path)
 		p->heapLimit = (uint32_t)Json_Number(e, "heapLimit", base->heapLimit);
 		p->bootCode = (uint32_t)Json_Number(e, "bootCode", base->bootCode);
 		p->bootData = (uint32_t)Json_Number(e, "bootData", base->bootData);
+		p->seSlots = (int)Json_Number(e, "seSlots", base->seSlots);
+		if(p->seSlots != 128)
+			p->seSlots = 0;
+		p->screenModes = (int)Json_Number(e, "screenModes", base->screenModes);
+		if(p->screenModes != 0 && p->screenModes != 16)
+			p->screenModes = 0;
 		n++;
 	}
 	return n;
@@ -368,7 +375,7 @@ static void MergeDefaults(void)
 {
 	size_t i;
 	int k;
-	for(i = 0; i < GEN_COUNT && gProfileCount < ENGINE_PROFILES_MAX; i++)
+	for(i = 0; i < BGI_COUNTOF(kDefaultProfiles) && gProfileCount < ENGINE_PROFILES_MAX; i++)
 	{
 		for(k = 0; k < gProfileCount; k++)
 			if(strcmp(gProfiles[k].name, kDefaultProfiles[i].name) == 0)
@@ -599,6 +606,8 @@ char* Engine_FormatGamesJson(size_t* len)
 		OutNumber(&o, "heapLimit", p->heapLimit, &first);
 		OutNumber(&o, "bootCode", p->bootCode, &first);
 		OutNumber(&o, "bootData", p->bootData, &first);
+		OutNumber(&o, "seSlots", p->seSlots, &first);
+		OutNumber(&o, "screenModes", p->screenModes, &first);
 		OutPut(&o, i + 1 < gProfileCount ? " },\n" : " }\n");
 	}
 	OutPut(&o, "\t],\n\t\"games\": [\n");

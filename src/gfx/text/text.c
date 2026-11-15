@@ -28,6 +28,8 @@ void Text_SetGfxPtr(Gfx_t* g)
 void Text_SetBmpMgrPtr(BmpMgr_t* m)
 {
 	gTextBmpMgr = m;
+	if(!m)
+		TextMetrics_Clear();
 }
 
 // ---- globals -----------------------------------------------------------------------------------

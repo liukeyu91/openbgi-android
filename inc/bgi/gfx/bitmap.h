@@ -126,11 +126,11 @@ int Blit_Crossfade(Bmp_t* dst, const Bmp_t* a, const Bmp_t* b, int ratio, int le
 int Blit_CrossfadeTo(Bmp_t* tmp, const Bmp_t* a, const Bmp_t* b, int ratio);
 // the gray-map filter of the Filter object: colour over dst (RGB32) weighted by the map (blit_filter.c)
 void Blit_TintByGray(Bmp_t* dst, uint32_t colour, const Bmp_t* gray, int param, int level);
-void Blit_FilterKind1(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);   // filter kind 1: add colour * level (a black colour dims)
-void Blit_FilterKind2(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);   // filter kind 2, "91 1D" mode 2: luminance tint
-void Blit_FilterKind3(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);   // filter kind 3, "91 1D" mode 1: blend toward src XOR colour
-void Blit_TintKeepAlpha(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level); // 1.494 on: "91 1D" mode 3, blend toward colour keeping alpha
-void Blit_AddColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);     // 1.494 on: "91 1D" mode 4, add colour * level keeping alpha
+void Blit_FilterKind1(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);    // filter kind 1: add colour * level (a black colour dims)
+void Blit_FilterKind2(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);    // filter kind 2, "91 1D" mode 2: luminance tint
+void Blit_FilterKind3(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);    // filter kind 3, "91 1D" mode 1: blend toward src XOR colour
+void Blit_TintKeepAlpha(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);  // 1.494 on: "91 1D" mode 3, blend toward colour keeping alpha
+void Blit_AddColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level);      // 1.494 on: "91 1D" mode 4, add colour * level keeping alpha
 void Blit_SubtractColour(Bmp_t* dst, const Bmp_t* src, uint32_t colour, int level); // "91 1D" mode 5, subtract colour * level keeping alpha
 /* "90 19" and background type 4: src placed at (x, y) of dst and drawn
  * through the GRAY8 map `gray` of its size, revealed where the map is
@@ -154,6 +154,7 @@ int Blit_Gradient(Bmp_t* dst, const Bmp_t* src, int type, int level);
  * into.  0 ok, 1 modes differ, 0xc bad map; the Level variant blends onto
  * RGB32 only and answers 0xf for another destination mode. */
 int Blit_Ripple(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table);
+int Blit_RippleEx(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table, int smooth);
 int Blit_RippleLevel(Bmp_t* dst, const Bmp_t* srcCrop, const Bmp_t* srcFull, const Bmp_t* vecdist, const void* table, int level);
 // background type 11: mosaic of (amount + 1)-pixel blocks mixed in at `extra`; `style` is ignored; 0 ok, 1 modes differ
 int Blit_Flip(Bmp_t* dst, const Bmp_t* src, int amount, int style, int extra);

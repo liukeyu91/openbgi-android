@@ -28,6 +28,8 @@ void ParticleScreen_Ctor(ParticleScreen_t* p, int slotId)
 	DispObj_Ctor(&p->obj, 4, slotId);
 	p->obj.vt = &ParticleScreen_Vtbl;
 	p->engine = ParticleEngine_New();
+	p->layers = NULL;
+	p->layerCount = 0;
 	memset(&p->surf, 0, sizeof p->surf);
 	p->cx = p->cy = 0;
 	p->rectLimit = 0x1000;
@@ -38,6 +40,7 @@ void ParticleScreen_Ctor(ParticleScreen_t* p, int slotId)
 void ParticleScreen_Dtor(ParticleScreen_t* p)
 {
 	p->obj.vt = &ParticleScreen_Vtbl;
+	ParticleScreen_ClearLayers(p);
 	if(p->engine)
 		ParticleEngine_Delete(p->engine);
 	BGI_Free(p->surf.pixels);
@@ -55,6 +58,7 @@ static void ParticleScreen_Destroy(DispObj_t* o, int flags)
 void ParticleScreen_Update(ParticleScreen_t* p)
 {
 	ParticleEngine_Update(p->engine);
+	ParticleScreen_UpdateLayers(p);
 }
 
 // "C0 0D": run `ms` milliseconds of simulation ahead of time
@@ -69,7 +73,7 @@ static void ParticleScreen_Draw(DispObj_t* o, Bmp_t* dst, const Rect_t* local, u
 	ParticleScreen_t* p = (ParticleScreen_t*)o;
 	Bmp_t src;
 	(void)minKey;
-	if(!p->surf.pixels)
+	if(p->layerCount || !p->surf.pixels)
 		return;
 	src = p->surf;
 	Bmp_Crop(&src, local);
@@ -117,6 +121,11 @@ void ParticleScreen_SetRectLimit(ParticleScreen_t* p, int limit)
 void ParticleScreen_Redraw(ParticleScreen_t* p)
 {
 	int cur = p->flip, k, i;
+	if(p->layerCount)
+	{
+		ParticleScreen_RedrawLayers(p);
+		return;
+	}
 	if(!p->surf.pixels)
 		return;
 	Bmp_Clear(&p->surf, NULL);

@@ -52,6 +52,7 @@ static int LayoutAndBlit(int vertical, Bmp_t* text, int* outRectCount, Rect_t* r
 			Text_RubyPlaceH(&rich, font, rubyColour, style, &dict);
 		Text_AlignH(&rich, cur, area, font, hang, style, swing);
 	}
+	TextMetrics_Capture(&rich, *outLines, fi.size, vertical);
 	*outRectCount = Text_Collect(text, rects, &rich, effect, level);
 	RichState_Free(&rich);
 	RubyDict_Clear(&dict);

@@ -36,6 +36,7 @@ void Bg8_Ctor(Bg8_t* b)
 	b->bmp = -1;
 	b->vecdist = -1;
 	b->table = NULL;
+	b->smooth = 0;
 }
 
 void Bg8_FreeTable(Bg8_t* b)
@@ -125,6 +126,11 @@ int Bg8_SelectRipple(Bg8_t* b, int selector, int level)
 // the setParam slot: parameter 0x100 is Bg8_SelectRipple(a, c), 0xFFFF0002 when it fails
 static int Bg8_SetParam(DispObj_t* o, int no, int a, int c)
 {
+	if(no == 0xff)
+	{
+		((Bg8_t*)o)->smooth = a;
+		return 0;
+	}
 	if(no != 0x100)
 		return DispObj_SetParam(o, no, a, c);
 	return Bg8_SelectRipple((Bg8_t*)o, a, c) != 0 ? (int)0xffff0002 : 0;
@@ -144,7 +150,7 @@ static int Bg8_Render(Background_t* bg, Bmp_t* dst, const Rect_t* local)
 	srcCrop = srcFull;
 	Bmp_Crop(&srcCrop, local);
 	Bmp_Crop(&vec, local);
-	Blit_Ripple(dst, &srcCrop, &srcFull, &vec, b->table);
+	Blit_RippleEx(dst, &srcCrop, &srcFull, &vec, b->table, b->smooth);
 	return 1;
 }
 

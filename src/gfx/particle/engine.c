@@ -317,7 +317,7 @@ typedef struct PtclVis // a projected particle; linked in order from far to near
  * that succeeded, clipped to `dst`); *outCount and the result are their
  * number. */
 static int ParticleEngine_RenderImpl(ParticleEngine_t* e, Bmp_t* dst, int cx, int cy, int32_t* outCount,
-	Rect_t* outRects)
+	Rect_t* outRects, int32_t nearZ, int32_t farZ)
 {
 	static PtclVis_t vis[PTCL_MAX]; // too large for the stack at 0x8000 entries (the original keeps its 4096 there)
 	PtclVis_t* head = NULL;
@@ -342,7 +342,7 @@ static int ParticleEngine_RenderImpl(ParticleEngine_t* e, Bmp_t* dst, int cx, in
 		t = (int32_t)((double)x * e->cosC - (double)y * e->sinC);
 		y = (int32_t)((double)x * e->sinC + (double)y * e->cosC);
 		x = t;
-		if(z < 0) // behind the camera
+		if(z < nearZ || z >= farZ) // outside the selected depth slice
 			continue;
 		vis[n].x = x;
 		vis[n].y = y;
@@ -388,7 +388,7 @@ static int ParticleEngine_RenderImpl(ParticleEngine_t* e, Bmp_t* dst, int cx, in
 // render for ParticleScreen_Redraw: see ParticleEngine_RenderImpl
 int ParticleEngine_Render(ParticleEngine_t* e, Bmp_t* dst, int cx, int cy, int32_t* outCount, Rect_t* outRects)
 {
-	return ParticleEngine_RenderImpl(e, dst, cx, cy, outCount, outRects);
+	return ParticleEngine_RenderImpl(e, dst, cx, cy, outCount, outRects, 0, INT32_MAX);
 }
 
 // ---- the automatic redraw list ------------------------------------------------------------
@@ -485,4 +485,9 @@ void Ptcl_AutoTick(void)
 void Ptcl_UpdateAll(void)
 {
 	Gfx_UpdateParticles(gGfx);
+}
+
+int ParticleEngine_RenderRange(ParticleEngine_t* e, Bmp_t* dst, int cx, int cy, int32_t* count, Rect_t* rectangles, int32_t nearZ, int32_t farZ)
+{
+	return ParticleEngine_RenderImpl(e, dst, cx, cy, count, rectangles, nearZ, farZ);
 }

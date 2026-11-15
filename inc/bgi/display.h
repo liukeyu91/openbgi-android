@@ -34,9 +34,10 @@ extern int gWindowAlive;       // the window exists (between its creation and it
 
 /* The picture sizes by size index: the generation's defaults
  * (Display_InitSizeTable), and from 1.494 on whatever "81 60" set. */
-extern int gScreenWidths[8];
-extern int gScreenHeights[8];
+extern int gScreenWidths[16];
+extern int gScreenHeights[16];
 void Display_InitSizeTable(void);
+int Display_ModeCount(void);
 int Display_SetSizeEntry(int idx, int w, int h);          // "81 60": 0 ok, 1 bad index, 2 bad size
 static inline void Display_GetPictureSize(int* w, int* h) // of the current size index
 {

@@ -145,7 +145,10 @@ int OsPosix_UnicodeToSjis(uint32_t cp, char out[2])
 	else
 		return 0;
 	iconv(gUtf8ToSjis, NULL, NULL, NULL, NULL); // reset the shift state
-	if(iconv(gUtf8ToSjis, &ip, &il, &op, &ol) == (size_t)-1 || il != 0)
+												/* A positive iconv result is a non-reversible substitution (musl
+     * writes an asterisk for an unrepresentable code point). Reject it
+     * just like EILSEQ so the caller supplies its documented question mark. */
+	if(iconv(gUtf8ToSjis, &ip, &il, &op, &ol) != 0 || il != 0)
 		return 0;
 	return (int)(2 - ol); // the bytes it took of the two available
 }

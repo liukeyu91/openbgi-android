@@ -28,6 +28,8 @@
 #include "bgi/gfx/bmpops.h"
 #include "bgi/gfx/bmpmgr.h"
 #include "bgi/gfx/text.h"
+#include "bgi/gfx/gfxmgr.h"
+#include "bgi/gfx/window.h"
 #include "bgi/file.h"
 #include "bgi/codec.h"
 
@@ -401,7 +403,7 @@ static int Opcode_Gfx2_BmpDrawTextStyled(Thread_t* t)
 	r = BmpOp_DrawText(bmp, &lines, x, y, str, parseTags, tags, fontNo, size, widthPct, bold, prop, hang, spacing, colour,
 		rubyColour, style);
 	Gfx2_TextResult(t, r, bmp, fontNo, size, widthPct);
-	Thread_Push(t, (uint32_t)lines);
+	Thread_Push(t, gEngine->screenModes == 16 ? TextMetrics_Save() : (uint32_t)lines);
 	return 0;
 }
 
@@ -563,8 +565,19 @@ static int Opcode_Gfx2_TextAbcWidths(Thread_t* t)
  * ended.  Any other number is a script error. */
 static int Opcode_Gfx2_TextLayoutParam(Thread_t* t)
 {
-	int32_t* out = (int32_t*)PopPtr(t);
-	uint32_t no = Thread_Pop(t);
+	uint32_t no;
+	int32_t* out;
+	if(gEngine->screenModes == 16)
+	{
+		no = Thread_Pop(t);
+		out = (int32_t*)PopPtr(t);
+	}
+	else
+	{
+		out = (int32_t*)PopPtr(t);
+		no = Thread_Pop(t);
+	}
+
 	switch(no)
 	{
 		case 0x100:
@@ -678,6 +691,34 @@ static int Opcode_Gfx2_SeqLoad(Thread_t* t)
 	return 2;
 }
 
+/* 92 94: out-or-NULL, record -> count; copying consumes the record. */
+static int Opcode_Gfx2_TakeLineHeights(Thread_t* t)
+{
+	uint32_t token = Thread_Pop(t);
+	uint32_t out = Thread_Pop(t);
+	Thread_Push(t, (uint32_t)TextMetrics_Take(out ? (int32_t*)ResolvePtr(out, t) : NULL, token));
+	return 0;
+}
+/* 92 95: window -> current font height. */
+static int Opcode_Gfx2_WindowFontHeight(Thread_t* t)
+{
+	DispObj_t* window = Gfx_FindWindow(gGfx, Thread_Pop(t));
+	if(!window)
+		ScriptError(MSG_BAD_WINDOW_HANDLE, t);
+	Thread_Push(t, (uint32_t)Window_GetFontSize((Window_t*)window));
+	return 0;
+}
+/* 92 F6: bitmap, volume -> status. As with F4/F5, this backend has no
+ * attached video texture; 1 is the native no-player result, 4 no slot. */
+static int Opcode_Gfx2_VideoTextureVolume(Thread_t* t)
+{
+	Thread_Pop(t);
+	int bitmap = (int)Thread_Pop(t);
+	Bmp_t image;
+	Thread_Push(t, BmpMgr_GetInfo(gBmpMgr, &image, bitmap) ? 1u : 4u);
+	return 0;
+}
+
 // 92 F4 (1.494 on): bmp, v → code; control the slot's video texture (always 1: the slot has none)
 static int Opcode_Gfx2_VideoTextureControl(Thread_t* t)
 {
@@ -708,6 +749,9 @@ static int Opcode_Gfx2_VideoTexturePosition(Thread_t* t)
 void Vm_Optable92Init(void)
 {
 	static const OpEntry_t ops[] = {
+		{0x94, Opcode_Gfx2_TakeLineHeights, GEN_FIRST, GEN_LAST},
+		{0x95, Opcode_Gfx2_WindowFontHeight, GEN_FIRST, GEN_LAST},
+		{0xF6, Opcode_Gfx2_VideoTextureVolume, GEN_FIRST, GEN_LAST},
 		{0x14, Opcode_Gfx2_PreloadImage, GEN_1_494, GEN_LAST},
 		{0x15, Opcode_Gfx2_PreloadClear, GEN_1_494, GEN_LAST},
 		{0x12, Opcode_Gfx2_BmpSetBaseSize, GEN_1_535, GEN_LAST},

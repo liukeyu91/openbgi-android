@@ -362,7 +362,7 @@ static int Opcode_Sys_Galloc(Thread_t* t) // 80 20: size → p
 static int Opcode_Sys_Gfree(Thread_t* t) // 80 21: p → ok
 {
 	uint32_t p = Thread_Pop(t);
-	int ok = GFree(p);
+	int ok = p ? GFree(p) : 1; // native 4953bf: freeing NULL succeeds
 	if(!ok)
 		SYS_ERROR(t, MSG_GFREE_BAD_ADDRESS, p);
 	Thread_Push(t, (uint32_t)ok);
@@ -386,61 +386,85 @@ static int Opcode_Sys_CountFiles(Thread_t* t) // 80 24: pattern, recurse → n
  */
 static int Opcode_Sys_ListFiles(Thread_t* t) // 80 25: buf, bufSize, pattern, recurse, max -> bytes/count
 {
-    uint32_t max = Thread_Pop(t);
-    uint32_t recurse = Thread_Pop(t);
-    const char* pattern = (const char*)PopPtr(t);
-    uint32_t bufSize = Thread_Pop(t);
-    char* buf = (char*)PopPtr(t);
-    int limit = max && max < 0x7fffffffu ? (int)max : 0x7fffffff;
-    uint32_t i, bytes = 0;
-    int count = FindFiles(NULL, pattern, (int)recurse, NULL, limit);
-    char** names;
-    int allocated = count;
-    if(count <= 0) { Thread_Push(t, 0); return 0; }
-    names = (char**)BGI_Alloc((size_t)count * sizeof(char*));
-    for(i = 0; i < (uint32_t)count; ++i) names[i] = (char*)BGI_Alloc(0x104);
-    count = FindFiles(names, pattern, (int)recurse, NULL, count);
-    for(i = 0; i < (uint32_t)count; ++i) bytes += (uint32_t)strlen(names[i]) + 1;
-    if(buf && bytes <= bufSize) {
-        for(i = 0; i < (uint32_t)count; ++i) {
-            size_t size = strlen(names[i]) + 1;
-            memcpy(buf, names[i], size); buf += size;
-        }
-    }
-    for(i = 0; i < (uint32_t)allocated; ++i) BGI_Free(names[i]);
-    BGI_Free(names);
-    Thread_Push(t, !buf ? bytes : bytes <= bufSize ? (uint32_t)count : 0xffffffffu);
-    return 0;
+	uint32_t max = Thread_Pop(t);
+	uint32_t recurse = Thread_Pop(t);
+	const char* pattern = (const char*)PopPtr(t);
+	uint32_t bufSize = Thread_Pop(t);
+	char* buf = (char*)PopPtr(t);
+	int limit = max && max < 0x7fffffffu ? (int)max : 0x7fffffff;
+	uint32_t i, bytes = 0;
+	int count = FindFiles(NULL, pattern, (int)recurse, NULL, limit);
+	char** names;
+	int allocated = count;
+	if(count <= 0)
+	{
+		Thread_Push(t, 0);
+		return 0;
+	}
+	names = (char**)BGI_Alloc((size_t)count * sizeof(char*));
+	for(i = 0; i < (uint32_t)count; ++i)
+		names[i] = (char*)BGI_Alloc(0x104);
+	count = FindFiles(names, pattern, (int)recurse, NULL, count);
+	for(i = 0; i < (uint32_t)count; ++i)
+		bytes += (uint32_t)strlen(names[i]) + 1;
+	if(buf && bytes <= bufSize)
+	{
+		for(i = 0; i < (uint32_t)count; ++i)
+		{
+			size_t size = strlen(names[i]) + 1;
+			memcpy(buf, names[i], size);
+			buf += size;
+		}
+	}
+	for(i = 0; i < (uint32_t)allocated; ++i)
+		BGI_Free(names[i]);
+	BGI_Free(names);
+	Thread_Push(t, !buf ? bytes : bytes <= bufSize ? (uint32_t)count
+												   : 0xffffffffu);
+	return 0;
 }
 
 /* 80 26: directory-name counterpart of list_files. The four-argument
  * query/fill contract is used by builddata._bp in KanojoStep. */
 static int Opcode_Sys_ListDirectories(Thread_t* t)
 {
-    uint32_t max = Thread_Pop(t);
-    const char* pattern = (const char*)PopPtr(t);
-    uint32_t capacity = Thread_Pop(t);
-    char* buffer = (char*)PopPtr(t);
-    OsFindData_t entry;
-    OsFind_t* find = OS_FindFirst(pattern, &entry);
-    uint32_t bytes = 0, count = 0;
-    int fits = 1;
-    if(find) {
-        do {
-            size_t n;
-            if(!(entry.attrs & OS_ATTR_DIRECTORY) || strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0)continue;
-            if(max && count >= max)break;
-            n = strlen(entry.name) + 1;
-            if(buffer) {
-                if(n <= capacity && fits) { memcpy(buffer, entry.name, n); buffer += n; capacity -= (uint32_t)n; }
-                else fits = 0;
-            }
-            bytes += (uint32_t)n; ++count;
-        } while(OS_FindNext(find, &entry));
-        OS_FindClose(find);
-    }
-    Thread_Push(t, !buffer ? bytes : fits ? count : 0xffffffffu);
-    return 0;
+	uint32_t max = Thread_Pop(t);
+	const char* pattern = (const char*)PopPtr(t);
+	uint32_t capacity = Thread_Pop(t);
+	char* buffer = (char*)PopPtr(t);
+	OsFindData_t entry;
+	OsFind_t* find = OS_FindFirst(pattern, &entry);
+	uint32_t bytes = 0, count = 0;
+	int fits = 1;
+	if(find)
+	{
+		do
+		{
+			size_t n;
+			if(!(entry.attrs & OS_ATTR_DIRECTORY) || strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0)
+				continue;
+			if(max && count >= max)
+				break;
+			n = strlen(entry.name) + 1;
+			if(buffer)
+			{
+				if(n <= capacity && fits)
+				{
+					memcpy(buffer, entry.name, n);
+					buffer += n;
+					capacity -= (uint32_t)n;
+				}
+				else
+					fits = 0;
+			}
+			bytes += (uint32_t)n;
+			++count;
+		} while(OS_FindNext(find, &entry));
+		OS_FindClose(find);
+	}
+	Thread_Push(t, !buffer ? bytes : fits ? count
+										  : 0xffffffffu);
+	return 0;
 }
 
 static int Opcode_Sys_Mkdir(Thread_t* t) // 80 28: path → ok
@@ -1057,7 +1081,7 @@ static int Opcode_Sys_SetDisplayMode(Thread_t* t) // 80 60: sizeIdx, pixelMode, 
 	uint32_t fullscreen = Thread_Pop(t), pixelMode = Thread_Pop(t), sizeIdx = Thread_Pop(t);
 	if(pixelMode >= 2)
 		ScriptError(MSG_BAD_PIXEL_MODE, t);
-	if(sizeIdx >= (gEngine->gen >= GEN_1_494 ? 8u : 4u)) // the size table has eight entries from 1.494 on, four before
+	if(sizeIdx >= (uint32_t)Display_ModeCount()) // the size table has eight entries from 1.494 on, four before
 		ScriptError(MSG_BAD_SCREEN_SIZE, t);
 	SetDisplayMode((int)sizeIdx, (int)pixelMode, (int)fullscreen);
 	return 0;
@@ -2374,7 +2398,7 @@ void Vm_Optable80Init(void)
 		{0x21, Opcode_Sys_Gfree, GEN_FIRST, GEN_LAST},
 		{0x24, Opcode_Sys_CountFiles, GEN_FIRST, GEN_LAST},
 		{0x25, Opcode_Sys_ListFiles, GEN_FIRST, GEN_LAST},
-        {0x26, Opcode_Sys_ListDirectories, GEN_FIRST, GEN_LAST},
+		{0x26, Opcode_Sys_ListDirectories, GEN_FIRST, GEN_LAST},
 		{0x27, Opcode_Sys_MoveFile, GEN_1_494, GEN_LAST},
 		{0x28, Opcode_Sys_Mkdir, GEN_FIRST, GEN_LAST},
 		{0x29, Opcode_Sys_Rmdir, GEN_FIRST, GEN_LAST},

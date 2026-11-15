@@ -672,6 +672,11 @@ static int Sprite_GetParam(DispObj_t* o, int no, int32_t* out)
 	Bmp_t a;
 	switch(no)
 	{
+		case 0x10:
+			if(gEngine->screenModes != 16)
+				return DispObj_GetParam(o, no, out);
+			out[0] = s->bmp1;
+			return 0;
 		case 0x41:
 			if(s->mode != 2 && s->mode != 5)
 				return (int)0xffff0001;

@@ -108,6 +108,7 @@ static void BuildGlyph(BidiCtx_t* x, BidiChar_t* ch, int delay)
 	int width;
 
 	ch->node = Layout_NewNode(delay);
+	ch->node->emHeight = x->size;
 	ch->node->srcOfs = ch->ofs;
 	Bmp_Fill(&view, NULL, 0);
 	Text_PaintGlyph(&view, &g, (int)ch->code, x->fi->font, x->colour);

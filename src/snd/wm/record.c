@@ -111,7 +111,7 @@ int Wm_SeCheck(int slot)
 {
 	if(!Wm_Running())
 		return WM_E_NOT_RUNNING;
-	if((uint32_t)slot >= WM_SE_SLOTS)
+	if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount())
 		return WM_E_BAD_CHANNEL;
 	return gSe[slot].active ? 0 : WM_E_NOT_LOADED;
 }

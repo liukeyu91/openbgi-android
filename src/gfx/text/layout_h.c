@@ -212,6 +212,7 @@ int Text_LayoutCoreH(RichState_t* rich, int32_t* outLines, const char* str, int 
 		}
 
 		node = Layout_NewNode(m.delay);
+		node->emHeight = size;
 		node->srcOfs = pos;
 		Bmp_Fill(&view, NULL, 0);
 		Text_PaintGlyph(&view, &g, (int)code, cf->font, m.colour);

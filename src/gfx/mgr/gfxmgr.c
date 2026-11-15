@@ -89,6 +89,7 @@ int Gfx_GetProjCentre(Gfx_t* g, int32_t out[2])
 // the compositor, the background, every object and the buffers
 void Gfx_Dtor(Gfx_t* g)
 {
+	Gfx_DeleteAllParticles(g); // depth slices must detach while the compositor is alive
 	if(g->comp)
 	{
 		Compositor_Dtor(g->comp);
@@ -101,7 +102,6 @@ void Gfx_Dtor(Gfx_t* g)
 	Gfx_DeleteAllEffectors(g);
 	Gfx_DeleteAllMaps(g);
 	Gfx_DeleteAllWindows(g);
-	Gfx_DeleteAllParticles(g);
 	Gfx_DeleteAllRains(g);
 	Gfx_DeleteAllKnobs(g);
 	Gfx_DeleteAllGroups(g);

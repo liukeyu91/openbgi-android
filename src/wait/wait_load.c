@@ -6,7 +6,7 @@
  *
  * Interface: waitobj.h (the constructors).
  *
- *   WaitLoader     base: a file read by the loader thread into a 32 MB buffer
+ *   WaitLoader     base: a file read by the loader thread into a buffer sized for the decoded resource
  *   WaitBmpLoad    "90 10": the file becomes a bitmap slot; pushes nothing
  *   WaitSeLoad     "A0 20" / "A0 21": the file becomes a sound effect slot;
  *                  pushes nothing
@@ -22,6 +22,7 @@
  * An archive name of "0" stands for "no archive" (a loose file).  These are
  * counted waits: the machine does not shut down while one is pending.
  */
+#include "bgi/version.h"
 #include "bgi/wait.h"
 #include "bgi/waitobj.h"
 #include "bgi/error.h"
@@ -34,7 +35,7 @@
 typedef struct WaitLoader // 0x238 bytes
 {
 	Wait_t w;         // (WaitCounted)
-	uint8_t* buf;     // 32 MB file buffer
+	uint8_t* buf;     // decoded-size file buffer
 	char arc[0x104];  // lower-cased archive name ("" for none)
 	char name[0x104]; // lower-cased file name
 	uint32_t status;  // loader status: 0 pending, -1 failed, else the size in bytes
@@ -91,12 +92,22 @@ static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const
 	strcpy(w->name, name);
 	SjisStrLwr(w->name);
 	w->useCache = useCache && gFileCache != NULL;
-	w->buf = (uint8_t*)BGI_Alloc(0x2000000);
-	if(w->useCache)
+	/* The decoded image may be much larger than its compressed entry:
+     * Full HD sprite sheets exceed the original 32 MiB scratch buffer. */
+	uint32_t bytes = 0;
+	w->cacheHit = w->useCache && FileCache_Lookup(gFileCache, NULL, &bytes, ARC_ARG(w), w->name);
+	if(!w->cacheHit)
+		bytes = GetFileSize_(ARC_ARG(w), w->name);
+	if(gEngine->gen < GEN_1_69_472 && bytes < 0x2000000u)
+		bytes = 0x2000000u;
+	if(bytes < 16)
+		bytes = 16;
+	w->buf = (uint8_t*)BGI_Alloc((size_t)bytes + 0x30);
+	memset(w->buf + bytes, 0, 0x30);
+	if(w->cacheHit)
 	{
-		w->cacheHit = FileCache_Lookup(gFileCache, w->buf, &w->status, ARC_ARG(w), w->name) != 0;
-		if(w->cacheHit)
-			return;
+		FileCache_Lookup(gFileCache, w->buf, &w->status, ARC_ARG(w), w->name);
+		return;
 	}
 	Loader_QueueFile(&w->status, w->buf, ARC_ARG(w), w->name);
 }

@@ -27,7 +27,7 @@ uint32_t Wm_SeLoad(int slot, const void* bwFile, int fadeInMs, double gain, doub
 	Wm_Lock();
 	if(!Wm_Running())
 		res = WM_E_NOT_RUNNING;
-	else if((uint32_t)slot >= WM_SE_SLOTS)
+	else if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount())
 		res = WM_E_BAD_CHANNEL;
 	else
 	{
@@ -67,7 +67,7 @@ int Wm_SeUnload(int slot)
 	Wm_Lock();
 	if(!Wm_Running())
 		res = WM_E_NOT_RUNNING;
-	else if((uint32_t)slot >= WM_SE_SLOTS)
+	else if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount())
 		res = WM_E_BAD_CHANNEL;
 	else
 	{
@@ -126,7 +126,7 @@ int Wm_SeSetMasterVolume(int slot, uint32_t vol)
 	Wm_Lock();
 	if(!Wm_Running())
 		res = WM_E_NOT_RUNNING;
-	else if((uint32_t)slot >= WM_SE_SLOTS)
+	else if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount())
 		res = WM_E_BAD_CHANNEL;
 	else
 	{
@@ -148,7 +148,7 @@ int Wm_SeSetChannelVolume(int slot, uint32_t vol)
 	Wm_Lock();
 	if(!Wm_Running())
 		res = WM_E_NOT_RUNNING;
-	else if((uint32_t)slot >= WM_SE_SLOTS)
+	else if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount())
 		res = WM_E_BAD_CHANNEL;
 	else
 	{

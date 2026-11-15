@@ -200,6 +200,7 @@ typedef struct Bg8
 	uint32_t* table;     // the ring table, rings * 4 dwords, refilled on every setLevel
 	int32_t rippleNo;    // the ripple definition ("92 00" / "92 01") in the bitmap manager
 	int32_t selector;    // the phase selector of the definition (setParam 0x100)
+	int32_t smooth;      // four-bit bilinear sampling (setParam 0xFF)
 } Bg8_t;
 void Bg8_Ctor(Bg8_t* b);
 void Bg8_Dtor(Bg8_t* b);
@@ -264,22 +265,23 @@ int Bg11_SetLink(Bg11_t* b, int link);        // 1 ok, 0 link not 0 or 1
 //  --- type 12: transformed layers ------------------------------
 typedef struct Bg12Layer
 {
-	int32_t hasBitmap;  // a bitmap was set (Bg12_LayerSetBitmap)
-	int32_t visible;    // drawn when set
-	int32_t x, y;       // 16.16 screen position of the centre
-	int32_t effect;     // Bmp_BlitEffect effect of layers 1..7 (layer 0 is copied)
-	int32_t level;      // 0..0x100, handed to the blit (0 shows the bitmap as it is)
-	int32_t bmp;        // the bitmap, any size
-	int32_t gen;        // its generation
-	int32_t cx, cy;     // 16.16 centre inside the bitmap
-	int32_t angle;      // 16.16 degrees
-	int32_t sx, sy;     // 16.16 scale (non-zero)
-	int32_t angleCurve; // Ease curve of the angle delta
-	int32_t scaleCurve; // Ease curve of the scale delta
-	int32_t dcx, dcy;   // centre delta (16.16) reached at progress 0x100
-	int32_t dAngle;     // angle delta (16.16 degrees) reached at progress 0x100, through angleCurve
-	int32_t dsx, dsy;   // scale delta (16.16) reached at progress 0x100, through scaleCurve
-	int32_t smooth;     // bilinear sampling
+	int32_t hasBitmap;   // a bitmap was set (Bg12_LayerSetBitmap)
+	int32_t visible;     // drawn when set
+	int32_t x, y;        // 16.16 screen position of the centre
+	int32_t effect;      // Bmp_BlitEffect effect of layers 1..7 (layer 0 is copied)
+	int32_t level;       // 0..0x100, handed to the blit (0 shows the bitmap as it is)
+	int32_t bmp;         // the bitmap, any size
+	int32_t gen;         // its generation
+	int32_t cx, cy;      // 16.16 centre inside the bitmap
+	int32_t angle;       // 16.16 degrees
+	int32_t sx, sy;      // 16.16 scale (non-zero)
+	int32_t centreCurve; // Ease curve of the centre delta
+	int32_t angleCurve;  // Ease curve of the angle delta
+	int32_t scaleCurve;  // Ease curve of the scale delta
+	int32_t dcx, dcy;    // centre delta (16.16) reached at progress 0x100
+	int32_t dAngle;      // angle delta (16.16 degrees) reached at progress 0x100, through angleCurve
+	int32_t dsx, dsy;    // scale delta (16.16) reached at progress 0x100, through scaleCurve
+	int32_t smooth;      // bilinear sampling
 } Bg12Layer_t;
 typedef struct Bg12
 {

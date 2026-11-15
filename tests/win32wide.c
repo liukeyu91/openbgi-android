@@ -118,17 +118,33 @@ int WideCharToMultiByte(UINT cp, DWORD flags, LPCWSTR src, int cch, LPSTR dst, i
 		*used = FALSE;
 	while(inLeft)
 	{
-		if(iconv(cd, &in, &inLeft, &out, &outLeft) != (size_t)-1)
+		// Convert one character so musl's successful '*' substitution can be
+		// translated into the Windows used-default flag and requested byte.
+		size_t chunk = 2;
+		uint16_t unit = (uint8_t)in[0] | (uint16_t)(uint8_t)in[1] << 8;
+		if(unit >= 0xd800 && unit <= 0xdbff && inLeft >= 4)
+			chunk = 4;
+		char* next = in;
+		size_t left = chunk;
+		char* saved = out;
+		size_t available = outLeft;
+		size_t result = iconv(cd, &next, &left, &out, &outLeft);
+		if(result == 0 && left == 0)
+		{
+			in += chunk;
+			inLeft -= chunk;
+			continue;
+		}
+		if(result == (size_t)-1 && errno == E2BIG)
 			break;
-		if(errno == E2BIG)
-			break;
-		// a character the code page lacks: the default character, one unit taken
+		out = saved;
+		outLeft = available;
 		*out++ = def ? def[0] : '?';
 		outLeft--;
 		if(used)
 			*used = TRUE;
-		in += 2;
-		inLeft -= 2;
+		in += chunk;
+		inLeft -= chunk;
 	}
 	iconv_close(cd);
 	n = (int)(out - buf);

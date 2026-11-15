@@ -15,6 +15,12 @@
  * code match the original.
  */
 #include "wm_internal.h"
+#include "bgi/version.h"
+
+int Wm_SeSlotCount(void)
+{
+	return gEngine->seSlots == 128 ? 128 : 64;
+}
 
 /* BGI_SND_DEBUG in the environment reports music opens (with the file's
  * loop specification) and the pump's restarts / ends on stderr */
@@ -194,7 +200,7 @@ int Wm_DebugVoice(int bgm, int index, WmVoiceInfo_t* out)
 {
 	const Voice_t* v;
 	memset(out, 0, sizeof *out);
-	if(bgm ? (index < 0 || index >= WM_BGM_CHANNELS) : (index < 0 || index >= WM_SE_SLOTS))
+	if(bgm ? (index < 0 || index >= WM_BGM_CHANNELS) : (index < 0 || index >= Wm_SeSlotCount()))
 		return 0;
 	v = bgm ? &gBgmVoices[index] : &gSeVoices[index];
 	out->loaded = v->stream != NULL;

@@ -28,7 +28,7 @@
 
 void CheckSeSlot(uint32_t slot, Thread_t* t) // 0.. 63: a sound-effect slot
 {
-	if(slot >= 0x40)
+	if(slot >= (gEngine->seSlots == 128 ? 128u : 64u))
 		CHECK_ERROR(t, MSG_BAD_SE_SLOT, (int)slot);
 }
 
