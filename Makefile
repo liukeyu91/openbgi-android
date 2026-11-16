@@ -3,26 +3,37 @@
 #
 # Makefile - builds OpenBGI
 #
-#   make                 native Linux build        -> bin/bgi
-#   make win             MinGW cross build          -> bin/bgi.exe
-#   make android-core    Android ARM64 core archive -> bin/android/arm64-v8a/libopenbgi-core.a
-#   make android-native  Android SurfaceView/JNI library -> bin/android/arm64-v8a/libopenbgi.so
-#   make wasm            Emscripten build           -> bin/wasm/openbgi.html (+ .js, .wasm; docs/wasm.md)
+#   make                 native Linux build        -> $(BIN_DIR)/bgi
+#   make win             MinGW cross build          -> $(BIN_DIR)/bgi.exe
+#   make android-core    Android ARM64 core archive -> $(BIN_DIR)/android/arm64-v8a/libopenbgi-core.a
+#   make android-native  Android SurfaceView/JNI library -> $(BIN_DIR)/android/arm64-v8a/libopenbgi.so
+#   make wasm            Emscripten build           -> $(BIN_DIR)/wasm/openbgi.html (+ .js, .wasm; docs/wasm.md)
 #   make CC=clang        any other C99 compiler
-#   make tools           the command-line tools -> bin/bpasm, bin/bgiscn, bin/bgidump, bin/bgipack
+#   make tools           the command-line tools -> $(BIN_DIR)/bpasm, $(BIN_DIR)/bgiscn, $(BIN_DIR)/bgidump, $(BIN_DIR)/bgipack
 #   make test            build and run the unit tests (tests/)
 #   make check           syntax-check every source with -pedantic
 #   make check-win       syntax-check src/os/win32 against stub SDK headers (no MinGW needed)
 #   make check-wasm      syntax-check src/os/wasm against a stub Emscripten header (no emcc needed)
 #   make wasm-test       the asset server's protocol test (node)
-#   make wasm-sim        the WebAssembly back end as a native binary (bin/openbgi-wasmsim, no browser)
+#   make wasm-sim        the WebAssembly back end as a native binary ($(BIN_DIR)/openbgi-wasmsim, no browser)
 #   make clean
 #
-# Layout: inc/ headers, src/ sources, obj/ objects, bin/ binaries.
+# Layout: inc/ headers, src/ sources, $(OBJ_DIR)/ objects, $(BIN_DIR)/ binaries.
 # The OS layer is src/os/os_common.c plus src/os/posix/*.c, src/os/win32/*.c
 # or src/os/wasm/*.c.  Only plain make is used; no autotools / CMake.
 
 CC      ?= gcc
+OBJ_DIR ?= obj
+BIN_DIR ?= bin
+SANITIZERS ?=
+comma := ,
+ifneq ($(strip $(SANITIZERS)),)
+  OBJ_DIR := obj/sanitize-$(subst $(comma),-,$(SANITIZERS))
+  BIN_DIR := bin/sanitize-$(subst $(comma),-,$(SANITIZERS))
+  override OPT := -O1 -g
+  CFLAGS += -fsanitize=$(SANITIZERS) -fno-omit-frame-pointer -fno-sanitize-recover=all
+  LDFLAGS += -fsanitize=$(SANITIZERS) -fno-sanitize-recover=all
+endif
 # the optional libraries are looked up with pkg-config; a cross build uses
 # its toolchain's own (see the win32 platform below), never the host's
 PKG_CONFIG ?= pkg-config
@@ -32,11 +43,12 @@ CSTD    := -std=c99
 # estimates assume unbounded %s arguments (the inputs are archive and file
 # names, which are bounded by the formats that produce them)
 WARN    := -Wall -Wextra -pedantic -Wno-unused-parameter \
-           -Wno-format-truncation -Wno-format-overflow
+           -Wno-format-truncation -Wno-format-overflow -Wno-unknown-warning-option
 OPT     ?= -O2 -g
 INC     := -Iinc
 CFLAGS  += $(CSTD) $(WARN) $(OPT) $(INC) -D_POSIX_C_SOURCE=200809L
-LDFLAGS +=
+CFLAGS += $(EXTRA_CFLAGS)
+LDFLAGS += $(EXTRA_LDFLAGS)
 
 # ---- platform -------------------------------------------------------------
 # "make win" selects MinGW, "make wasm" Emscripten, and "make android-core"
@@ -59,7 +71,7 @@ ifeq ($(PLATFORM),wasm)
              -sEXPORTED_FUNCTIONS=_main,_malloc,_free \
              -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPU8,HEAPU16,HEAP16,HEAPU32,FS,IDBFS \
              -lidbfs.js --pre-js tools/wasm/client.js --shell-file tools/wasm/shell.html
-  TARGET  := bin/wasm/openbgi$(EXE)
+  TARGET  := $(BIN_DIR)/wasm/openbgi$(EXE)
   # no host libraries: the BW codec 3 (Vorbis) needs the single-file decoder here
   VORBIS  := $(if $(wildcard src/snd/stb_vorbis.c),stb,none)
 else ifeq ($(PLATFORM),wasmsim)
@@ -72,7 +84,7 @@ else ifeq ($(PLATFORM),wasmsim)
   TOOL_SRC := tools/wasm/hostmock.c tools/wasm/fakebrowser.c
   CFLAGS  += -DBGI_WASM -DBGI_POSIX -I. -Itools/wasmstub
   LDLIBS  += -lm
-  TARGET  := bin/openbgi-wasmsim
+  TARGET  := $(BIN_DIR)/openbgi-wasmsim
   VORBIS  := none
 else ifeq ($(PLATFORM),win32)
   # CROSS is the toolchain prefix; it must not be given a value (not even an
@@ -96,7 +108,7 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
   AR := $(ANDROID_LLVM)/llvm-ar
   CFLAGS += -DBGI_ANDROID -D_GNU_SOURCE -fPIC -Wno-unknown-warning-option
   VORBIS := none
-  TARGET := bin/android/arm64-v8a/libopenbgi-core.a
+  TARGET := $(BIN_DIR)/android/arm64-v8a/libopenbgi-core.a
   ifeq ($(PLATFORM),android-native)
     ifeq ($(and $(strip $(FREETYPE_INCLUDE)),$(strip $(FREETYPE_LIB))),)
       $(error Set FREETYPE_INCLUDE and FREETYPE_LIB to the ARM64 FreeType headers and static library)
@@ -112,7 +124,7 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     VORBIS := vorbisfile
     VORBIS_CFLAGS := -I$(ANDROID_VORBIS_PREFIX)/include
     VORBIS_LIBS := $(ANDROID_VORBIS_ARCHIVES) -lm
-    TARGET := bin/android/arm64-v8a/libopenbgi.so
+    TARGET := $(BIN_DIR)/android/arm64-v8a/libopenbgi.so
   endif
 else
   EXE     :=
@@ -128,6 +140,21 @@ else
   ifneq ($(shell $(PKG_CONFIG) --exists fontconfig 2>/dev/null && echo yes),)
     CFLAGS += -DBGI_HAVE_FONTCONFIG $(shell $(PKG_CONFIG) --cflags fontconfig)
     LDLIBS += $(shell $(PKG_CONFIG) --libs fontconfig)
+  endif
+endif
+
+# Development sanitizers use separate objects and binaries; they never reuse
+# unsanitized release objects or add sanitizer runtimes to release APKs.
+ifneq ($(strip $(SANITIZERS)),)
+  ifneq ($(PLATFORM),posix)
+    $(error SANITIZERS currently supports the POSIX test backend only)
+  endif
+endif
+HARDEN ?= 1
+ifeq ($(HARDEN),1)
+  ifeq ($(filter wasm wasmsim win32,$(PLATFORM)),)
+    CFLAGS += -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat=2 -Werror=format-security
+    LDFLAGS += -Wl,-z,relro,-z,now,-z,noexecstack
   endif
 endif
 
@@ -165,7 +192,7 @@ BPC_SRC  := $(wildcard src/bpc/*.c)
 DUMP_SRC := $(if $(filter wasm wasmsim,$(PLATFORM)),,$(wildcard src/dump/*.c))
 VM_SRC   := $(wildcard src/vm/*.c)
 WAIT_SRC := $(wildcard src/wait/*.c)
-SYS_SRC  := $(wildcard src/sys/*.c) $(wildcard src/sys/install/*.c) $(wildcard src/sysobj/*.c)
+SYS_SRC  := $(wildcard src/sys/*.c) $(wildcard src/sys/install/*.c) $(wildcard src/sys$(OBJ_DIR)/*.c)
 GFX_SRC  := $(wildcard src/gfx/*.c) $(wildcard src/gfx/background/*.c) $(wildcard src/gfx/mgr/*.c) \
             $(wildcard src/gfx/particle/*.c) $(wildcard src/gfx/window/*.c) $(wildcard src/gfx/text/*.c)
 SND_SRC  := $(wildcard src/snd/*.c) $(wildcard src/snd/bw/*.c) $(wildcard src/snd/wm/*.c)
@@ -176,39 +203,39 @@ COMMON_OS_SRC := src/os/os_common.c
 
 SRC := $(CORE_SRC) $(ASM_SRC) $(SCN_SRC) $(BPC_SRC) $(DUMP_SRC) $(VM_SRC) $(WAIT_SRC) $(SYS_SRC) $(GFX_SRC) $(SND_SRC) $(DBG_SRC) \
        $(COMMON_OS_SRC) $(OS_SRC)
-OBJ := $(patsubst src/%.c,obj/$(PLATFORM)/%.o,$(SRC)) $(patsubst tools/%.c,obj/$(PLATFORM)/tools/%.o,$(TOOL_SRC))
+OBJ := $(patsubst src/%.c,$(OBJ_DIR)/$(PLATFORM)/%.o,$(SRC)) $(patsubst tools/%.c,$(OBJ_DIR)/$(PLATFORM)/tools/%.o,$(TOOL_SRC))
 DEP := $(OBJ:.o=.d)
-LIB_OBJ := $(filter-out obj/$(PLATFORM)/sys/main.o,$(OBJ)) # the engine without its entry point
+LIB_OBJ := $(filter-out $(OBJ_DIR)/$(PLATFORM)/sys/main.o,$(OBJ)) # the engine without its entry point
 
 # Opt-in device harness: a separate APK/library; never part of the release engine.
 ifeq ($(PLATFORM):$(ANDROID_HOST_TEST),android-native:1)
-  LIB_OBJ += obj/android-native/tools/android/hosttest.o
-  TARGET := bin/android-hosttest/arm64-v8a/libopenbgi.so
+  LIB_OBJ += $(OBJ_DIR)/android-native/tools/android/hosttest.o
+  TARGET := $(BIN_DIR)/android-hosttest/arm64-v8a/libopenbgi.so
   ANDROID_HOST_WRAP := -Wl,--wrap=Engine_Main
 endif
 
-TARGET ?= bin/bgi$(EXE)
+TARGET ?= $(BIN_DIR)/bgi$(EXE)
 
-.PHONY: all win android-core android-native wasm wasm-sim tools check check-win check-wasm wasm-test test clean msg
+.PHONY: all win android-core android-native wasm wasm-sim tools check check-win check-wasm wasm-test test sanitizer-test clean msg
 
 all: $(TARGET)
 
 # ---- the command-line tools (tools/*.c linked with the engine library) ----
-TOOLS := bin/bpasm$(EXE) bin/bgiscn$(EXE) bin/bgidump$(EXE) bin/bgipack$(EXE)
+TOOLS := $(BIN_DIR)/bpasm$(EXE) $(BIN_DIR)/bgiscn$(EXE) $(BIN_DIR)/bgidump$(EXE) $(BIN_DIR)/bgipack$(EXE)
 
 tools: $(TOOLS)
 
-bin/bpasm$(EXE): tools/bpasm.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+$(BIN_DIR)/bpasm$(EXE): tools/bpasm.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
-bin/bgiscn$(EXE): tools/bgiscn.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+$(BIN_DIR)/bgiscn$(EXE): tools/bgiscn.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
-bin/bgidump$(EXE): tools/bgidump.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+$(BIN_DIR)/bgidump$(EXE): tools/bgidump.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
-bin/bgipack$(EXE): tools/bgipack.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+$(BIN_DIR)/bgipack$(EXE): tools/bgipack.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
 win:
 	$(MAKE) PLATFORM=win32
@@ -226,35 +253,35 @@ wasm-sim:
 	$(MAKE) PLATFORM=wasmsim
 
 ifeq ($(PLATFORM),android-core)
-$(TARGET): $(LIB_OBJ) | bin
+$(TARGET): $(LIB_OBJ) | $(BIN_DIR)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $(LIB_OBJ)
 else ifeq ($(PLATFORM),android-native)
-$(filter obj/android-native/snd/bw/%,$(OBJ)): $(ANDROID_VORBIS_ARCHIVES)
-$(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) | bin
+$(filter $(OBJ_DIR)/android-native/snd/bw/%,$(OBJ)): $(ANDROID_VORBIS_ARCHIVES)
+$(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) | $(BIN_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) $(ANDROID_HOST_WRAP) -shared -Wl,--no-undefined -Wl,-soname,libopenbgi.so -Wl,-z,max-page-size=16384 -o $@ $(LIB_OBJ) $(LDLIBS)
 else
-$(TARGET): $(OBJ) | bin
+$(TARGET): $(OBJ) | $(BIN_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
 endif
 
-obj/$(PLATFORM)/%.o: src/%.c | inc/bgi/msg.h
+$(OBJ_DIR)/$(PLATFORM)/%.o: src/%.c | inc/bgi/msg.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-obj/$(PLATFORM)/tools/%.o: tools/%.c | inc/bgi/msg.h
+$(OBJ_DIR)/$(PLATFORM)/tools/%.o: tools/%.c | inc/bgi/msg.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 # third-party single-file libraries are compiled without the project's warnings
-obj/$(PLATFORM)/snd/stb_vorbis.o: src/snd/stb_vorbis.c
+$(OBJ_DIR)/$(PLATFORM)/snd/stb_vorbis.o: src/snd/stb_vorbis.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CSTD) $(OPT) $(INC) -w -c -o $@ $<
 
-bin:
-	@mkdir -p bin
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
 
 # the Shift-JIS message table is generated from tools/messages.txt
 inc/bgi/msg.h: tools/messages.txt tools/mkmsg.py
@@ -279,7 +306,7 @@ check-win:
 check-wasm:
 	@for f in src/os/wasm/*.c; do \
 	    echo "  CHECK $$f"; \
-	    $(CC) $(CFLAGS) -DBGI_WASM -Itools/wasmstub -fsyntax-only $$f || exit 1; \
+	    $(CC) $(CFLAGS) $(LDFLAGS) -DBGI_WASM -Itools/wasmstub -fsyntax-only $$f || exit 1; \
 	done
 
 # the asset server's protocol, exercised through the browser-side client under node
@@ -288,51 +315,54 @@ wasm-test:
 
 # ---- tests ---------------------------------------------------------------------
 TEST_SRC := $(filter-out tests/wasmfs.c tests/win32wide.c tests/posixpaths.c,$(wildcard tests/*.c))
-TEST_BIN := $(patsubst tests/%.c,bin/test_%$(EXE),$(TEST_SRC))
+TEST_BIN := $(patsubst tests/%.c,$(BIN_DIR)/test_%$(EXE),$(TEST_SRC))
 
-bin/test_%$(EXE): tests/%.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+$(BIN_DIR)/test_%$(EXE): tests/%.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
 # Count actual decoder calls while exercising cache behavior with real images.
-bin/test_cbgcache$(EXE): tests/cbgcache.c $(LIB_OBJ) | bin
+$(BIN_DIR)/test_cbgcache$(EXE): tests/cbgcache.c $(LIB_OBJ) | $(BIN_DIR)
 	$(CC) $(CFLAGS) -Wl,--wrap=BGI_CbgDecode -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
-bin/test_cbgfast$(EXE): tests/cbgfast.c src/core/cbg.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(filter-out obj/$(PLATFORM)/core/cbg.o,$(LIB_OBJ)) $(LDLIBS)
+$(BIN_DIR)/test_cbgfast$(EXE): tests/cbgfast.c src/core/cbg.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(filter-out $(OBJ_DIR)/$(PLATFORM)/core/cbg.o,$(LIB_OBJ)) $(LDLIBS)
 
-bin/test_cbg2fast$(EXE): tests/cbg2fast.c src/core/cbg2.c $(LIB_OBJ) | bin
-	$(CC) $(CFLAGS) -o $@ $< $(filter-out obj/$(PLATFORM)/core/cbg2.o,$(LIB_OBJ)) $(LDLIBS)
+$(BIN_DIR)/test_cbg2fast$(EXE): tests/cbg2fast.c src/core/cbg2.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(filter-out $(OBJ_DIR)/$(PLATFORM)/core/cbg2.o,$(LIB_OBJ)) $(LDLIBS)
 
 # the WebAssembly file layer on the host, against the mock server of the test
 # (built apart: it defines the OS_File* functions the platform's back end has too)
 WASMFS_SRC := tests/wasmfs.c src/os/wasm/fs.c src/os/wasm/sjis.c src/os/wasm/host.c src/os/os_common.c \
               tools/wasm/hostmock.c
-bin/test_wasmfs$(EXE): $(WASMFS_SRC) inc/bgi/os_wasm.h | bin
-	$(CC) $(CFLAGS) -DBGI_WASM -I. -Itools/wasmstub -o $@ $(WASMFS_SRC)
+$(BIN_DIR)/test_wasmfs$(EXE): $(WASMFS_SRC) inc/bgi/os_wasm.h | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -DBGI_WASM -I. -Itools/wasmstub -o $@ $(WASMFS_SRC)
 
 # the Win32 back end's string conversions on the host: wide.c against the stub
 # windows.h, with the 16-bit wchar_t of Windows, the code pages mocked by the
 # test with iconv (built apart for the same reason as the test above)
 WIN32WIDE_SRC := tests/win32wide.c src/os/win32/wide.c src/os/os_common.c
-bin/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32stub/windows.h | bin
-	$(CC) $(CFLAGS) -DBGI_WIN32 -fshort-wchar -Itools/win32stub -o $@ $(WIN32WIDE_SRC)
+$(BIN_DIR)/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32stub/windows.h | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -DBGI_WIN32 -fshort-wchar -Itools/win32stub -o $@ $(WIN32WIDE_SRC)
 
 ifeq ($(PLATFORM),posix)
 # Compile the Android font/encoding paths without Android window or JNI services.
 ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/android/sjis.c src/os/os_common.c
-bin/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc | bin
-	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
-TEST_BIN += bin/test_androidfont$(EXE)
+$(BIN_DIR)/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc | $(BIN_DIR)
+	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) $(LDFLAGS) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
+TEST_BIN += $(BIN_DIR)/test_androidfont$(EXE)
 
-bin/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c | bin
-	$(CC) $(CFLAGS) -o $@ $^ -pthread
-TEST_BIN += bin/test_wasmfs$(EXE) bin/test_win32wide$(EXE) bin/test_posixpaths$(EXE)
+$(BIN_DIR)/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ -pthread
+TEST_BIN += $(BIN_DIR)/test_wasmfs$(EXE) $(BIN_DIR)/test_win32wide$(EXE) $(BIN_DIR)/test_posixpaths$(EXE)
 endif
 
 test: $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "  RUN $$t"; $$t || exit 1; done
 
+sanitizer-test:
+	$(MAKE) SANITIZERS=address,undefined test
+
 clean:
-	rm -rf obj bin
+	python3 tools/clean.py "$(OBJ_DIR)" "$(BIN_DIR)"
 
 -include $(DEP)

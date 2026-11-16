@@ -57,7 +57,7 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 
 主应用输出为 `bin/android/openbgi.apk`。同一构建环境下执行
 `sh tools/android/package-ui-preview.sh` 可生成独立预览包。
-打包脚本使用本地测试签名密钥；后续覆盖安装需保留同一密钥。
+正式打包必须显式提供工程外的持久签名密钥和密码环境变量，并通过已固定的证书 SHA-256 校验；脚本不会自动生成替代密钥。详见 [签名、CI 与可复现构建](../../docs/build-integrity.md)。
 
 ## 开发检查
 

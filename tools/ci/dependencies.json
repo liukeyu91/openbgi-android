@@ -1,0 +1,26 @@
+{
+  "ndk": {
+    "url": "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip",
+    "sha256": "601246087a682d1944e1e16dd85bc6e49560fe8b6d61255be2829178c8ed15d9"
+  },
+  "build-tools": {
+    "url": "https://dl.google.com/android/repository/build-tools_r35_linux.zip",
+    "sha256": "bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88"
+  },
+  "platform": {
+    "url": "https://dl.google.com/android/repository/platform-35-ext15_r01.zip",
+    "sha256": "a93712aedd4f851d9cf1f7281f7c4fe5581ce03a9df37ffc8c53a487eadf311f"
+  },
+  "freetype": {
+    "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.gz",
+    "sha256": "d95564eabaf932255c7e3c2958217f42e010f92dcd90120155de3b954c3dc09a"
+  },
+  "ogg": {
+    "url": "https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz",
+    "sha256": "e2947bfc17a3898e156d940483fe23f70aa288ff7fce7f17968e47e3f82b5e43"
+  },
+  "vorbis": {
+    "url": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz",
+    "sha256": "e2ce5829a17081a31530423ff50b86428148c3956daa7d9e64beab71159ff281"
+  }
+}

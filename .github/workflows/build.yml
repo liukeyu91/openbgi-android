@@ -1,0 +1,50 @@
+name: Build and memory checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizers: ['', 'address,undefined']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker build -t openbgi-build -f tools/ci/Dockerfile .
+      - name: Host, Android contracts, ASan and UBSan
+        env:
+          SANITIZERS: ${{ matrix.sanitizers }}
+        run: docker run --rm -e SANITIZERS -e ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 -e UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 -v "$PWD:/src" openbgi-build sh tools/ci/test.sh
+  android-reproducible:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker build -t openbgi-build -f tools/ci/Dockerfile .
+      - run: mkdir -p ../deps ../reproduction
+      - name: Verify locked dependencies and compile ARM64 libraries
+        run: docker run --rm -v "$PWD:/src:ro" -v "$PWD/../deps:/deps" openbgi-build sh tools/ci/android-deps.sh /deps
+      - name: Build in independent paths and require identical APK, DEX and ELF
+        run: docker run --rm -v "$PWD:/src:ro" -v "$PWD/../deps:/deps:ro" -v "$PWD/../reproduction:/reproduction" openbgi-build python3 tools/ci/reproduce.py /reproduction /deps
+      - name: Collect unsigned artifact and evidence
+        if: always()
+        run: |
+          mkdir -p ci-results
+          docker image inspect openbgi-build --format '{{.Id}}' > ci-results/container-image.txt
+          cp tools/ci/dependencies.json ci-results/
+          find ../reproduction -type f \( -name 'build.log' -o -name 'reproducibility.json' -o -name 'openbgi-unsigned.apk' \) -exec cp --parents {} ci-results/ \;
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: android-unsigned-and-reproducibility
+          path: ci-results/
+          retention-days: 14
