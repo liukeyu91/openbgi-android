@@ -13,4 +13,10 @@ static inline Viewport_t AndroidViewport(int sw,int sh,int cw,int ch,int mode)
     else if(mode!=1){if((int64_t)w*ch>(int64_t)h*cw)w=(int)((int64_t)h*cw/ch);else h=(int)((int64_t)w*ch/cw);}
     v.x=(sw-w)/2;v.y=(sh-h)/2;v.w=w;v.h=h;return v;
 }
+/* Preserve pixel edges only when both axes have the same whole-number gain. */
+static inline int AndroidViewportNearest(Viewport_t v,int cw,int ch)
+{
+    return cw>0 && ch>0 && v.w>=cw && v.h>=ch &&
+        v.w%cw==0 && v.h%ch==0 && v.w/cw==v.h/ch;
+}
 #endif

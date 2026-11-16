@@ -15,6 +15,7 @@ static struct {
     ANativeWindow* window;
     unsigned generation;
     GLuint program,texture;
+    GLenum filter;
     int width,height;
     uint32_t* packed;
     size_t capacity;
@@ -77,7 +78,8 @@ static int Open(ANativeWindow* window,unsigned generation)
     if(!ok){char log[1024];glGetProgramInfoLog(gRender.program,sizeof log,NULL,log);OsAndroid_Log(log);return 0;}
     glUseProgram(gRender.program);glUniform1i(glGetUniformLocation(gRender.program,"canvas"),0);
     glGenTextures(1,&gRender.texture);glBindTexture(GL_TEXTURE_2D,gRender.texture);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    gRender.filter=GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT,4);glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_DITHER);
     {char log[256];snprintf(log,sizeof log,"EGL GLES2 renderer: %s; swap interval 1",glGetString(GL_RENDERER));OsAndroid_Log(log);}
@@ -117,6 +119,14 @@ int OsAndroid_Render(ANativeWindow* window,unsigned generation,const uint32_t* p
         ++gStats.partial;gStats.bytes+=(uint64_t)dw*dh*4;
     }
     v=AndroidViewport(sw,sh,w,h,mode);
+    {
+        GLenum filter=AndroidViewportNearest(v,w,h)?GL_NEAREST:GL_LINEAR;
+        if(filter!=gRender.filter){
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,filter);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,filter);
+            gRender.filter=filter;
+        }
+    }
     glViewport(0,0,sw,sh);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT);
     glViewport(v.x,sh-v.y-v.h,v.w,v.h);
     glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,0,positions);glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,0,uv);

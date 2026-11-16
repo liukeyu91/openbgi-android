@@ -78,3 +78,9 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 make bin/test_androidfont
 BGI_TEST_CJK_FONT=/path/to/NotoSansCJKjp-Regular.otf bin/test_androidfont
 ```
+
+### 缩放过滤与音频输出
+
+实际视口为相同整数倍放大时使用最近邻；非整数倍、缩小或两个轴比例不同时使用线性过滤。过滤方式会随窗口、画布和缩放模式变化自动调整。
+
+Android 音频保留混音器原采样率，接受设备协商出的采样率，在输出端连续线性重采样；可转换立体声/单声道、I16/浮点格式。打开失败会尝试设备原生采样率及备用格式，前台按秒重试，并记录请求参数、协商结果、错误码和写入失败。输出不可用时界面提示可导出日志。

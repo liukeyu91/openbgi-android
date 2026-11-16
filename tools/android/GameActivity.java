@@ -53,6 +53,19 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native boolean nativeCreate(String internal, String external, int scaleMode);
     private native void nativeSurface(Surface surface);
     private native void nativeVsync();
+    private native int nativeAudioStatus();
+    private boolean audioWarningShown;
+    private final Runnable audioCheck = new Runnable() {
+        public void run() {
+            if(!ready || !resumed)return;
+            int status=nativeAudioStatus();
+            if(status<0 && !audioWarningShown) {
+                audioWarningShown=true;
+                Toast.makeText(GameActivity.this,"音频输出暂不可用，可在“关于”页导出日志。",Toast.LENGTH_LONG).show();
+            } else if(status>0)audioWarningShown=false;
+            ui.postDelayed(this,1000);
+        }
+    };
     private final Choreographer.FrameCallback frames = time -> onFrame();
     private boolean rendering() { return ready && resumed && surfaceReady && audioFocus!=null && audioFocus.running(); }
     private void onFrame() {
@@ -228,9 +241,9 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             if(paused) { interruptionText.setText(audioFocus.message()); if(textInput != null) textInput.suspend(); }
         }
     }
-    @Override protected void onResume() { super.onResume(); resumed = true; if(audioFocus != null) audioFocus.resume(); stateChanged(); immersive(); }
+    @Override protected void onResume() { super.onResume(); resumed = true; if(audioFocus != null) audioFocus.resume(); stateChanged(); immersive(); ui.removeCallbacks(audioCheck); if(ready)ui.postDelayed(audioCheck,1000); }
     @Override protected void onPause() {
-        resumed=false;InitialTextRepairDialog.dismissAll(this);
+        resumed=false;ui.removeCallbacks(audioCheck);InitialTextRepairDialog.dismissAll(this);
         if(textInput!=null)textInput.suspend();if(audioFocus!=null)audioFocus.pause();stateChanged();super.onPause();
     }
     @Override public void onWindowFocusChanged(boolean hasFocus) {

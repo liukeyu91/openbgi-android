@@ -53,6 +53,7 @@ void OsAndroid_EngineOptions(char* out, size_t size);
 void OsAndroid_Log(const char* text);
 size_t OsAndroid_ScriptToUtf8(const char* text,char* out,size_t size);
 void OsAndroid_AudioForeground(int resumed);
+int OsAndroid_AudioStatus(void);
 uint64_t OsAndroid_ClockNs(void);
 JNIEnv* OsAndroid_GetEnv(int* attached);
 void OsAndroid_ReleaseEnv(int attached);

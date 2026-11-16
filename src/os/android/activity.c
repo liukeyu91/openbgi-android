@@ -237,6 +237,12 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeSurface(JNIEnv* 
 }
 
 /* Choreographer only grants frame tokens. The worker owns EGL and the canvas. */
+JNIEXPORT jint JNICALL Java_org_openbgi_port_GameActivity_nativeAudioStatus(JNIEnv* env,jobject activity)
+{
+    (void)env;(void)activity;
+    return OsAndroid_AudioStatus();
+}
+
 JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeVsync(JNIEnv* env,jobject activity)
 {
     AndroidHost_t* host=gHost;

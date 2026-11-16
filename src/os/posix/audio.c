@@ -29,7 +29,7 @@
 #endif
 #ifdef BGI_ANDROID
 #include "../android/android_internal.h"
-#include <aaudio/AAudio.h>
+#include "../android/audio_output.h"
 #endif
 
 static struct
@@ -53,47 +53,17 @@ void OsAndroid_AudioForeground(int resumed)
 	__atomic_store_n(&gAudioForeground, resumed, __ATOMIC_RELAXED);
 }
 
-// Only the mixer thread opens, writes or closes the stream.
-static AAudioStream* OpenAAudio(int rate)
+/* UI reads only this atomic status; it never accesses the stream. */
+static int gAudioOutputStatus;
+int OsAndroid_AudioStatus(void)
 {
-	AAudioStreamBuilder* builder;
-	AAudioStream* stream = NULL;
-	aaudio_result_t result = AAudio_createStreamBuilder(&builder);
-	if(result != AAUDIO_OK)
-		return NULL;
-	AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
-	AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_GAME);
-	AAudioStreamBuilder_setSampleRate(builder, rate);
-	AAudioStreamBuilder_setChannelCount(builder, 2);
-	AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
-	result = AAudioStreamBuilder_openStream(builder, &stream);
-	AAudioStreamBuilder_delete(builder);
-	if(result != AAUDIO_OK)
-		return NULL;
-	if(AAudioStream_getSampleRate(stream) != rate ||
-		AAudioStream_getChannelCount(stream) != 2 ||
-		AAudioStream_getFormat(stream) != AAUDIO_FORMAT_PCM_I16 ||
-		AAudioStream_requestStart(stream) != AAUDIO_OK)
-	{
-		AAudioStream_close(stream);
-		return NULL;
-	}
-	OsAndroid_Log("AAudio stereo output started");
-	return stream;
+    return __atomic_load_n(&gAudioOutputStatus,__ATOMIC_RELAXED);
+}
+static void AudioStatus(int status)
+{
+    __atomic_store_n(&gAudioOutputStatus,status,__ATOMIC_RELAXED);
 }
 
-static int WriteAAudio(AAudioStream* stream, const int16_t* buf, int frames)
-{
-	int done = 0;
-	while(done < frames)
-	{
-		aaudio_result_t n = AAudioStream_write(stream, buf + 2 * done, frames - done, 40000000);
-		if(n <= 0)
-			return n == 0; // a timeout can drop this period, a stream error needs a reopen
-		done += n;
-	}
-	return 1;
-}
 #endif
 
 // nanosleep that resumes after a signal
@@ -156,41 +126,41 @@ static void* AudioThread(void* arg)
 	int period = gAudio.rate / 50; // 20 ms
 	int16_t* buf = (int16_t*)malloc((size_t)period * 2 * sizeof(int16_t));
 #ifdef BGI_ANDROID
-	AAudioStream* stream = NULL;
-	int retry = 0;
+	AndroidAudioOutput_t output = {0};
+	int retry = 0, failures = 0;
 #endif
-	if(!buf)
+	if(!buf){
+#ifdef BGI_ANDROID
+        OsAndroid_Log("AAudio mixer buffer allocation failed");AudioStatus(-1);
+#endif
 		return NULL;
+    }
 	while(!__atomic_load_n(&gAudio.stop, __ATOMIC_RELAXED))
 	{
 #ifdef BGI_ANDROID
 		if(!__atomic_load_n(&gAudioForeground, __ATOMIC_RELAXED))
 		{
-			if(stream)
-			{
-				AAudioStream_close(stream);
-				stream = NULL;
-			}
+			AndroidAudio_Close(&output);AudioStatus(0);
 			retry = 0;
 			SleepNs(20000000L);
 			continue;
 		}
-		if(!stream && retry-- <= 0)
+		if(!output.stream && retry-- <= 0)
 		{
-			stream = OpenAAudio(gAudio.rate);
+            int opened=AndroidAudio_Open(&output,gAudio.rate,period,failures%30==0);
+            if(opened)failures=0;else ++failures;
+            AudioStatus(opened?1:-1);
 			retry = 49; // retry once a second while foregrounded
 		}
 #endif
 		memset(buf, 0, (size_t)period * 2 * sizeof(int16_t));
 		gAudio.fill(gAudio.user, buf, period);
 #ifdef BGI_ANDROID
-		if(stream)
+		if(output.stream)
 		{
-			if(WriteAAudio(stream, buf, period))
-				continue;
-			AAudioStream_close(stream);
-			stream = NULL;
-			retry = 0;
+			if(AndroidAudio_Write(&output,buf,period))continue;
+            AndroidAudio_Close(&output);AudioStatus(-1);
+            ++failures;retry=49;
 		}
 #endif
 #ifdef BGI_HAVE_ALSA
@@ -207,8 +177,7 @@ static void* AudioThread(void* arg)
 		SleepNs(20L * 1000000L); // the silent clock
 	}
 #ifdef BGI_ANDROID
-	if(stream)
-		AAudioStream_close(stream);
+    AndroidAudio_Close(&output);AudioStatus(0);
 #endif
 	free(buf);
 	return NULL;
@@ -217,9 +186,12 @@ static void* AudioThread(void* arg)
 // open the device (when built with ALSA) and start the pull thread; 0 when running already, for a bad argument or without a thread
 int OS_AudioStart(int rate, OsAudioFill_t fill, void* user)
 {
-	if(gAudio.running || rate <= 0 || !fill)
+	if(gAudio.running || rate < 50 || rate > 384000 || !fill)
 		return 0;
 	gAudio.rate = rate;
+#ifdef BGI_ANDROID
+    AudioStatus(0);
+#endif
 	gAudio.fill = fill;
 	gAudio.user = user;
 	gAudio.stop = 0;
@@ -228,6 +200,9 @@ int OS_AudioStart(int rate, OsAudioFill_t fill, void* user)
 #endif
 	if(pthread_create(&gAudio.thread, NULL, AudioThread, NULL) != 0)
 	{
+#ifdef BGI_ANDROID
+        OsAndroid_Log("AAudio mixer thread creation failed");AudioStatus(-1);
+#endif
 #ifdef BGI_HAVE_ALSA
 		if(gAudio.pcm)
 			snd_pcm_close(gAudio.pcm);
