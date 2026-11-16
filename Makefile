@@ -125,6 +125,9 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     CFLAGS += -DBGI_HAVE_FFMPEG -I$(ANDROID_FFMPEG_PREFIX)/include
     ANDROID_FFMPEG_ARCHIVES := $(addprefix $(ANDROID_FFMPEG_PREFIX)/lib/,libavformat.a libavcodec.a libswscale.a libswresample.a libavutil.a)
     LDLIBS += $(ANDROID_FFMPEG_ARCHIVES)
+    # Static FFmpeg AArch64 assembly references its internal tables directly.
+    # Keep archive symbols local to this DSO; JNI entry points remain exported.
+    LDFLAGS += -Wl,--exclude-libs,ALL
     LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lEGL -lGLESv2 -lm
     ANDROID_VORBIS_ARCHIVES := $(addprefix $(ANDROID_VORBIS_PREFIX)/lib/,libvorbisfile.a libvorbis.a libogg.a)
     VORBIS := vorbisfile
