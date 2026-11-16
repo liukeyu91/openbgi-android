@@ -56,6 +56,7 @@ static uint32_t Assemble(const char* text, EngineGen_t gen, uint8_t* out, uint32
 	uint32_t n;
 	FILE* log = quiet ? fopen("/dev/null", "w") : stderr;
 	Asm_Assemble(text, strlen(text), gen, log, &r);
+	BGI_Free(r.labels);
 	if(quiet)
 		fclose(log);
 	if(!r.file)
@@ -355,6 +356,7 @@ static void TestErrors(void)
 		AsmResult_t r;
 		FILE* log = fopen("/dev/null", "w");
 		Asm_Assemble("atan2\n", 5, GEN_1_58, log, &r);
+		BGI_Free(r.labels);
 		fclose(log);
 		CHECK(r.file != NULL && r.warnings == 1 && r.errors == 0);
 		BGI_Free(r.file);

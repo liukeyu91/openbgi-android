@@ -19,5 +19,5 @@ cmake_android -S freetype-2.13.3 -B ft-build -DCMAKE_INSTALL_PREFIX="$deps/arm64
 cmake --build ft-build --parallel 4; cmake --install ft-build
 cmake_android -S libogg-1.3.6 -B ogg-build -DCMAKE_INSTALL_PREFIX="$deps/arm64" -DBUILD_TESTING=OFF
 cmake --build ogg-build --parallel 4; cmake --install ogg-build
-cmake_android -S libvorbis-1.3.7 -B vorbis-build -DCMAKE_INSTALL_PREFIX="$deps/arm64" -DCMAKE_PREFIX_PATH="$deps/arm64" -DBUILD_TESTING=OFF
+cmake_android -S libvorbis-1.3.7 -B vorbis-build -DCMAKE_INSTALL_PREFIX="$deps/arm64" -DCMAKE_PREFIX_PATH="$deps/arm64" -DOGG_INCLUDE_DIR="$deps/arm64/include" -DOGG_LIBRARY="$deps/arm64/lib/libogg.a" -DBUILD_TESTING=OFF
 cmake --build vorbis-build --parallel 4; cmake --install vorbis-build

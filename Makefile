@@ -357,7 +357,7 @@ TEST_BIN += $(BIN_DIR)/test_wasmfs$(EXE) $(BIN_DIR)/test_win32wide$(EXE) $(BIN_D
 endif
 
 test: $(TEST_BIN)
-	@for t in $(TEST_BIN); do echo "  RUN $$t"; $$t || exit 1; done
+	@status=0; for t in $(TEST_BIN); do echo "  RUN $$t"; $$t || status=1; done; exit $$status
 
 sanitizer-test:
 	$(MAKE) SANITIZERS=address,undefined test
