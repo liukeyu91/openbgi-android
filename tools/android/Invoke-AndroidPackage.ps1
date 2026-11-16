@@ -16,8 +16,9 @@ try {
     $key=Join-Path $SigningDirectory $filename
     if(-not(Test-Path -LiteralPath $key)) {throw 'Persistent signing key is missing; refusing to create a replacement'}
     $credential=Import-Clixml -LiteralPath (Join-Path $SigningDirectory 'release.credential.xml')
-    $env:OPENBGI_KEYSTORE=(& wsl.exe wslpath -a $key).Trim()
-    if($LASTEXITCODE -ne 0) {throw 'Cannot translate the signing-key path for WSL'}
+    $translated=& wsl.exe -e wslpath -a $key
+    if($LASTEXITCODE -ne 0 -or -not $translated) {throw 'Cannot translate the signing-key path for WSL'}
+    $env:OPENBGI_KEYSTORE=$translated.Trim()
     $env:OPENBGI_KEY_ALIAS=$credential.UserName
     $env:OPENBGI_STORE_PASS=$credential.GetNetworkCredential().Password
     $env:WSLENV=(@($old['WSLENV'],'OPENBGI_KEYSTORE/u','OPENBGI_KEY_ALIAS/u','OPENBGI_STORE_PASS/u') | Where-Object {$_}) -join ':'

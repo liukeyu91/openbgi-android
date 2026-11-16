@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Include the decoder to exercise its private bit reader and predictor without
  * exporting test-only entry points from the engine. See the Makefile rule. */

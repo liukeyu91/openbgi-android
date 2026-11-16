@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "../src/core/cbg2.c"
 #if defined(__linux__)
