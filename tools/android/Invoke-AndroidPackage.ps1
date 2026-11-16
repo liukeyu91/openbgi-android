@@ -5,10 +5,11 @@ param(
     [Parameter(Mandatory=$true)][string]$WorkingDirectory,
     [Parameter(Mandatory=$true)][string]$PackageScript,
     [ValidateSet('main','ui-preview')][string]$Variant='main',
+    [long]$SourceDateEpoch=0,
     [string]$SigningDirectory=(Join-Path $env:USERPROFILE '.openbgi\signing')
 )
 $ErrorActionPreference='Stop'
-$names=@('OPENBGI_KEYSTORE','OPENBGI_KEY_ALIAS','OPENBGI_STORE_PASS','WSLENV')
+$names=@('OPENBGI_KEYSTORE','OPENBGI_KEY_ALIAS','OPENBGI_STORE_PASS','SOURCE_DATE_EPOCH','WSLENV')
 $old=@{}
 foreach($name in $names) {$old[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 try {
@@ -19,9 +20,16 @@ try {
     $translated=& wsl.exe -e wslpath -a $key
     if($LASTEXITCODE -ne 0 -or -not $translated) {throw 'Cannot translate the signing-key path for WSL'}
     $env:OPENBGI_KEYSTORE=$translated.Trim()
+    if($SourceDateEpoch -eq 0) {
+        $sourceRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $timestamp=& git -C $sourceRoot log -1 --format=%ct
+        if($LASTEXITCODE -ne 0 -or -not $timestamp) {throw 'Set SourceDateEpoch when building without Git history'}
+        $SourceDateEpoch=[long]$timestamp
+    }
+    $env:SOURCE_DATE_EPOCH=[string]$SourceDateEpoch
     $env:OPENBGI_KEY_ALIAS=$credential.UserName
     $env:OPENBGI_STORE_PASS=$credential.GetNetworkCredential().Password
-    $env:WSLENV=(@($old['WSLENV'],'OPENBGI_KEYSTORE/u','OPENBGI_KEY_ALIAS/u','OPENBGI_STORE_PASS/u') | Where-Object {$_}) -join ':'
+    $env:WSLENV=(@($old['WSLENV'],'OPENBGI_KEYSTORE/u','OPENBGI_KEY_ALIAS/u','OPENBGI_STORE_PASS/u','SOURCE_DATE_EPOCH/u') | Where-Object {$_}) -join ':'
     Push-Location -LiteralPath $WorkingDirectory
     try {
         & wsl.exe -e sh $PackageScript

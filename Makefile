@@ -192,7 +192,7 @@ BPC_SRC  := $(wildcard src/bpc/*.c)
 DUMP_SRC := $(if $(filter wasm wasmsim,$(PLATFORM)),,$(wildcard src/dump/*.c))
 VM_SRC   := $(wildcard src/vm/*.c)
 WAIT_SRC := $(wildcard src/wait/*.c)
-SYS_SRC  := $(wildcard src/sys/*.c) $(wildcard src/sys/install/*.c) $(wildcard src/sys$(OBJ_DIR)/*.c)
+SYS_SRC  := $(wildcard src/sys/*.c) $(wildcard src/sys/install/*.c) $(wildcard src/sysobj/*.c)
 GFX_SRC  := $(wildcard src/gfx/*.c) $(wildcard src/gfx/background/*.c) $(wildcard src/gfx/mgr/*.c) \
             $(wildcard src/gfx/particle/*.c) $(wildcard src/gfx/window/*.c) $(wildcard src/gfx/text/*.c)
 SND_SRC  := $(wildcard src/snd/*.c) $(wildcard src/snd/bw/*.c) $(wildcard src/snd/wm/*.c)
