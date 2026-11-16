@@ -40,6 +40,6 @@ CI 产物明确命名 `openbgi-unsigned.apk`，不能直接用于覆盖安装正
 
 `make sanitizer-test CC=clang` 使用 AddressSanitizer 和 UndefinedBehaviorSanitizer，异常即失败，编译产物独立放在 `obj/sanitize-address-undefined` 和 `bin/sanitize-address-undefined`。GitHub Actions 在真实 Linux 容器中开启泄漏检查，另外运行常规 C 测试、Android Java 合约、字体与构建保护测试。
 
-Linux/Android 默认启用栈保护、FORTIFY、格式字符串检查、RELRO/NOW 与不可执行栈。Android 正式包不包含开发用 sanitizer 运行库。
+Linux/Android 默认启用栈保护、FORTIFY、格式字符串检查、RELRO/NOW 与不可执行栈。Android 正式包不包含开发用 sanitizer 运行库。CI 会检查实际生成的 ELF：栈保护及 FORTIFY 符号、RELRO/NOW、不可执行栈与 sanitizer 运行库依赖，记录为 `hardening.json`；任一缺失则失败。
 
 这些措施能发现已执行路径中的问题，不代表 C 引擎已经内存安全，也不能证明所有游戏资源、脚本路径或第三方库均安全。尚未引入覆盖率驱动模糊测试，手机端也没有运行 HWASan；后续应持续补充畸形资源、解码器和 VM 边界用例。
