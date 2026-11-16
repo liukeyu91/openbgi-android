@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "makinghd-evb-resources",
+  "description": "Native compressed graphics and translated scripts; resource conversion, not a full-route validation.",
+  "runtime": {"engine": "1.659.8", "text_encoding": "utf8", "font_family": "Noto Sans CJK SC"},
+  "sources": [
+    {"format": "evb-external", "path": "MakingLovers_chs.klt", "select": ["*"]}
+  ]
+}

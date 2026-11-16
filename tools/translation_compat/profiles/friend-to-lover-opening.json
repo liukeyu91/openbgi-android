@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "friend-to-lover-arc-opening",
+  "description": "Already-translated native ARC opening; Windows font hooks are a separate runtime adaptation.",
+  "runtime": {"engine": "1.616", "text_encoding": "gbk", "font_family": "Noto Sans CJK SC"},
+  "sources": [
+    {"format": "bgi-arc", "path": "Archive/data01800.arc", "select": ["a_prologue01"]}
+  ]
+}

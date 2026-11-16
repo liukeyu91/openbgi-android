@@ -20,7 +20,7 @@ OpenBGI 是 BGI / Ethornell 引擎的 C99 重写。本仓库提供 Android 移�
 3. 打开游戏；如编码无法确定，在“游戏设置”中预览并选择。
 
 导入会复制文件到应用存储，需要足够的可用空间。覆盖安装同一应用可保留数据；卸载会清除应用内数据。
-汉化补丁若封装在 Windows EXE 中，需先展开相应资源。
+导入时会自动展开已识别的汉化资源包，并应用已知游戏的编码与引擎设置。已有游戏可在卡片菜单选择“处理汉化补丁”。
 
 Android 版仍在开发中，不同作品的兼容性需要分别验证。
 
@@ -30,6 +30,7 @@ Android 版仍在开发中，不同作品的兼容性需要分别验证。
 - [Android 使用与构建](tools/android/README.md)
 - [Android 概述](docs/android.md)
 - [引擎版本与游戏配置](docs/versions.md)
+- [离线汉化资源检测与转换](tools/translation_compat/README.md)
 - [GPL-2.0 许可证](LICENSE)
 
 ## Upstream OpenBGI

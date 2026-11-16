@@ -1,0 +1,8 @@
+{
+  "name": "Bouncy Castle CamelliaEngine",
+  "tag": "r1rv86",
+  "source_url": "https://raw.githubusercontent.com/bcgit/bc-java/r1rv86/core/src/main/java/org/bouncycastle/crypto/engines/CamelliaEngine.java",
+  "source_sha256": "bdaf28f3415282c177bb067d89da724355b4b377c58d471c758841d20713bab1",
+  "license_url": "https://raw.githubusercontent.com/bcgit/bc-java/r1rv86/LICENSE.html",
+  "license_sha256": "afaf5bd0b0d869dc86b71711e1b775b204948634c9710a35a9a70d1613a2ab14"
+}

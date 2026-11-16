@@ -7,6 +7,7 @@ import java.util.*;
 final class GameImport {
     interface OpenArchive { InputStream open() throws IOException; }
     interface Progress { void copied(int completed, int total); }
+    interface Prepare { void run(File staging) throws IOException; }
     static final class Archive {
         final String name; final long size; final OpenArchive source;
         Archive(String name, long size, OpenArchive source) { this.name=name; this.size=size; this.source=source; }
@@ -27,6 +28,9 @@ final class GameImport {
         return result;
     }
     static synchronized void install(File target, List<Archive> files, Progress progress) throws IOException {
+        install(target,files,progress,staging->{});
+    }
+    static synchronized void install(File target, List<Archive> files, Progress progress, Prepare prepare) throws IOException {
         Path game=target.toPath(), staging=game.resolveSibling(".import-"+target.getName());
         if (Files.exists(game)) throw new IOException("目标游戏目录已存在");
         remove(staging);
@@ -57,6 +61,7 @@ final class GameImport {
                 }
                 progress.copied(++done,files.size());
             }
+            prepare.run(staging.toFile());
             if(!gamePresent(staging.toFile())) throw new IOException("目录根部缺少非空的 system.arc 或 ipl._bp，请选择完整游戏目录");
             Files.move(staging,game,StandardCopyOption.ATOMIC_MOVE);
         } catch(IOException|RuntimeException error) {

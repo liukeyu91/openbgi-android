@@ -41,11 +41,13 @@ python3 "$root/tools/android/normalize-zip.py" "$stage/resources.zip" "$stage/re
 "$aapt2" link --manifest "$manifest" -I "$platform" -o "$stage/unsigned.apk" "$stage/resources-sorted.zip"
 mkdir -p "$stage/classes"
 sh "$root/tools/android/generate-profiles.sh" "$stage/EngineProfiles.java"
+python3 "$root/tools/android/generate-patch-profiles.py" "$stage/PatchProfiles.java"
 javac --release 8 -encoding UTF-8 -classpath "$platform" -d "$stage/classes" \
     "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" "$root/tools/android/SaveBackup.java" "$root/tools/android/SaveRestore.java" "$root/tools/android/GameDataLock.java" \
     "$root/tools/android/InitialTextRepair.java" "$root/tools/android/InitialTextRepairDialog.java" \
     "$root/tools/android/ArchiveTextSamples.java" "$root/tools/android/EncodingDetector.java" "$root/tools/android/EncodingPreview.java" "$root/tools/android/GameEncoding.java" \
     "$root/tools/android/ProgramCompatibility.java" "$root/tools/android/NativeProgramInspector.java" \
+    "$stage/PatchProfiles.java" "$root/tools/android/PatchImport.java" "$root/tools/android/PatchEvb.java" "$root/tools/android/PatchAplib.java" "$root/tools/android/PatchCpk.java" "$root/tools/android/PatchCamellia.java" \
     "$stage/EngineProfiles.java" "$root/tools/android/TouchInput.java" "$root/tools/android/InputKeys.java" "$root/tools/android/GameSettings.java" "$root/tools/android/SettingsDialog.java" "$root/tools/android/Viewport.java" "$root/tools/android/AudioFocusController.java" "$root/tools/android/GameAudioFocus.java" "$root/tools/android/InputDialogs.java" "$root/tools/android/GameTextCodec.java" "$root/tools/android/TextInput.java" "$root/tools/android/GameActivity.java" "$root/tools/android/LauncherActivity.java" "$root/tools/android/GameImport.java" "$root/tools/android/CrashLogs.java"
 jar cf "$stage/launcher.jar" -C "$stage/classes" .
 python3 "$root/tools/android/normalize-zip.py" "$stage/launcher.jar" "$stage/launcher-sorted.jar" --epoch "$epoch"
@@ -57,6 +59,7 @@ cp "$root/LICENSE" "$stage/assets/licenses/OpenBGI-GPLv2.txt"
 cp "$ft/docs/GPLv2.TXT" "$stage/assets/licenses/FreeType-GPLv2.txt"
 cp "$ogg/COPYING" "$stage/assets/licenses/libogg.txt"
 cp "$vorbis/COPYING" "$stage/assets/licenses/libvorbis.txt"
+cp "$root/tools/android/crypto/BouncyCastle-MIT.txt" "$stage/assets/licenses/BouncyCastle-MIT.txt"
 awk '/^ \*\// {exit} /^ \*/ {sub(/^ \* ?/, ""); print}' \
     "$root/src/os/cp936.inc" > "$stage/assets/licenses/Unicode.txt"
 awk '/^ \*\// {exit} /^ \*/ {sub(/^ \* ?/, ""); print}' \

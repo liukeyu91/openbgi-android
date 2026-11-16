@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "kanojostep-embedded-evb-and-update",
+  "description": "Original CHS distribution resources, excluding its Windows DLL; not the phone's later supplemental translation.",
+  "runtime": {"engine": "1.636", "text_encoding": "gbk"},
+  "sources": [
+    {"format": "evb-pe", "path": "KanojoStep_CHS_20200101.exe", "select": ["*"], "exclude": ["r_noe_03", "c_siina_insert01"]},
+    {"format": "evb-external", "path": "Update0.pck", "select": ["*"]}
+  ]
+}

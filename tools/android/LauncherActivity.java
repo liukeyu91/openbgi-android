@@ -298,7 +298,7 @@ public final class LauncherActivity extends Activity {
     }
     private void gameMenu(File dir,String name) {
         if(importing)return;
-        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查","导出存档","导入存档"},(d,which)->{
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查","导出存档","导入存档","处理汉化补丁"},(d,which)->{
             if(which==0) play(dir);
             if(which==1) SettingsDialog.show(this,dir,name,this::showLibrary);
             if(which==2)rename(dir,name);
@@ -306,6 +306,7 @@ public final class LauncherActivity extends Activity {
             if(which==5)checkCompatibility(dir);
             if(which==6)exportSaves(dir,name);
             if(which==7)importSaves(dir);
+            if(which==8)processTranslation(dir);
             if(which==4 && engineRunning()) { toast("请先退出正在运行的游戏，再删除游戏"); return; }
             if(which==4) new AlertDialog.Builder(this).setTitle("删除“"+name+"”？").setMessage("将永久删除此游戏的应用内数据（含存档和设置）。导入源目录会保留。")
                 .setNegativeButton("取消",null).setPositiveButton("删除",(dialog,w)->new Thread(()->{
@@ -464,7 +465,10 @@ public final class LauncherActivity extends Activity {
         try {
             List<GameImport.Archive> files=new ArrayList<>();
             collect(tree,DocumentsContract.getTreeDocumentId(tree),"",files,new HashSet<>(),0);
-            GameImport.install(destination,files,(done,total)->runOnUiThread(()->{importStatus="正在导入："+done+" / "+total+" 项";if(!isDestroyed() && status!=null)status.setText(importStatus);}));
+            final PatchImport.Result[] patch={null};
+            GameImport.install(destination,files,(done,total)->importProgress("正在导入："+done+" / "+total+" 项"),
+                staging->{patch[0]=PatchImport.process(staging,PatchProfiles.ALL,this::importProgress);
+                    GameSettings settings=GameSettings.load(staging);patch[0].apply(settings);settings.save(staging);});
             published=true;
             defaults(destination,null);
             String title="游戏 "+new java.text.SimpleDateFormat("MM-dd HH:mm",Locale.ROOT).format(new Date());
@@ -478,12 +482,29 @@ public final class LauncherActivity extends Activity {
             android.util.Log.i("OpenBGI",settings.encodingStatus());
             runOnUiThread(()->{importStatus="正在检查程序…";if(status!=null)status.setText(importStatus);});
             ProgramCompatibility.Result compatibility=scanCompatibility(destination,settings.profile);
-            runOnUiThread(()->{ importing=false;if(isDestroyed())return;showLibrary();toast("导入完成。"+settings.encodingStatus());showCompatibility(compatibility); });
+            String patchStatus=patch[0]==null||(patch[0].containers==0&&patch[0].profile.isEmpty())?"":patch[0].summary();
+            runOnUiThread(()->{ importing=false;if(isDestroyed())return;showLibrary();toast("导入完成。"+patchStatus+settings.encodingStatus());showCompatibility(compatibility); });
         } catch(Exception error) {
             if(!published)try { GameImport.remove(destination.toPath()); } catch(IOException ignored) {}
             android.util.Log.w("OpenBGI","Import failed",error);
             runOnUiThread(()->{ importing=false; showLibrary(); toast("导入失败："+error.getMessage()); });
         }
+    }
+    private void importProgress(String message){
+        runOnUiThread(()->{importStatus=message;if(!isDestroyed()&&status!=null)status.setText(message);});
+    }
+    private void processTranslation(File dir){
+        if(importing)return;
+        if(engineRunning()){toast("请先存档并退出游戏，再处理汉化补丁");return;}
+        importing=true;importStatus="正在检测汉化补丁…";showLibrary();
+        new Thread(()->{
+            try(GameDataLock lock=GameDataLock.acquire(resourceDirectory(dir))){
+                PatchImport.Result result=PatchImport.process(resourceDirectory(dir),PatchProfiles.ALL,this::importProgress);
+                GameSettings settings=GameSettings.load(dir);result.apply(settings);settings.save(dir);
+                ProgramCompatibility.Result compatibility=scanCompatibility(dir,settings.profile);
+                runOnUiThread(()->{importing=false;if(isDestroyed())return;showLibrary();toast(result.summary());showCompatibility(compatibility);});
+            }catch(Exception error){android.util.Log.w("OpenBGI","Patch import failed",error);runOnUiThread(()->{importing=false;if(isDestroyed())return;showLibrary();toast("汉化处理失败："+error.getMessage());});}
+        },"OpenBGI-PatchImport").start();
     }
     private void collect(Uri tree,String id,String prefix,List<GameImport.Archive> files,Set<String> visited,int depth) throws IOException {
         if(depth>64 || !visited.add(id))throw new IOException("目录过深或循环引用");

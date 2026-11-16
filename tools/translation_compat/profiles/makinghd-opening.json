@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "makinghd-opening-cpk-v2",
+  "description": "Opening script proof; UI images and mixed encoding still require adaptation.",
+  "runtime": {"engine": "1.659.8", "text_encoding": "utf8", "font_family": "Noto Sans CJK SC"},
+  "sources": [
+    {"format": "cpk-v2", "path": "MakingLovers_cn.cpk", "key": "MakingLovers_cn.key", "select": ["prologue*", "*._bp"]}
+  ]
+}
