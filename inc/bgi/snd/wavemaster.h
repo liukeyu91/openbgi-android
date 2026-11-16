@@ -39,6 +39,7 @@
 int Wm_SeSlotCount(void);
 
 int Wm_Init(void); // start the library and the audio device; 0, 1 already started, 5 no device
+int Wm_EnsureMixer(void); // start output for an external source without marking the script library initialised
 /* An extra source mixed with the channels: `fn` adds its stereo 16-bit
  * frames into `acc` (interleaved 32-bit accumulators, `frames` of them)
  * on the mixer's thread, under the library lock.  The movie player feeds

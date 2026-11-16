@@ -12,6 +12,9 @@ unzip -qo cache/platform-35-ext15_r01.zip -d sdk
 cp -a sdk/android-35-ext15/. sdk/platforms/android-35/
 for file in freetype-2.13.3 libogg-1.3.6 libvorbis-1.3.7; do tar -xzf "cache/$file.tar.gz"; done
 export ANDROID_NDK_HOME="$deps/android-ndk-r27d"
+tar -xJf cache/ffmpeg-8.1.3.tar.xz
+mkdir -p ffmpeg-build
+(cd ffmpeg-build && sh "$root/tools/ci/ffmpeg-build.sh" "$deps/ffmpeg-8.1.3" "$deps/ffmpeg-arm64" android)
 cmake_android() {
  cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF "$@"
 }

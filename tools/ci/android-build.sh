@@ -4,6 +4,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 deps=${1:?dependency directory}; deps=$(cd "$deps" && pwd)
 export ANDROID_NDK_HOME="$deps/android-ndk-r27d" ANDROID_SDK_ROOT="$deps/sdk"
 export FREETYPE_SOURCE="$deps/freetype-2.13.3" OGG_SOURCE="$deps/libogg-1.3.6" VORBIS_SOURCE="$deps/libvorbis-1.3.7"
+export FFMPEG_SOURCE="$deps/ffmpeg-8.1.3" ANDROID_FFMPEG_PREFIX="$deps/ffmpeg-arm64"
 export OPENBGI_SIGNING_MODE=unsigned
 : "${SOURCE_DATE_EPOCH:?Set SOURCE_DATE_EPOCH to the source commit timestamp}"
 cd "$root"

@@ -243,6 +243,11 @@ JNIEXPORT jint JNICALL Java_org_openbgi_port_GameActivity_nativeAudioStatus(JNIE
     return OsAndroid_AudioStatus();
 }
 
+JNIEXPORT jint JNICALL Java_org_openbgi_port_GameActivity_nativeMovieStatus(JNIEnv* env,jobject activity)
+{
+    (void)env;(void)activity;return OsAndroid_MovieStatus();
+}
+
 JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeVsync(JNIEnv* env,jobject activity)
 {
     AndroidHost_t* host=gHost;
@@ -259,6 +264,7 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeState(JNIEnv* en
     BGI_UNUSED(env); BGI_UNUSED(activity);
     if(!host) return;
     OsAndroid_AudioForeground(resumed);
+    OsAndroid_MovieForeground(resumed);
     ClockState(resumed);
     pthread_mutex_lock(&host->lock);
     if(host->resumed != resumed) OsAndroid_Log(resumed ? "Host running" : "Host paused");
@@ -275,6 +281,7 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeDestroy(JNIEnv* 
     BGI_UNUSED(env); BGI_UNUSED(activity);
     if(!host) return;
     OsAndroid_AudioForeground(0);
+    OsAndroid_MovieForeground(0);
     pthread_mutex_lock(&host->lock);
     host->destroyed = 1;
     host->inputCount = 0;

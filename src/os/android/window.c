@@ -160,6 +160,7 @@ static void DispatchInput(const InputEvent_t* e)
     if(!gActive)return;
     if(e->type==AINPUT_EVENT_TYPE_KEY){
         if(e->key<=0 || e->key>=256)return;
+        if(e->action==AKEY_EVENT_ACTION_DOWN&&(e->key==0x1b||e->key==0x0d)&&OsAndroid_MovieSkip())return;
         if(e->action==AKEY_EVENT_ACTION_DOWN){gKeys[e->key]=0x80;if(gEvents.key_down)gEvents.key_down(e->key,e->repeat);}
         else if(e->action==AKEY_EVENT_ACTION_UP){gKeys[e->key]=0;if(gEvents.key_up)gEvents.key_up(e->key);}
         return;
@@ -169,6 +170,7 @@ static void DispatchInput(const InputEvent_t* e)
         if(gKeys[1])MouseButton(0,0);if(gKeys[2])MouseButton(1,0);return;
     }
     inside=MapPoint(e->x,e->y,e->width,e->height);
+    if(e->action==ANDROID_POINTER_DOWN&&inside&&e->key==0&&OsAndroid_MovieSkip())return;
     if((inside || gKeys[1] || gKeys[2]) && gEvents.mouse_move)gEvents.mouse_move(gMouseX,gMouseY);
     if(e->action==ANDROID_POINTER_DOWN && inside && e->key>=0 && e->key<=1 && !gKeys[e->key+1])MouseButton(e->key,1);
     else if(e->action==ANDROID_POINTER_UP && e->key>=0 && e->key<=1 && gKeys[e->key+1])MouseButton(e->key,0);
@@ -214,6 +216,7 @@ int OS_PumpMessages(void)
     input=ReadInputLocked(host,&event);
     pthread_mutex_unlock(&host->lock);
     /* Never hold the UI/lifecycle mutex across driver calls or eglSwapBuffers. */
+    if(active&&OsAndroid_MovieTick()&&gEvents.movie_event)gEvents.movie_event(1);
     if(gRedraw!=redraw){gRedraw=redraw;gDirty=1;gRetryAt=0;}
     if(!window){OsAndroid_RenderClose();gDirty=1;}
     else if(gDirty && gVisible && gCanvas && frame!=gLastFrame && OsAndroid_ClockNs()>=gRetryAt){

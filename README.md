@@ -202,6 +202,9 @@ finds them on the PATH or next to `bgi` (no library is linked: the video
 comes in through a pipe, the sound through the engine's own mixer).
 Without them the movie is skipped (a note on stderr says so) and the
 game goes on, as before.
+Android instead links a local-file FFmpeg decoder into the app, with movie
+audio routed through the mixer, background pause and tap / Esc / Enter to skip.
+See [Android movie playback](docs/android-movie.md) for codecs and limits.
 
 The later builds (1.529 on) open their window at the size their scripts
 ask for, which is the game's own resolution scaled down when the

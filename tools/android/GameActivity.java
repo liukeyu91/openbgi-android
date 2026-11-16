@@ -54,7 +54,9 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native void nativeSurface(Surface surface);
     private native void nativeVsync();
     private native int nativeAudioStatus();
+    private native int nativeMovieStatus();
     private boolean audioWarningShown;
+    private boolean movieWarningShown;
     private final Runnable audioCheck = new Runnable() {
         public void run() {
             if(!ready || !resumed)return;
@@ -63,6 +65,9 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
                 audioWarningShown=true;
                 Toast.makeText(GameActivity.this,"音频输出暂不可用，可在“关于”页导出日志。",Toast.LENGTH_LONG).show();
             } else if(status>0)audioWarningShown=false;
+            int movie=nativeMovieStatus();
+            if(movie<0&&!movieWarningShown){movieWarningShown=true;Toast.makeText(GameActivity.this,"影片无法播放，已跳过；可在“关于”页导出日志。",Toast.LENGTH_LONG).show();}
+            else if(movie>=0)movieWarningShown=false;
             ui.postDelayed(this,1000);
         }
     };

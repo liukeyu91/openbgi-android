@@ -610,6 +610,9 @@ static void TestApi(void)
 		pcm[i] = Signal(i, 0);
 	CHECK(Wm_SePlay(0, 0x80, 0x40) == 0x14); // not running
 	CHECK(Wm_SeSetChannelVolume(0, 0x40) == 0x14 && Wm_BgmSetChannelVolume(0, 0x40) == 0x14);
+	/* A movie can start output before the script initialises Wave Master. */
+	CHECK(Wm_EnsureMixer() == 1);
+	CHECK(Wm_StartTimer() == 0x14);
 	CHECK(Wm_Init() == 0);
 	CHECK(Wm_Init() == 1);                   // already
 	CHECK(Wm_SePlay(0, 0x80, 0x40) == 0x14); // the timer is not running yet

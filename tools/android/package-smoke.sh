@@ -8,6 +8,7 @@ sdk=${ANDROID_SDK_ROOT:?Set ANDROID_SDK_ROOT to an Android SDK directory}
 ft=${FREETYPE_SOURCE:?Set FREETYPE_SOURCE to the FreeType source directory used for the library}
 ogg=${OGG_SOURCE:?Set OGG_SOURCE to the libogg source directory used for the library}
 vorbis=${VORBIS_SOURCE:?Set VORBIS_SOURCE to the libvorbis source directory used for the library}
+ffmpeg=${FFMPEG_SOURCE:?Set FFMPEG_SOURCE to the FFmpeg source directory used for the library}
 tools="$sdk/build-tools/${ANDROID_BUILD_TOOLS:-35.0.0}"
 platform="$sdk/platforms/android-${ANDROID_PLATFORM:-35}/android.jar"
 aapt2=${AAPT2_BIN:-"$tools/aapt2"}
@@ -59,6 +60,7 @@ cp "$root/LICENSE" "$stage/assets/licenses/OpenBGI-GPLv2.txt"
 cp "$ft/docs/GPLv2.TXT" "$stage/assets/licenses/FreeType-GPLv2.txt"
 cp "$ogg/COPYING" "$stage/assets/licenses/libogg.txt"
 cp "$vorbis/COPYING" "$stage/assets/licenses/libvorbis.txt"
+cp "$ffmpeg/COPYING.LGPLv2.1" "$stage/assets/licenses/FFmpeg-LGPLv2.1.txt"
 cp "$root/tools/android/crypto/BouncyCastle-MIT.txt" "$stage/assets/licenses/BouncyCastle-MIT.txt"
 awk '/^ \*\// {exit} /^ \*/ {sub(/^ \* ?/, ""); print}' \
     "$root/src/os/cp936.inc" > "$stage/assets/licenses/Unicode.txt"

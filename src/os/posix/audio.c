@@ -55,6 +55,25 @@ void OsAndroid_AudioForeground(int resumed)
 
 /* UI reads only this atomic status; it never accesses the stream. */
 static int gAudioOutputStatus;
+static int gAudioDelayUs;
+int OsAndroid_AudioDelayUs(void)
+{
+    return __atomic_load_n(&gAudioDelayUs,__ATOMIC_RELAXED);
+}
+static void AudioDelay(AndroidAudioOutput_t* out,int pendingUs)
+{
+    int64_t frames=0,delay=0;
+    if(out->stream&&out->rate>0){
+        frames=AAudioStream_getFramesWritten(out->stream)-AAudioStream_getFramesRead(out->stream);
+        if(frames>0)delay=frames>(int64_t)out->rate*2?2000000:frames*1000000/out->rate;
+        delay+=pendingUs;
+    }
+    /* Ignore implausible device counters, never move movie time backwards
+     * by an unbounded value supplied by an audio driver. */
+    if(delay<0)delay=0;
+    if(delay>2000000)delay=2000000;
+    __atomic_store_n(&gAudioDelayUs,(int)delay,__ATOMIC_RELAXED);
+}
 int OsAndroid_AudioStatus(void)
 {
     return __atomic_load_n(&gAudioOutputStatus,__ATOMIC_RELAXED);
@@ -141,6 +160,7 @@ static void* AudioThread(void* arg)
 		if(!__atomic_load_n(&gAudioForeground, __ATOMIC_RELAXED))
 		{
 			AndroidAudio_Close(&output);AudioStatus(0);
+			AudioDelay(&output,0);
 			retry = 0;
 			SleepNs(20000000L);
 			continue;
@@ -154,12 +174,16 @@ static void* AudioThread(void* arg)
 		}
 #endif
 		memset(buf, 0, (size_t)period * 2 * sizeof(int16_t));
+#ifdef BGI_ANDROID
+        AudioDelay(&output,period*1000000/gAudio.rate);
+#endif
 		gAudio.fill(gAudio.user, buf, period);
 #ifdef BGI_ANDROID
 		if(output.stream)
 		{
-			if(AndroidAudio_Write(&output,buf,period))continue;
+			if(AndroidAudio_Write(&output,buf,period)){AudioDelay(&output,0);continue;}
             AndroidAudio_Close(&output);AudioStatus(-1);
+            AudioDelay(&output,0);
             ++failures;retry=49;
 		}
 #endif
@@ -178,6 +202,7 @@ static void* AudioThread(void* arg)
 	}
 #ifdef BGI_ANDROID
     AndroidAudio_Close(&output);AudioStatus(0);
+    AudioDelay(&output,0);
 #endif
 	free(buf);
 	return NULL;
@@ -283,6 +308,7 @@ int OS_PlaySoundFile(const char* path)
 
 // ---- movies ----------------------------------------------------------------------
 // No movie playback: the open fails, and the rest reports a graph that is not there.
+#ifndef BGI_ANDROID
 
 int OS_MovieOpen(const char* path)
 {
@@ -306,3 +332,4 @@ int OS_MovieIsRunning(void)
 void OS_MovieSetVolume(int32_t vol)
 {
 }
+#endif

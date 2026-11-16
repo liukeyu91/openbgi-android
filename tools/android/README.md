@@ -24,10 +24,10 @@ Android 9 及以上的 ARM64 设备。应用只提供引擎，游戏资源需自
 ## 构建环境
 
 - Android NDK、SDK Platform 35、Build Tools 35.0.0、JDK 17。
-- CMake、Make，以及 FreeType、libogg、libvorbis 源码。
+- CMake、Make，以及 FreeType、libogg、libvorbis、FFmpeg 源码；版本与 SHA-256 固定在 `tools/ci/dependencies.json`。
 - FreeType 使用 GPLv2 许可选项；字体从 Android 系统中读取。
 
-设置 `ANDROID_NDK_HOME`、`ANDROID_SDK_ROOT`、`FREETYPE_SOURCE`、`OGG_SOURCE` 和 `VORBIS_SOURCE`。
+设置 `ANDROID_NDK_HOME`、`ANDROID_SDK_ROOT`、`FREETYPE_SOURCE`、`OGG_SOURCE`、`VORBIS_SOURCE` 和 `FFMPEG_SOURCE`。
 另为中间构建目录设置 `FT_BUILD`、`CODEC_BUILD` 和 `CODEC_PREFIX`。在项目根目录执行：
 
 ```sh
@@ -49,11 +49,13 @@ for codec in "$OGG_SOURCE" "$VORBIS_SOURCE"; do
     cmake --build "$build"
     cmake --install "$build"
 done
+mkdir -p "$FFMPEG_BUILD"
+(cd "$FFMPEG_BUILD" && sh "$OLDPWD/tools/ci/ffmpeg-build.sh" "$FFMPEG_SOURCE" "$ANDROID_FFMPEG_PREFIX" android)
 make android-native ANDROID_NDK_HOME="$ANDROID_NDK_HOME" \
     FREETYPE_INCLUDE="$FREETYPE_SOURCE/include" FREETYPE_LIB="$FT_BUILD/libfreetype.a" \
-    ANDROID_VORBIS_PREFIX="$CODEC_PREFIX"
+    ANDROID_VORBIS_PREFIX="$CODEC_PREFIX" ANDROID_FFMPEG_PREFIX="$ANDROID_FFMPEG_PREFIX"
 ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
-    OGG_SOURCE="$OGG_SOURCE" VORBIS_SOURCE="$VORBIS_SOURCE" \
+    OGG_SOURCE="$OGG_SOURCE" VORBIS_SOURCE="$VORBIS_SOURCE" FFMPEG_SOURCE="$FFMPEG_SOURCE" \
     sh tools/android/package-smoke.sh
 ```
 
@@ -62,6 +64,8 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 正式打包必须显式提供工程外的持久签名密钥和密码环境变量，并通过已固定的证书 SHA-256 校验；脚本不会自动生成替代密钥。详见 [签名、CI 与可复现构建](../../docs/build-integrity.md)。
 
 ## 开发检查
+
+`tools/ci/movie-check.sh /tmp/movie-check` 从固定源码构建主机 FFmpeg，并对 MPEG / WMV / MP4、音频重采样、静音、无声影片、变帧率、暂停和阻塞中止运行实际解码测试及 ASan / UBSan 检查。检查覆盖引擎适配层；第三方 FFmpeg 静态库在该检查中未启用 Sanitizer。Android 实机的输出延迟和各游戏片头仍需设备验证。
 
 - `make test`：引擎测试。
 - `sh tools/android/tests/run-encoding-tests.sh`：编码检测与配置。

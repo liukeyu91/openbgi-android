@@ -49,10 +49,20 @@ void Wm_Unlock(void)
 	OS_LockLeave(gWmLock);
 }
 
-/* Start the library: every record and voice reset, the audio device
- * opened at 44.1 kHz 16-bit stereo with the mixer as its callback.
- * 0 ok, 1 already started, 5 when there is no audio device or it could
- * not be started (the library then stays uninitialised). */
+/* Movies may need output before the script initialises Wave Master. */
+int Wm_EnsureMixer(void)
+{
+	int ok;
+	Wm_Lock();
+	if(!gAudioRunning && OS_AudioAvailable() && OS_AudioStart(WM_MIX_RATE, Mixer_Fill, NULL))
+		gAudioRunning = 1;
+	ok = gAudioRunning;
+	Wm_Unlock();
+	return ok;
+}
+
+/* Start the script library: reset records, retaining any output already
+ * started for a movie. 0 ok, 1 already started, 5 no output thread. */
 int Wm_Init(void)
 {
 	gSndDebug = getenv("BGI_SND_DEBUG") != NULL;
@@ -77,7 +87,7 @@ int Wm_Init(void)
 			gSe[i].voice = &gSeVoices[i];
 		}
 		// DirectSound at 44.1 kHz, 16-bit stereo
-		if(!OS_AudioAvailable() || !OS_AudioStart(WM_MIX_RATE, Mixer_Fill, NULL))
+		if(!gAudioRunning && (!OS_AudioAvailable() || !OS_AudioStart(WM_MIX_RATE, Mixer_Fill, NULL)))
 			r = WM_E_NO_DEVICE;
 		else
 		{

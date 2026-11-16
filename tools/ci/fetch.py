@@ -4,7 +4,9 @@ import hashlib, json, os, subprocess, sys
 from pathlib import Path
 lock=json.loads(Path(__file__).with_name('dependencies.json').read_text())
 out=Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
-for spec in lock.values():
+selected=sys.argv[2:] or list(lock)
+for name in selected:
+    spec=lock[name]
     dest=out/spec['url'].rsplit('/',1)[1]
     if not dest.exists():
         tmp=dest.with_suffix(dest.suffix+'.download')

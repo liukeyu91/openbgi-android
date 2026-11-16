@@ -116,9 +116,15 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     ifeq ($(strip $(ANDROID_VORBIS_PREFIX)),)
       $(error Set ANDROID_VORBIS_PREFIX to the installation directory of ARM64 Ogg and Vorbis static libraries)
     endif
+    ifeq ($(strip $(ANDROID_FFMPEG_PREFIX)),)
+      $(error Set ANDROID_FFMPEG_PREFIX to the ARM64 FFmpeg static library installation)
+    endif
     ANDROID_POSIX := audio files font machine native paths process registry thread time
     OS_SRC := $(wildcard src/os/android/*.c) $(addprefix src/os/posix/,$(addsuffix .c,$(ANDROID_POSIX)))
     CFLAGS += -I$(FREETYPE_INCLUDE)
+    CFLAGS += -DBGI_HAVE_FFMPEG -I$(ANDROID_FFMPEG_PREFIX)/include
+    ANDROID_FFMPEG_ARCHIVES := $(addprefix $(ANDROID_FFMPEG_PREFIX)/lib/,libavformat.a libavcodec.a libswscale.a libswresample.a libavutil.a)
+    LDLIBS += $(ANDROID_FFMPEG_ARCHIVES)
     LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lEGL -lGLESv2 -lm
     ANDROID_VORBIS_ARCHIVES := $(addprefix $(ANDROID_VORBIS_PREFIX)/lib/,libvorbisfile.a libvorbis.a libogg.a)
     VORBIS := vorbisfile
@@ -258,7 +264,7 @@ $(TARGET): $(LIB_OBJ) | $(BIN_DIR)
 	$(AR) rcs $@ $(LIB_OBJ)
 else ifeq ($(PLATFORM),android-native)
 $(filter $(OBJ_DIR)/android-native/snd/bw/%,$(OBJ)): $(ANDROID_VORBIS_ARCHIVES)
-$(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) | $(BIN_DIR)
+$(TARGET): $(LIB_OBJ) $(FREETYPE_LIB) $(ANDROID_VORBIS_ARCHIVES) $(ANDROID_FFMPEG_ARCHIVES) | $(BIN_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) $(ANDROID_HOST_WRAP) -shared -Wl,--no-undefined -Wl,-soname,libopenbgi.so -Wl,-z,max-page-size=16384 -o $@ $(LIB_OBJ) $(LDLIBS)
 else

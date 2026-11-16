@@ -22,6 +22,15 @@ jobs:
         env:
           SANITIZERS: ${{ matrix.sanitizers }}
         run: docker run --rm -e SANITIZERS -e ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 -e UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 -v "$PWD:/src" openbgi-build sh tools/ci/test.sh
+  movie:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker build -t openbgi-build -f tools/ci/Dockerfile .
+      - run: docker run --rm -v "$PWD:/src" openbgi-build sh tools/ci/movie-check.sh /tmp/movie-check
   android-reproducible:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
