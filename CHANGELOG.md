@@ -4,6 +4,7 @@ Android 移植各版本的主要变化，按版本倒序排列。
 
 | 版本 | 主要更新 |
 | --- | --- |
+| 0.10.17-preview | 签名密钥持久保存、证书校验及清理保护；新增 GitHub Actions、固定工具链和双目录可复现构建；接入 ASan / UBSan / 泄漏检查，修复资源泄漏，并验证原生库栈保护、FORTIFY、RELRO / NOW 和不可执行栈。 |
 | 0.10.16-preview | 修正 Android Noto CJK 字体在 SJIS 和 UTF-8 模式下字高被压缩、字形变扁的问题。 |
 | 0.10.15-preview | 适配 Making Lovers Full HD 的显示模式、音效槽、文字回看和图形参数，修复大图片加载时的内存越界。 |
 | 0.10.14-preview | 补充 Making Lovers Full HD 启动时使用的图形兼容设置指令。 |
