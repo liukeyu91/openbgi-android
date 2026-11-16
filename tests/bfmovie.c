@@ -411,6 +411,8 @@ static void TestWaits(const uint8_t* file, size_t size, const uint32_t* pix1, in
 	BmSeq_FreeAll();
 	Thread_Delete(t);
 	Loader_Stop();
+	FileSet_Delete(gArcMgr);
+	gArcMgr = NULL;
 	BmpMgr_Delete(gBmpMgr);
 	gBmpMgr = NULL;
 	remove("clip.bm");

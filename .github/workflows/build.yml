@@ -41,7 +41,7 @@ jobs:
           mkdir -p ci-results
           docker image inspect openbgi-build --format '{{.Id}}' > ci-results/container-image.txt
           cp tools/ci/dependencies.json ci-results/
-          find ../reproduction -type f \( -name 'build.log' -o -name 'reproducibility.json' -o -name 'openbgi-unsigned.apk' \) -exec cp --parents {} ci-results/ \;
+          python3 tools/ci/collect.py ../reproduction ci-results/reproduction
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

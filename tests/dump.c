@@ -328,6 +328,8 @@ static void TestEncoders(void)
 // ---- files of the scratch directory ----------------------------------------------------------------
 
 static char gRoot[0x200]; // the scratch directory
+static char* gKeptPaths[128];
+static size_t gKeptCount;
 
 static const char* Path(const char* rel)
 {
@@ -344,6 +346,9 @@ static const char* Keep(const char* rel)
 	const char* p = Path(rel);
 	char* copy = (char*)malloc(strlen(p) + 1);
 	strcpy(copy, p);
+    if(gKeptCount == sizeof gKeptPaths / sizeof gKeptPaths[0])
+        abort();
+    gKeptPaths[gKeptCount++] = copy;
 	return copy;
 }
 
@@ -1031,6 +1036,8 @@ int main(void)
 		RemoveTree(gRoot);
 	else
 		printf("  the scratch directory %s is kept\n", gRoot);
+	while(gKeptCount)
+		free(gKeptPaths[--gKeptCount]);
 	printf("%s\n", gFails ? "FAILED" : "ok");
 	return gFails != 0;
 }

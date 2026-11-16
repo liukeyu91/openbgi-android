@@ -285,7 +285,7 @@ static void FreeExpr(Expr_t* e)
 static void ResetStack(Dec_t* d)
 {
 	while(d->sp > 0)
-		free(d->stack[--d->sp].text);
+		FreeExpr(&d->stack[--d->sp]);
 	d->pendingArgs = -1;
 }
 
@@ -456,6 +456,8 @@ static char* ArgList(Dec_t* d, int count, uint32_t off)
 		Expr_t e = Pop(d, off);
 		parts[i] = e.text;
 		total += strlen(e.text) + 2;
+		e.text = NULL; // transferred to parts
+		FreeExpr(&e);
 	}
 	out = (char*)malloc(total);
 	out[0] = 0;
@@ -485,7 +487,7 @@ static char* ArgListInOrder(Dec_t* d, int count)
 		if(i > d->sp - count)
 			strcat(out, ", ");
 		strcat(out, d->stack[i].text);
-		free(d->stack[i].text);
+		FreeExpr(&d->stack[i]);
 		if(d->stack[i].startOff < d->popMinOff)
 			d->popMinOff = d->stack[i].startOff;
 	}
@@ -509,7 +511,7 @@ static char* AllArgsInOrder(Dec_t* d)
 		if(i)
 			strcat(out, ", ");
 		strcat(out, d->stack[i].text);
-		free(d->stack[i].text);
+		FreeExpr(&d->stack[i]);
 		if(d->stack[i].startOff < d->popMinOff)
 			d->popMinOff = d->stack[i].startOff;
 	}
@@ -755,7 +757,7 @@ static uint32_t ParseExpr(Dec_t* d, uint32_t i, uint32_t end)
 				char* te = Operand(&e, SCN_PREC_UNARY);
 				Push(d, Format("%s%s", t == SCN_NOT ? "~" : "!", te), SCN_PREC_UNARY, E_OTHER, 0);
 				free(te);
-				free(e.text);
+				FreeExpr(&e);
 				break;
 			}
 			case SCN_ARGS: d->pendingArgs = (int)in->ops[0]; break;
@@ -767,13 +769,13 @@ static uint32_t ParseExpr(Dec_t* d, uint32_t i, uint32_t end)
 				if(name.kind != E_STR || !(s = Scn_String(d->f, name.aux)))
 				{
 					Fail(d, in->off, "callfn without a name string");
-					free(name.text);
+					FreeExpr(&name);
 					return i;
 				}
 				args = FunctionArgs(d, FunctionArity(d, s), in->off);
 				Push(d, Format("%s(%s)", s, args), SCN_PREC_PRIMARY, E_CALL, 0);
 				free(args);
-				free(name.text);
+				FreeExpr(&name);
 				break;
 			}
 			case SCN_CALL:
@@ -790,7 +792,7 @@ static uint32_t ParseExpr(Dec_t* d, uint32_t i, uint32_t end)
 				args = FunctionArgs(d, FunctionArity(d, fn), in->off);
 				Push(d, Format("%s(%s)", fn, args), SCN_PREC_PRIMARY, E_CALL, 0);
 				free(args);
-				free(a.text);
+				FreeExpr(&a);
 				break;
 			}
 			default:
@@ -810,7 +812,7 @@ static uint32_t ParseExpr(Dec_t* d, uint32_t i, uint32_t end)
 					args = FunctionArgs(d, FunctionArity(d, name), in->off);
 					Push(d, Format("%s(%s)", name, args), SCN_PREC_PRIMARY, E_CALL, 1);
 					free(args);
-					free(a.text);
+					FreeExpr(&a);
 					return i + 1; // a statement of its own
 				}
 				if(IsCommandToken(t) && t != SCN_LINEINFO)
@@ -826,7 +828,7 @@ static uint32_t ParseExpr(Dec_t* d, uint32_t i, uint32_t end)
 						// lstr(n): the scenario compiler's string variable reference, no args token
 						Expr_t n = Pop(d, in->off);
 						Push(d, Format("lstr(%s)", n.text), SCN_PREC_PRIMARY, E_CALL, 0);
-						free(n.text);
+						FreeExpr(&n);
 						break;
 					}
 					if(d->style == SCN_STYLE_SCENARIO && d->pendingArgs < 0 && (t == 0xf6 || t == 0xf0 || t == 0xf3))
@@ -973,7 +975,7 @@ static void FlushStatements(Dec_t* d, int line, uint32_t off)
 	for(i = 0; i < d->sp; i++)
 		AddEntry(d, line, ENT_TEXT, off, Format("%s;", d->stack[i].text));
 	for(i = 0; i < d->sp; i++)
-		free(d->stack[i].text);
+		FreeExpr(&d->stack[i]);
 	d->sp = 0;
 }
 
@@ -993,7 +995,7 @@ static void FlushUnder(Dec_t* d, int keep, int line, uint32_t off)
 	for(i = 0; i < extra; i++)
 	{ // the first statement starts at the marker, the next ones where their expressions begin (a label may point there)
 		AddEntry(d, i ? 0 : d->stmtLine, ENT_TEXT, i ? d->stack[i].startOff : d->stmtOff, Format("%s;", d->stack[i].text));
-		free(d->stack[i].text);
+		FreeExpr(&d->stack[i]);
 	}
 	memmove(d->stack, d->stack + extra, (size_t)keep * sizeof d->stack[0]);
 	d->sp = keep;
@@ -1035,7 +1037,7 @@ static uint32_t ParseIf(Dec_t* d, uint32_t i, uint32_t end, int line, uint32_t c
 	char* condText)
 {
 	uint32_t xi = IndexAt(d, target), k, jt, bodyEnd, elseEnd;
-	Expr_t cond;
+	Expr_t cond = {0};
 	int closeLine = 0;
 	uint32_t condOff = d->insn[condStart].off; // where the construct starts: the condition, after whatever was flushed before it
 	if(condText)
@@ -1063,7 +1065,7 @@ static uint32_t ParseIf(Dec_t* d, uint32_t i, uint32_t end, int line, uint32_t c
 	if(xi == UINT32_MAX || xi > end || xi < i + 1)
 	{
 		Fail(d, d->insn[i].off, "bad branch target");
-		free(cond.text);
+		FreeExpr(&cond);
 		return end;
 	}
 	// a loop: the range ends with `[line] addr COND; jmp`
@@ -1077,12 +1079,12 @@ static uint32_t ParseIf(Dec_t* d, uint32_t i, uint32_t end, int line, uint32_t c
 			else
 			{
 				Fail(d, d->insn[i].off, "a loop without a closing line marker");
-				free(cond.text);
+				FreeExpr(&cond);
 				return end;
 			}
 		}
 		AddEntry(d, line, ENT_OPEN, condOff, Format("while (%s) {", cond.text));
-		free(cond.text);
+		FreeExpr(&cond);
 		PushCtx(d, target, condOff);
 		d->depth++;
 		ParseStmts(d, i + 1, bodyEnd, 0, NULL);
@@ -1095,7 +1097,7 @@ static uint32_t ParseIf(Dec_t* d, uint32_t i, uint32_t end, int line, uint32_t c
 	if(xi < i + 3 || !IsJump(d, xi - 2, &jt) || jt < target)
 	{
 		Fail(d, d->insn[i].off, "an if without the jump over its else part");
-		free(cond.text);
+		FreeExpr(&cond);
 		return end;
 	}
 	bodyEnd = xi - 2;
@@ -1106,12 +1108,12 @@ static uint32_t ParseIf(Dec_t* d, uint32_t i, uint32_t end, int line, uint32_t c
 		else
 		{
 			Fail(d, d->insn[i].off, "an if without a closing line marker");
-			free(cond.text);
+			FreeExpr(&cond);
 			return end;
 		}
 	}
 	AddEntry(d, line, ENT_OPEN, condOff, Format("if (%s) {", cond.text));
-	free(cond.text);
+	FreeExpr(&cond);
 	d->depth++;
 	ParseStmts(d, i + 1, bodyEnd, switchTemp, NULL);
 	d->depth--;
@@ -1313,8 +1315,8 @@ static uint32_t ParseJumpBuiltin(Dec_t* d, uint32_t i, int line, uint32_t stmtOf
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("jump %s;", script.text));
 		else
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("jump %s, %s;", script.text, label.text));
-		free(label.text);
-		free(script.text);
+		FreeExpr(&label);
+		FreeExpr(&script);
 		return i + 2;
 	}
 	if(d->sp == 2 && IsTok(d, i + 1, 0xf0))
@@ -1325,8 +1327,8 @@ static uint32_t ParseJumpBuiltin(Dec_t* d, uint32_t i, int line, uint32_t stmtOf
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("call %s;", script.text));
 		else
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("call %s, %s;", script.text, label.text));
-		free(label.text);
-		free(script.text);
+		FreeExpr(&label);
+		FreeExpr(&script);
 		return i + 2;
 	}
 	if(d->sp == 1 && IsTok(d, i + 1, SCN_ADDR) && d->insn[i + 1].ops[0] == 0 && IsTok(d, i + 2, SCN_CALL))
@@ -1338,12 +1340,12 @@ static uint32_t ParseJumpBuiltin(Dec_t* d, uint32_t i, int line, uint32_t stmtOf
 		if(!s || strlen(s) * 3 >= sizeof utf)
 		{
 			Fail(d, in->off, "a local call without a label name");
-			free(label.text);
+			FreeExpr(&label);
 			return i;
 		}
 		OS_SjisToUtf8(s, utf, sizeof utf);
 		AddEntry(d, line, ENT_TEXT, stmtOff, Format("call %s;", utf));
-		free(label.text);
+		FreeExpr(&label);
 		return i + 3;
 	}
 	Fail(d, in->off, "unrecognized set_label use");
@@ -1538,14 +1540,14 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 			{
 				char* cond = Format("%s = %s", lv, value.text);
 				free(lv);
-				free(addr.text);
-				free(value.text);
+				FreeExpr(&addr);
+				FreeExpr(&value);
 				return ParseIf(d, i + 2, end, line, condStart, d->insn[i + 1].ops[0], switchTemp, cond);
 			}
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("%s = %s;", lv, value.text));
 			free(lv);
-			free(addr.text);
-			free(value.text);
+			FreeExpr(&addr);
+			FreeExpr(&value);
 			return i + 1;
 		}
 		case SCN_STORE2:
@@ -1591,8 +1593,8 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 					else
 						AddEntry(d, line, ENT_OPEN, stmtOff, Format("switch @0x%x (%s) {", addr.aux, value.text));
 					AddEntry(d, cl, ENT_CLOSE, d->insn[i + 1].off, Strdup("}"));
-					free(addr.text);
-					free(value.text);
+					FreeExpr(&addr);
+					FreeExpr(&value);
 					return i + 1 + kk;
 				}
 				leadingDefault = bare;
@@ -1610,8 +1612,8 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 						AddEntry(d, line, ENT_OPEN, stmtOff, Format("switch (%s) {", value.text));
 					else
 						AddEntry(d, line, ENT_OPEN, stmtOff, Format("switch @0x%x (%s) {", addr.aux, value.text));
-					free(addr.text);
-					free(value.text);
+					FreeExpr(&addr);
+					FreeExpr(&value);
 					return ParseSwitch(d, leadingDefault == 2 ? i + 1 : i + 1 + kk, end, cl, addr.aux, leadingDefault);
 				}
 			}
@@ -1620,8 +1622,8 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 				AddEntry(d, line, ENT_TEXT, stmtOff, Format("%s <- %s;", lv, value.text));
 				free(lv);
 			}
-			free(addr.text);
-			free(value.text);
+			FreeExpr(&addr);
+			FreeExpr(&value);
 			return i + 1;
 		}
 		case SCN_JCC:
@@ -1633,7 +1635,7 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 			{
 				Expr_t a = Pop(d, 0);
 				target = a.aux;
-				free(a.text);
+				FreeExpr(&a);
 			}
 			return ParseIf(d, i, end, line, condStart, target, switchTemp, NULL);
 		case SCN_SETRET:
@@ -1646,7 +1648,7 @@ static uint32_t ParseStmt(Dec_t* d, uint32_t i, uint32_t end, uint32_t switchTem
 			}
 			v = Pop(d, 0);
 			AddEntry(d, line, ENT_TEXT, stmtOff, Format("return %s;", v.text));
-			free(v.text);
+			FreeExpr(&v);
 			return i + 3;
 		}
 		case SCN_MSG_TOKEN:
