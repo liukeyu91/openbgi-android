@@ -342,9 +342,9 @@ static void CellMetrics(FT_Face face, FT_Pos* ascUnits, FT_Pos* descUnits)
 	const TT_OS2* os2 = (const TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
 #ifdef BGI_ANDROID
 	/* Noto CJK's Win metrics reserve space beyond the CJK em for marks.
-	 * For GBK text use its typographic cell, so the ink has the intended
-	 * height at the script's independently specified character width. */
-	if(gOsTextGbk && os2 && face->family_name &&
+	 * Use its typographic cell in every text encoding: changing how bytes
+	 * are decoded must not change the aspect ratio of the same glyph. */
+	if(os2 && face->family_name &&
 		(strncmp(face->family_name, "Noto Sans CJK", 13) == 0 ||
 		 strncmp(face->family_name, "Noto Serif CJK", 14) == 0) &&
 		os2->sTypoAscender > 0 && os2->sTypoDescender <= 0 &&

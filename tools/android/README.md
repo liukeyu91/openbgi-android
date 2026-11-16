@@ -69,3 +69,12 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 
 主机检查不能代替实际设备及具体游戏的兼容性验证。
 结构及兼容性概述见 [Android 概述](../../docs/android.md)。
+
+### 日文字体比例回归
+
+主机上的 `bin/test_androidfont` 直接编译 Android 使用的 FreeType 绘字和 CP932 解码源码，比较同一字体、同一汉字在 SJIS、GBK、UTF-8 下的像素、字高和字符步进。执行前设置 `BGI_TEST_CJK_FONT` 为本机 Noto Sans CJK 或 Noto Serif CJK 字体文件的路径；未提供时该项会明确显示跳过。测试字体由开发者自行提供，不打包进 APK。
+
+```sh
+make bin/test_androidfont
+BGI_TEST_CJK_FONT=/path/to/NotoSansCJKjp-Regular.otf bin/test_androidfont
+```

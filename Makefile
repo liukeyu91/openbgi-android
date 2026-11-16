@@ -318,6 +318,12 @@ bin/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32stub/wi
 	$(CC) $(CFLAGS) -DBGI_WIN32 -fshort-wchar -Itools/win32stub -o $@ $(WIN32WIDE_SRC)
 
 ifeq ($(PLATFORM),posix)
+# Compile the Android font/encoding paths without Android window or JNI services.
+ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/android/sjis.c src/os/os_common.c
+bin/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc | bin
+	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
+TEST_BIN += bin/test_androidfont$(EXE)
+
 bin/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c | bin
 	$(CC) $(CFLAGS) -o $@ $^ -pthread
 TEST_BIN += bin/test_wasmfs$(EXE) bin/test_win32wide$(EXE) bin/test_posixpaths$(EXE)

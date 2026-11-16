@@ -4,6 +4,7 @@ Android 移植各版本的主要变化，按版本倒序排列。
 
 | 版本 | 主要更新 |
 | --- | --- |
+| 0.10.16-preview | 修正 Android Noto CJK 字体在 SJIS 和 UTF-8 模式下字高被压缩、字形变扁的问题。 |
 | 0.10.15-preview | 适配 Making Lovers Full HD 的显示模式、音效槽、文字回看和图形参数，修复大图片加载时的内存越界。 |
 | 0.10.14-preview | 补充 Making Lovers Full HD 启动时使用的图形兼容设置指令。 |
 | 0.10.13-preview | 增加 Making Lovers Full HD 引擎识别，修正未识别时启动指令不可用的问题。 |
