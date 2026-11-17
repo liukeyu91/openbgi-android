@@ -20,8 +20,8 @@ final class PatchImport {
         Profile(String id,String engine,String encoding,Source[] sources){this.id=id;this.engine=engine;this.encoding=encoding;this.sources=sources;}
     }
     static final class Result{
-        String profile="",engine="",encoding="";int resources,preserved,containers;
-        String summary(){return resources>0?"已展开汉化资源 "+resources+" 项。":preserved>0?"汉化资源已就绪。":!profile.isEmpty()?"已识别汉化游戏设置。":containers>0?"未发现可展开的游戏资源。":"未发现需要展开的汉化资源。";}
+        String profile="",engine="",encoding="";int resources,preserved,containers,repaired;
+        String summary(){return repaired>0?"已处理汉化资源 "+resources+" 项，其中修复 "+repaired+" 项。":resources>0?"已展开汉化资源 "+resources+" 项。":preserved>0?"汉化资源已就绪。":!profile.isEmpty()?"已识别汉化游戏设置。":containers>0?"未发现可展开的游戏资源。":"未发现需要展开的汉化资源。";}
         void apply(GameSettings settings){
             if(!encoding.isEmpty())settings.chooseEncoding(encoding);
             if(!engine.isEmpty()&&Arrays.asList(EngineProfiles.NAMES).contains(engine))settings.profile=engine;
@@ -84,6 +84,7 @@ final class PatchImport {
         if(Files.isSymbolicLink(config))throw new IOException("配置目录不能使用符号链接");
         Files.createDirectories(config);Path work=Files.createTempDirectory(config,"patch-import-");
         List<Pack> packs=new ArrayList<>();List<Path> installed=new ArrayList<>();Result result=new Result();
+        Map<Path,Path> backups=new LinkedHashMap<>();boolean keepRecovery=false;
         Properties record=new Properties();
         try{
             progress.update("正在检测汉化补丁…");Profile chosen=null;Set<String> used=new HashSet<>();
@@ -123,12 +124,17 @@ final class PatchImport {
             }
             long total=0;for(Job job:jobs){PatchEvb.safeName(job.item.name);total=Math.addExact(total,job.item.size);}
             if(total>8L*1024*1024*1024||total>game.getUsableSpace())throw new IOException("手机剩余空间不足以展开汉化资源");
-            Map<String,Path> staged=new LinkedHashMap<>();Map<String,String> hashes=new HashMap<>();Set<String> preserved=new HashSet<>();int done=0;
+            Map<String,Path> staged=new LinkedHashMap<>(),targets=new HashMap<>();Map<String,String> hashes=new HashMap<>();Set<String> preserved=new HashSet<>(),repairs=new HashSet<>();int done=0;
             for(Job job:jobs){
                 if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("汉化处理已取消");
                 String lower=job.item.name.toLowerCase(Locale.ROOT);
                 File existing=lookup(game,job.item.name);
-                if(existing!=null){if(!existing.isFile())throw new IOException("资源与目录重名："+job.item.name);if(preserved.add(lower))result.preserved++;continue;}
+                boolean repair=false;
+                if(existing!=null){
+                    if(!existing.isFile())throw new IOException("资源与目录重名："+job.item.name);
+                    repair=job.pack.evb!=null&&!Files.isSymbolicLink(existing.toPath())&&job.pack.evb.matchesStored((PatchEvb.Entry)job.item.entry,existing);
+                    if(!repair){if(preserved.add(lower))result.preserved++;continue;}
+                }
                 Path output=work.resolve("resource-"+(done++));progress.update("正在展开汉化资源："+done+" / "+jobs.size());
                 try(OutputStream stream=new BufferedOutputStream(Files.newOutputStream(output,StandardOpenOption.CREATE_NEW))){job.pack.decode(job.item,stream);}
                 if(Files.size(output)!=job.item.size)throw new IOException("汉化资源展开长度不符："+job.item.name);
@@ -138,19 +144,31 @@ final class PatchImport {
                     Files.delete(output);continue;
                 }
                 staged.put(lower,output);hashes.put(lower,hash);record.setProperty("resource."+lower,hash);
+                targets.put(lower,repair?existing.toPath():root.resolve(lower));if(repair)repairs.add(lower);
             }
-            // No existing resource is replaced. All payloads validate before
-            // the first loose file is published; errors roll back new files.
+            // Repair only bytes identical to the old stored compression envelope.
+            // Validate all new payloads first, retain rollback copies, and replace
+            // each broken file atomically. Other existing overrides stay intact.
             for(Map.Entry<String,Path> entry:staged.entrySet()){
-                Path target=root.resolve(entry.getKey());Files.move(entry.getValue(),target);installed.add(target);
+                Path target=targets.get(entry.getKey());
+                if(repairs.contains(entry.getKey())){
+                    Path backup=work.resolve("original-"+backups.size());Files.copy(target,backup);backups.put(target,backup);
+                    Files.move(entry.getValue(),target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+                }else{Files.move(entry.getValue(),target);installed.add(target);}
             }
-            result.resources=staged.size();result.containers=packs.size();
+            result.resources=staged.size();result.containers=packs.size();result.repaired=repairs.size();
             record.setProperty("profile",result.profile);record.setProperty("encoding",result.encoding);record.setProperty("engine",result.engine);
             record.setProperty("expanded",Integer.toString(result.resources));record.setProperty("preserved",Integer.toString(result.preserved));
+            record.setProperty("repaired",Integer.toString(result.repaired));
             Path report=work.resolve("translation.properties");try(OutputStream out=Files.newOutputStream(report)){record.store(out,"OpenBGI offline patch import");}
             Files.move(report,config.resolve("translation.properties"),StandardCopyOption.REPLACE_EXISTING);
             return result;
-        }catch(IOException|RuntimeException error){for(Path path:installed)try{Files.deleteIfExists(path);}catch(IOException cleanup){error.addSuppressed(cleanup);}throw error;}
-        finally{for(Pack pack:packs)try{pack.close();}catch(IOException ignored){}GameImport.remove(work);}
+        }catch(IOException|RuntimeException error){
+            for(Path path:installed)try{Files.deleteIfExists(path);}catch(IOException cleanup){error.addSuppressed(cleanup);}
+            for(Map.Entry<Path,Path> backup:backups.entrySet())try{Files.move(backup.getValue(),backup.getKey(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
+                catch(IOException restore){keepRecovery=true;error.addSuppressed(restore);}
+            throw error;
+        }
+        finally{for(Pack pack:packs)try{pack.close();}catch(IOException ignored){}if(!keepRecovery)GameImport.remove(work);}
     }
 }

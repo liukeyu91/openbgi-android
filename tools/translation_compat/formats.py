@@ -264,35 +264,54 @@ class EvbExternal(Container):
     def read(self, e):
         data = self.stored_bytes(e)
         if e.codec == 'stored':
-            return data
-        if not self.decoder:
-            raise FormatError("Compressed EVB requires an explicitly selected aPLib decoder")
+            try:
+                self._block_sizes(data)
+            except FormatError:
+                return data
+            if not self.decoder:
+                raise FormatError("Possible compressed EVB requires an explicitly selected aPLib decoder")
+            try:
+                decoded = self._decode_blocks(data, e.size)
+            except FormatError:
+                return data  # A stored file can resemble a block-table header.
+            e.codec = 'aplib-blocks'
+            return decoded
+        return self._decode_blocks(data, e.size)
+
+    @staticmethod
+    def _block_sizes(data):
         if len(data) < 12:
             raise FormatError("Truncated EVB block table")
         table = struct.unpack_from('<I', data)[0]
-        if not 12 <= table <= len(data) or (table - 8) % 4:
+        if not 12 <= table <= min(len(data), MAX_INDEX) or table % 12:
             raise FormatError("Invalid EVB block table")
         sizes = [struct.unpack_from('<I', data, p)[0] for p in range(8, table, 12)]
-        if not sizes or any(not n for n in sizes) or sum(sizes) != len(data) - table:
+        if any(not 0 < n <= 1024 * 1024 for n in sizes) or sum(sizes) != len(data) - table:
             raise FormatError("EVB block sizes mismatch")
+        return table, sizes
+
+    def _decode_blocks(self, data, expected):
+        if not self.decoder:
+            raise FormatError("Compressed EVB requires an explicitly selected aPLib decoder")
+        table, sizes = self._block_sizes(data)
         at = table
         if hasattr(self.decoder, 'decode_blocks'):
             blocks = []
             for size in sizes:
                 blocks.append(data[at:at + size])
                 at += size
-            decoded = self.decoder.decode_blocks(blocks, e.size)
-            if not isinstance(decoded, bytes) or len(decoded) != e.size:
+            decoded = self.decoder.decode_blocks(blocks, expected)
+            if not isinstance(decoded, bytes) or len(decoded) != expected:
                 raise FormatError("EVB decoded length mismatch")
             return decoded
         out = bytearray()
         for size in sizes:
-            decoded = self.decoder(data[at:at + size], min(65536, e.size - len(out)))
-            if not isinstance(decoded, bytes) or not 0 < len(decoded) <= min(65536, e.size - len(out)):
+            decoded = self.decoder(data[at:at + size], min(65536, expected - len(out)))
+            if not isinstance(decoded, bytes) or not 0 < len(decoded) <= min(65536, expected - len(out)):
                 raise FormatError("Invalid EVB decoded block size")
             out += decoded
             at += size
-        if len(out) != e.size:
+        if len(out) != expected:
             raise FormatError("EVB decoded length mismatch")
         return bytes(out)
 

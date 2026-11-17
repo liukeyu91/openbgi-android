@@ -24,6 +24,8 @@ public final class PatchImportTest {
     }
     static File game(Path base,String name)throws IOException{Path root=base.resolve(name);Files.createDirectories(root);Files.write(root.resolve("system.arc"),text("native"));return root.toFile();}
     static PatchImport.Result run(File game)throws IOException{return PatchImport.process(game,new PatchImport.Profile[0],message->{});}
+    static byte[] equalEnvelope(){byte[] b=new byte[17];put(b,0,12);put(b,8,5);byte[] packed={65,(byte)0xaf,1,0x30,0};System.arraycopy(packed,0,b,12,5);return b;}
+    static byte[] equalBundle()throws IOException{byte[] data=new byte[17];Arrays.fill(data,(byte)65);byte[] bundle=evb(new String[]{"intro"},new byte[][]{data},false);System.arraycopy(equalEnvelope(),0,bundle,bundle.length-17,17);return bundle;}
     interface Action{void run()throws IOException;}
     static void reject(Action action)throws IOException{checks++;try{action.run();throw new AssertionError("Invalid patch accepted");}catch(IOException expected){}}
     public static void main(String[] args)throws Exception{
@@ -38,6 +40,20 @@ public final class PatchImportTest {
             check(result.resources==0&&result.preserved==1,"Idempotent and preserves loose overrides");check(new String(Files.readAllBytes(game.toPath().resolve("intro")),StandardCharsets.UTF_8).equals("user override"),"Override contents preserved");
             File tiny=game(base,"compressed");Files.write(tiny.toPath().resolve("compressed.klt"),evb(new String[]{"intro"},new byte[][]{new byte[]{65,(byte)0xc0,0}},true));
             check(run(tiny).resources==1&&Files.readAllBytes(tiny.toPath().resolve("intro"))[0]==65,"aPLib integration");
+            File equal=game(base,"equal-size");Files.write(equal.toPath().resolve("patch.klt"),equalBundle());
+            byte[] expected=new byte[17];Arrays.fill(expected,(byte)65);
+            check(run(equal).resources==1&&Arrays.equals(Files.readAllBytes(equal.toPath().resolve("intro")),expected),"Equal-size compression is decoded");
+            Files.write(equal.toPath().resolve("intro"),equalEnvelope());result=run(equal);
+            check(result.repaired==1&&result.resources==1&&Arrays.equals(Files.readAllBytes(equal.toPath().resolve("intro")),expected),"Repair exact old compressed envelope");
+            result=run(equal);check(result.preserved==1&&result.repaired==0,"Repair is idempotent");
+            Files.write(equal.toPath().resolve("intro"),text("custom override"));result=run(equal);
+            check(result.repaired==0&&Arrays.equals(Files.readAllBytes(equal.toPath().resolve("intro")),text("custom override")),"Repair preserves user overrides");
+            File rollback=game(base,"repair-rollback");Files.write(rollback.toPath().resolve("patch.klt"),equalBundle());Files.write(rollback.toPath().resolve("intro"),equalEnvelope());
+            Path blocked=rollback.toPath().resolve(".openbgi/translation.properties");Files.createDirectories(blocked);Files.write(blocked.resolve("keep"),text("keep"));
+            reject(()->run(rollback));check(Arrays.equals(Files.readAllBytes(rollback.toPath().resolve("intro")),equalEnvelope()),"Report failure rolls repair back");
+            File lookalike=game(base,"stored-lookalike");byte[] invalid=equalEnvelope();Arrays.fill(invalid,12,17,(byte)0);
+            Files.write(lookalike.toPath().resolve("patch.klt"),evb(new String[]{"intro"},new byte[][]{invalid},false));
+            check(run(lookalike).resources==1&&Arrays.equals(Files.readAllBytes(lookalike.toPath().resolve("intro")),invalid),"Invalid compressed lookalike remains stored data");
             File carrier=game(base,"embedded");byte[] header=new byte[512];header[0]='M';header[1]='Z';put(header,60,64);header[64]='P';header[65]='E';header[100]='E';header[101]='V';header[102]='B';
             ByteArrayOutputStream pe=new ByteArrayOutputStream();pe.write(header);pe.write(evb(new String[]{"intro"},new byte[][]{translated},false));Files.write(carrier.toPath().resolve("patch.exe"),pe.toByteArray());
             check(run(carrier).resources==1,"Validated embedded EVB, skips literal magic");

@@ -106,6 +106,33 @@ class PipelineTests(unittest.TestCase):
         archive = EvbExternal(path)
         with self.assertRaisesRegex(FormatError, 'decoder'): archive.read(archive.entries[0])
 
+    def test_evb_equal_size_compression(self):
+        expected = b'A' * 17
+        packed = bytes.fromhex('41af013000')
+        envelope = struct.pack('<III', 12, 0, len(packed)) + packed
+        self.assertEqual(len(envelope), len(expected))
+        fixture = evb([('image', expected)])
+        fixture[-17:] = envelope
+        path = self.game / 'equal.klt'
+        path.write_bytes(fixture)
+        def decode(data, maximum):
+            self.assertEqual(data, packed)
+            self.assertEqual(maximum, 17)
+            return expected
+        archive = EvbExternal(path, decoder=decode)
+        self.assertEqual(archive.read(archive.entries[0]), expected)
+        self.assertEqual(archive.entries[0].codec, 'aplib-blocks')
+        archive = EvbExternal(path)
+        with self.assertRaisesRegex(FormatError, 'decoder'): archive.read(archive.entries[0])
+
+    def test_evb_stored_block_table_lookalike(self):
+        data = struct.pack('<III', 12, 0, 5) + bytes(5)
+        path = self.game / 'ordinary.klt'
+        path.write_bytes(evb([('data', data)]))
+        def invalid(data, maximum): raise FormatError('Invalid aPLib')
+        archive = EvbExternal(path, decoder=invalid)
+        self.assertEqual(archive.read(archive.entries[0]), data)
+
     def test_evb_rejects_malformed_table_and_payload(self):
         path = self.game / 'toy.klt'
         good = evb([('intro', b'toy')], True)

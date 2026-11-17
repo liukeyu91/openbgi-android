@@ -12,7 +12,7 @@ final class PatchEvb implements Closeable {
     static final long MAX_RESOURCE=256L*1024*1024;
     static final int MAX_INDEX=32*1024*1024,MAX_ENTRIES=100000;
     static final class Entry {
-        final String name;final long offset,stored,size;
+        final String name;final long offset,stored,size;boolean equalSizeCompressed;
         Entry(String name,long offset,long stored,long size){this.name=name;this.offset=offset;this.stored=stored;this.size=size;}
     }
     final List<Entry> entries;final long base;
@@ -58,7 +58,14 @@ final class PatchEvb implements Closeable {
             }
             long padding=end-f.getFilePointer();if(padding!=0&&padding!=4)throw new IOException("补丁目录条数不完整");
             for(int i=0;i<padding;i++)if(f.read()!=0)throw new IOException("补丁目录填充无效");
-            return new PatchEvb(f,base,entries);
+            PatchEvb result=new PatchEvb(f,base,entries);
+            for(Entry entry:entries)if(entry.size==entry.stored&&entry.stored>=12){
+                // Compression can exactly break even, including its block table.
+                // Recognise it only after a bounded full decode verifies the size.
+                try{result.decodeBlocks(entry,new OutputStream(){public void write(int b){}public void write(byte[] b,int off,int len){}});entry.equalSizeCompressed=true;}
+                catch(InvalidBlocks ordinaryStoredData){}
+            }
+            return result;
         }catch(IOException|RuntimeException error){f.close();throw error;}
     }
     /** Scan static bytes; loader string literals are not valid directory candidates. */
@@ -92,21 +99,37 @@ final class PatchEvb implements Closeable {
     }
     void decode(Entry entry,OutputStream out)throws IOException{
         file.seek(entry.offset);
-        if(entry.stored==entry.size){copy(file,out,entry.size);return;}
+        if(entry.stored==entry.size&&!entry.equalSizeCompressed){copy(file,out,entry.size);return;}
+        decodeBlocks(entry,out);
+    }
+    private static final class InvalidBlocks extends IOException{InvalidBlocks(String message){super(message);}}
+    private void decodeBlocks(Entry entry,OutputStream out)throws IOException{
+        file.seek(entry.offset);
         if(entry.stored<12)throw new IOException("压缩补丁数据截断");
         byte[] h=exact(file,8);long table=u32(h,0);
-        if(table<12||table>entry.stored||table>MAX_INDEX||(table-8)%4!=0)throw new IOException("压缩块目录无效");
+        if(table<12||table>entry.stored||table>MAX_INDEX||table%12!=0)throw new InvalidBlocks("压缩块目录无效");
         byte[] blocks=exact(file,(int)table-8);List<Integer> sizes=new ArrayList<>();long packed=0;
-        for(int at=0;at<blocks.length;at+=12){long n=u32(blocks,at);if(n<=0||n>1024*1024)throw new IOException("压缩块大小无效");sizes.add((int)n);packed+=n;}
-        if(packed!=entry.stored-table)throw new IOException("压缩块总长度不符");
+        for(int at=0;at<blocks.length;at+=12){long n=u32(blocks,at);if(n<=0||n>1024*1024)throw new InvalidBlocks("压缩块大小无效");sizes.add((int)n);packed+=n;}
+        if(packed!=entry.stored-table)throw new InvalidBlocks("压缩块总长度不符");
         long done=0;
         for(int n:sizes){
             if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("汉化处理已取消");
-            byte[] raw=PatchAplib.decompress(exact(file,n),(int)Math.min(65536,entry.size-done));
-            if(raw.length==0||raw.length>entry.size-done)throw new IOException("补丁展开长度不符");
+            byte[] packedBlock=exact(file,n),raw;
+            try{raw=PatchAplib.decompress(packedBlock,(int)Math.min(65536,entry.size-done));}
+            catch(IOException invalid){throw new InvalidBlocks(invalid.getMessage());}
+            if(raw.length==0||raw.length>entry.size-done)throw new InvalidBlocks("补丁展开长度不符");
             out.write(raw);done+=raw.length;
         }
-        if(done!=entry.size)throw new IOException("补丁展开长度不符");
+        if(done!=entry.size)throw new InvalidBlocks("补丁展开长度不符");
+    }
+    boolean matchesStored(Entry entry,File existing)throws IOException{
+        if(!entry.equalSizeCompressed||existing.length()!=entry.stored)return false;
+        file.seek(entry.offset);long remaining=entry.stored;
+        try(DataInputStream in=new DataInputStream(new BufferedInputStream(new FileInputStream(existing)))){
+            byte[] a=new byte[8192],b=new byte[8192];
+            while(remaining>0){int n=(int)Math.min(a.length,remaining);file.readFully(a,0,n);in.readFully(b,0,n);for(int i=0;i<n;i++)if(a[i]!=b[i])return false;remaining-=n;}
+            return in.read()==-1;
+        }
     }
     private static void copy(RandomAccessFile in,OutputStream out,long remaining)throws IOException{
         byte[] buffer=new byte[65536];while(remaining>0){if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("汉化处理已取消");int n=in.read(buffer,0,(int)Math.min(buffer.length,remaining));if(n<0)throw new EOFException("补丁载荷截断");out.write(buffer,0,n);remaining-=n;}
