@@ -128,7 +128,9 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     # Static FFmpeg AArch64 assembly references its internal tables directly.
     # Keep archive symbols local to this DSO; JNI entry points remain exported.
     LDFLAGS += -Wl,--exclude-libs,ALL
-    LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lEGL -lGLESv2 -lm
+    CFLAGS += -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+    LDFLAGS += -Wl,--build-id=sha1
+    LDLIBS += $(FREETYPE_LIB) -landroid -laaudio -llog -lEGL -lGLESv2 -ldl -lm
     ANDROID_VORBIS_ARCHIVES := $(addprefix $(ANDROID_VORBIS_PREFIX)/lib/,libvorbisfile.a libvorbis.a libogg.a)
     VORBIS := vorbisfile
     VORBIS_CFLAGS := -I$(ANDROID_VORBIS_PREFIX)/include
@@ -333,6 +335,9 @@ $(BIN_DIR)/test_%$(EXE): tests/%.c $(LIB_OBJ) | $(BIN_DIR)
 $(BIN_DIR)/test_cbgcache$(EXE): tests/cbgcache.c $(LIB_OBJ) | $(BIN_DIR)
 	$(CC) $(CFLAGS) -Wl,--wrap=BGI_CbgDecode -o $@ $< $(LIB_OBJ) $(LDLIBS)
 
+$(BIN_DIR)/test_bitmapjob$(EXE): tests/bitmapjob.c $(LIB_OBJ) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=BGI_CbgDecode -Wl,--wrap=OS_ThreadStart -o $@ $< $(LIB_OBJ) $(LDLIBS)
+
 $(BIN_DIR)/test_cbgfast$(EXE): tests/cbgfast.c src/core/cbg.c $(LIB_OBJ) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(filter-out $(OBJ_DIR)/$(PLATFORM)/core/cbg.o,$(LIB_OBJ)) $(LDLIBS)
 
@@ -355,7 +360,7 @@ $(BIN_DIR)/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32
 
 ifeq ($(PLATFORM),posix)
 # Compile the Android font/encoding paths without Android window or JNI services.
-ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/android/sjis.c src/os/os_common.c
+ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/posix/paths.c src/os/android/sjis.c src/os/os_common.c
 $(BIN_DIR)/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc | $(BIN_DIR)
 	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) $(LDFLAGS) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
 TEST_BIN += $(BIN_DIR)/test_androidfont$(EXE)

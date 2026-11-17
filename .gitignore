@@ -9,6 +9,7 @@ BGIError.txt
 internal/
 __pycache__/
 *.pyc
+font-cache/
 
 # Signing material belongs in a protected location outside this checkout.
 *.p12

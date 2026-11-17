@@ -156,6 +156,27 @@ int ReadFileEx(void* buf, uint32_t* outSize, const char* dir, const char* name, 
 	return r;
 }
 
+static int OpenViewPath(FileView_t* view, const char* path)
+{
+	File_Ctor(&view->file);
+	if(!DriveReady(path) || !File_OpenRead(&view->file,path))return 0;
+	view->offset=0;view->size=File_Size(&view->file);
+	return 1;
+}
+
+int File_OpenView(FileView_t* view, const char* dir, const char* name)
+{
+	char path[0x104];SearchNode_t* search;
+	if(name[0]=='\\' || name[1]==':')return OpenViewPath(view,name);
+	snprintf(path,sizeof path,"%s%s",dir,name);
+	if(OpenViewPath(view,path))return 1;
+	for(search=gFileSearchOn?gSearchList:NULL;search;search=search->next) {
+		snprintf(path,sizeof path,"%s%s\\%s",dir,search->name,name);
+		if(OpenViewPath(view,path))return 1;
+	}
+	return 0;
+}
+
 // The whole of a loose file into buf; the bytes read, 0 when it could not be read.
 uint32_t ReadWholeFile(void* buf, const char* dir, const char* name)
 {

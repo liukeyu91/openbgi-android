@@ -336,6 +336,32 @@ int ArcMgr_ArcNameFor(FileSet_t* mgr, char* dst, const char* arc, const char* na
 	return n ? ArcMgr_ArcNameFor(n, dst, arc, name) : 0;
 }
 
+static int OpenIndexedView(FileSet_t* node, FileView_t* view, const char* path, const char* name)
+{
+	for(;node;node=node->next) {
+		if(node->inner && OpenIndexedView(node->inner,view,path,name))return 1;
+		if(node->vt!=&FileSet_Vtbl || !node->loaded || strcmp(node->name,path))continue;
+		for(int i=0;i<node->count;i++)if(!strcmp(node->entries[i].name,name)) {
+			uint64_t offset=(uint64_t)node->dataBase+node->entries[i].offset;
+			File_Ctor(&view->file);
+			if(!File_OpenRead(&view->file,path))return 0;
+			if(offset+node->entries[i].size>File_Size(&view->file) ||
+				!File_Seek(&view->file,(uint32_t)offset)) {File_Close(&view->file);return 0;}
+			view->offset=(uint32_t)offset;view->size=node->entries[i].size;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ArcMgr_OpenView(FileSet_t* mgr, FileView_t* view, const char* arc, const char* name)
+{
+	char path[0x104],lower[0x104];
+	if(!mgr || !ArcMgr_ArcNameFor(mgr,path,arc,name))return 0;
+	snprintf(lower,sizeof lower,"%s",name);SjisStrLwr(lower);
+	return OpenIndexedView(mgr,view,path,lower);
+}
+
 // read the whole entry; see ArcMgr_ReadRange for the result
 uint32_t ArcMgr_Read(FileSet_t* mgr, void* dst, const char* arc, const char* name)
 {

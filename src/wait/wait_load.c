@@ -41,6 +41,7 @@ typedef struct WaitLoader // 0x238 bytes
 	uint32_t status;  // loader status: 0 pending, -1 failed, else the size in bytes
 	int useCache;     // the file cache is consulted / fed
 	int cacheHit;     // the lookup succeeded (nothing was queued)
+	BitmapJob_t* bitmapJob; // owned; joined before buf can be freed
 } WaitLoader_t;
 
 typedef struct WaitBmpLoad // 0x23c bytes
@@ -73,9 +74,10 @@ typedef struct LoaderVtbl
  * either satisfy the read from the file cache (useCache, and the cache
  * exists) or queue it with the loader thread.  A NULL name is a script
  * error, which does not return. */
-static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const char* name, int useCache)
+static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const char* name, int useCache, int bitmap)
 {
 	WaitCounted_Ctor(&w->w, t);
+	w->bitmapJob=NULL;
 	if(!name)
 	{
 		w->buf = NULL;
@@ -96,8 +98,11 @@ static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const
      * Full HD sprite sheets exceed the original 32 MiB scratch buffer. */
 	uint32_t bytes = 0;
 	w->cacheHit = w->useCache && FileCache_Lookup(gFileCache, NULL, &bytes, ARC_ARG(w), w->name);
+	w->status=0;
+	if(!w->cacheHit && bitmap && (w->bitmapJob=Loader_StartBitmap(&w->buf,ARC_ARG(w),w->name))!=NULL)
+		return;
 	if(!w->cacheHit)
-		bytes = GetFileSize_(ARC_ARG(w), w->name);
+		bytes = GetLoadFileSize(ARC_ARG(w), w->name);
 	if(gEngine->gen < GEN_1_69_472 && bytes < 0x2000000u)
 		bytes = 0x2000000u;
 	if(bytes < 16)
@@ -114,6 +119,7 @@ static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const
 
 static void WaitLoader_Dtor(WaitLoader_t* w)
 {
+	Loader_DestroyBitmap(w->bitmapJob);
 	BGI_Free(w->buf);
 	WaitCount_Dec();
 	WaitCounted_Dtor(&w->w);
@@ -129,12 +135,14 @@ static int WaitLoader_Poll(Wait_t* base)
 	if(!w->buf)
 		return -1;
 	Wait_Tick(base);
+	if(w->bitmapJob && !Loader_PollBitmap(w->bitmapJob,&w->status))
+		return 0;
 	if(w->status == 0)
 		return 0;
 	if(w->status == 0xffffffffu)
 		return -1;
 	if(w->useCache && !w->cacheHit)
-		FileCache_Add(gFileCache, ARC_ARG(w), w->name, w->buf, w->status);
+		Loader_CacheAdd(ARC_ARG(w), w->name, w->buf, w->status);
 	return ((const LoaderVtbl_t*)base->vt)->finish(w) != 0;
 }
 
@@ -199,7 +207,7 @@ static const LoaderVtbl_t WaitBmpLoad_Vtbl = {
 Wait_t* WaitBmpLoad_New(Thread_t* t, int bmpNo, const char* arc, const char* name)
 {
 	WaitBmpLoad_t* w = (WaitBmpLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 1);
+	WaitLoader_Ctor(&w->l, t, arc, name, 1, 1);
 	w->l.w.vt = &WaitBmpLoad_Vtbl.base;
 	w->bmpNo = bmpNo;
 	return &w->l.w;
@@ -257,7 +265,7 @@ static const LoaderVtbl_t WaitSeLoad_Vtbl = {
 Wait_t* WaitSeLoad_New(Thread_t* t, int slot, const char* arc, const char* name, int fadeInMs, double gain, double rate)
 {
 	WaitSeLoad_t* w = (WaitSeLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 0);
+	WaitLoader_Ctor(&w->l, t, arc, name, 0, 0);
 	w->l.w.vt = &WaitSeLoad_Vtbl.base;
 	w->slot = slot;
 	w->fadeInMs = fadeInMs;
@@ -377,7 +385,7 @@ static const LoaderVtbl_t WaitSeqLoad_Vtbl = {
 Wait_t* WaitSeqLoad_New(Thread_t* t, const char* arc, const char* name, int32_t* outNo, int32_t* info)
 {
 	WaitSeqLoad_t* w = (WaitSeqLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 1);
+	WaitLoader_Ctor(&w->l, t, arc, name, 1, 0);
 	w->l.w.vt = &WaitSeqLoad_Vtbl.base;
 	w->outNo = outNo;
 	w->info = info;

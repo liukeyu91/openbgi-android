@@ -51,6 +51,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native void nativeDialogResult(int serial, int result);
     private native void nativeEditChanged(byte[] text, int revision, boolean ime);
     private native boolean nativeCreate(String internal, String external, int scaleMode);
+    private native void nativeFontFamily(String family);
     private native void nativeSurface(Surface surface);
     private native void nativeVsync();
     private native int nativeAudioStatus();
@@ -90,18 +91,22 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         super.onCreate(state);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        File game;
         try {
-            File game=GameSettings.activeGame(getFilesDir());saveLock=GameDataLock.acquire(game);
-            File storage=game;
+            game=GameSettings.activeGame(getFilesDir());
+            File storage=DirectGame.resources(game);
             if(game.getName().equals("external")){
                 File base=getExternalFilesDir(null);if(base==null)throw new java.io.IOException("游戏目录不可用");storage=new File(base,"game");
             }
-            SaveRestore.recover(storage);settings=GameSettings.load(game);
+            saveLock=GameDataLock.acquire(storage);
+            SaveRestore.recover(storage);settings=TranslationRuntime.prepare(game,storage);
         }
         catch(java.io.IOException error) { Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();engineFinished();return; }
         if(!settings.encodingReady()) {
             Toast.makeText(this,"文字编码尚未确定，请在游戏设置中选择。",Toast.LENGTH_LONG).show();engineFinished();return;
         }
+        CrashLogs.beginSession(this,game,settings);
+        nativeFontFamily(settings.fontFamily);
         File external = getExternalFilesDir(null);
         ready = nativeCreate(getFilesDir().getAbsolutePath(), external == null ? "" : external.getAbsolutePath(), settings.scale);
         if(!ready) {

@@ -11,7 +11,8 @@ python3 "$src/generate-patch-profiles.py" "$out/PatchProfiles.java"
 "${JAVAC:-javac}" -encoding UTF-8 -d "$out" "$src/GameImport.java" "$src/GameSettings.java" \
     "$out/EngineProfiles.java" "$out/PatchProfiles.java" "$src/PatchImport.java" "$src/PatchEvb.java" \
     "$src/PatchAplib.java" "$src/PatchCamellia.java" "$src/PatchCpk.java" "$src/PatchCpkTest.java" \
-    "$src/PatchImportTest.java" "$src/tests/P0ImportTest.java"
+    "$src/PatchImportTest.java" "$src/tests/P0ImportTest.java" "$src/TranslationRuntime.java" "$src/TranslationRuntimeTest.java"
 "${JAVA:-java}" -Xmx96m -cp "$out" org.openbgi.port.PatchCpkTest
 "${JAVA:-java}" -Xmx96m -cp "$out" org.openbgi.port.PatchImportTest
+"${JAVA:-java}" -cp "$out" org.openbgi.port.TranslationRuntimeTest
 "${JAVA:-java}" -Xmx96m -cp "$out" org.openbgi.port.P0ImportTest "$out"

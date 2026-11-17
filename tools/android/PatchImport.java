@@ -16,15 +16,18 @@ final class PatchImport {
         Source(String format,String path,String key,String[] select,String[] exclude){this.format=format;this.path=path;this.key=key;this.select=select;this.exclude=exclude;}
     }
     static final class Profile{
-        final String id,engine,encoding;final Source[] sources;
-        Profile(String id,String engine,String encoding,Source[] sources){this.id=id;this.engine=engine;this.encoding=encoding;this.sources=sources;}
+        final String id,engine,encoding,fontFamily;final Source[] sources;
+        Profile(String id,String engine,String encoding,Source[] sources){this(id,engine,encoding,"",sources);}
+        Profile(String id,String engine,String encoding,String fontFamily,Source[] sources){this.id=id;this.engine=engine;this.encoding=encoding;this.fontFamily=fontFamily;this.sources=sources;}
     }
     static final class Result{
-        String profile="",engine="",encoding="";int resources,preserved,containers,repaired;
+        String profile="",engine="",encoding="",fontFamily="";int resources,preserved,containers,repaired;
         String summary(){return repaired>0?"已处理汉化资源 "+resources+" 项，其中修复 "+repaired+" 项。":resources>0?"已展开汉化资源 "+resources+" 项。":preserved>0?"汉化资源已就绪。":!profile.isEmpty()?"已识别汉化游戏设置。":containers>0?"未发现可展开的游戏资源。":"未发现需要展开的汉化资源。";}
         void apply(GameSettings settings){
             if(!encoding.isEmpty())settings.chooseEncoding(encoding);
             if(!engine.isEmpty()&&Arrays.asList(EngineProfiles.NAMES).contains(engine))settings.profile=engine;
+            if(!fontFamily.isEmpty())settings.fontFamily=fontFamily;
+            if(!profile.isEmpty())settings.translationProfile=profile;
         }
     }
     private static final class Item{
@@ -85,13 +88,16 @@ final class PatchImport {
         Files.createDirectories(config);Path work=Files.createTempDirectory(config,"patch-import-");
         List<Pack> packs=new ArrayList<>();List<Path> installed=new ArrayList<>();Result result=new Result();
         Map<Path,Path> backups=new LinkedHashMap<>();boolean keepRecovery=false;
-        Properties record=new Properties();
+        Properties record=new Properties(),previous=new Properties();
+        Path previousReport=config.resolve("translation.properties");
         try{
+            if(Files.isRegularFile(previousReport)&&Files.size(previousReport)<=4*1024*1024)
+                try(InputStream in=Files.newInputStream(previousReport)){previous.load(in);}
             progress.update("正在检测汉化补丁…");Profile chosen=null;Set<String> used=new HashSet<>();
             for(Profile profile:profiles){boolean complete=true;for(Source source:profile.sources){File f=lookup(game,source.path);if(f==null||!f.isFile()){complete=false;break;}if(!source.key.isEmpty()&&lookup(game,source.key)==null){complete=false;break;}}
                 if(complete){chosen=profile;break;}}
             List<Job> jobs=new ArrayList<>();
-            if(chosen!=null){result.profile=chosen.id;result.engine=chosen.engine;result.encoding=chosen.encoding;
+            if(chosen!=null){result.profile=chosen.id;result.engine=chosen.engine;result.encoding=chosen.encoding;result.fontFamily=chosen.fontFamily;
                 for(Source source:chosen.sources){
                     File input=lookup(game,source.path);used.add(input.getCanonicalPath());Pack pack=open(game,source);if(pack==null)continue;packs.add(pack);
                     for(Item item:pack.items)if(!excluded(item.name)&&matches(item.name,source.select)&&!matches(item.name,source.exclude))jobs.add(new Job(pack,item));
@@ -132,13 +138,21 @@ final class PatchImport {
                 boolean repair=false;
                 if(existing!=null){
                     if(!existing.isFile())throw new IOException("资源与目录重名："+job.item.name);
-                    repair=job.pack.evb!=null&&!Files.isSymbolicLink(existing.toPath())&&job.pack.evb.matchesStored((PatchEvb.Entry)job.item.entry,existing);
+                    String owned=previous.getProperty("resource."+lower,"");
+                    boolean managed=owned.matches("[0-9a-f]{64}")&&!Files.isSymbolicLink(existing.toPath())&&owned.equals(digest(existing));
+                    repair=managed || job.pack.evb!=null&&!Files.isSymbolicLink(existing.toPath())&&job.pack.evb.matchesStored((PatchEvb.Entry)job.item.entry,existing);
                     if(!repair){if(preserved.add(lower))result.preserved++;continue;}
                 }
                 Path output=work.resolve("resource-"+(done++));progress.update("正在展开汉化资源："+done+" / "+jobs.size());
                 try(OutputStream stream=new BufferedOutputStream(Files.newOutputStream(output,StandardOpenOption.CREATE_NEW))){job.pack.decode(job.item,stream);}
                 if(Files.size(output)!=job.item.size)throw new IOException("汉化资源展开长度不符："+job.item.name);
                 String hash=digest(output.toFile());
+                String seen=hashes.putIfAbsent(lower,hash);
+                if(seen!=null&&!seen.equals(hash))throw new IOException("汉化资源存在冲突，请保留同一版本的补丁："+job.item.name);
+                if(repair&&hash.equals(digest(existing))){
+                    record.setProperty("resource."+lower,hash);Files.delete(output);
+                    if(preserved.add(lower))result.preserved++;continue;
+                }
                 if(staged.containsKey(lower)){
                     if(!hashes.get(lower).equals(hash))throw new IOException("汉化资源存在冲突，请保留同一版本的补丁："+job.item.name);
                     Files.delete(output);continue;
@@ -146,9 +160,8 @@ final class PatchImport {
                 staged.put(lower,output);hashes.put(lower,hash);record.setProperty("resource."+lower,hash);
                 targets.put(lower,repair?existing.toPath():root.resolve(lower));if(repair)repairs.add(lower);
             }
-            // Repair only bytes identical to the old stored compression envelope.
-            // Validate all new payloads first, retain rollback copies, and replace
-            // each broken file atomically. Other existing overrides stay intact.
+            // Replace only our recorded, unmodified outputs or an exact old
+            // compression envelope. Keep rollback copies until publication.
             for(Map.Entry<String,Path> entry:staged.entrySet()){
                 Path target=targets.get(entry.getKey());
                 if(repairs.contains(entry.getKey())){
@@ -158,6 +171,7 @@ final class PatchImport {
             }
             result.resources=staged.size();result.containers=packs.size();result.repaired=repairs.size();
             record.setProperty("profile",result.profile);record.setProperty("encoding",result.encoding);record.setProperty("engine",result.engine);
+            record.setProperty("fontFamily",result.fontFamily);
             record.setProperty("expanded",Integer.toString(result.resources));record.setProperty("preserved",Integer.toString(result.preserved));
             record.setProperty("repaired",Integer.toString(result.repaired));
             Path report=work.resolve("translation.properties");try(OutputStream out=Files.newOutputStream(report)){record.store(out,"OpenBGI offline patch import");}

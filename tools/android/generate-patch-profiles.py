@@ -22,8 +22,9 @@ for name in names:
             quote(s['format']), quote(s['path']), quote(s.get('key', '')),
             arr(s['select']), arr(s.get('exclude', []))))
     r = p.get('runtime', {})
-    rows.append('new PatchImport.Profile(%s,%s,%s,new PatchImport.Source[]{%s})' % (
+    rows.append('new PatchImport.Profile(%s,%s,%s,%s,new PatchImport.Source[]{%s})' % (
         quote(p['id']), quote(r.get('engine', '')), quote(r.get('text_encoding', '')),
+        quote(r.get('font_family', '')),
         ','.join(sources)))
 text = ('/* Generated from shared JSON profiles; SPDX-License-Identifier: GPL-2.0-only */\n'
         'package org.openbgi.port;\nfinal class PatchProfiles {\n'

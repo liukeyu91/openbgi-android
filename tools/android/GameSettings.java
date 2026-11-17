@@ -9,6 +9,7 @@ import java.util.*;
 final class GameSettings {
     static final int ENCODING_DETECTOR_VERSION = 1;
     String encoding = "sjis", profile = "auto";
+    String fontFamily="",translationProfile="";
     boolean automaticEncoding = true;
     String encodingDetection = "";
     int encodingDetectorVersion;
@@ -46,6 +47,8 @@ final class GameSettings {
         s.encodingDetectorVersion = number(p,"encodingDetectorVersion",0,0,Integer.MAX_VALUE);
         value = p.getProperty("profile", "auto");
         if(member(value, EngineProfiles.NAMES)) s.profile = value;
+        value=p.getProperty("fontFamily","");if(validFontFamily(value))s.fontFamily=value;
+        value=p.getProperty("translationProfile","");if(value.matches("[A-Za-z0-9._-]{0,80}"))s.translationProfile=value;
         s.scale = number(p,"scale",0,0,2); s.touch = number(p,"touch",0,0,1);
         s.saveKey = number(p,"saveKey",0x53,1,255); s.loadKey = number(p,"loadKey",0x4c,1,255);
         s.backlogKey = number(p,"backlogKey",0,0,255); s.menuKey = number(p,"menuKey",0x1b,1,255);
@@ -83,13 +86,14 @@ final class GameSettings {
         return "样本不足或结果不明确，请预览并手动选择编码。";
     }
     void save(File game) throws IOException {
-        if(!member(encoding,new String[]{"sjis","gbk","utf8"}) || !member(profile,EngineProfiles.NAMES) ||
+        if(!validFontFamily(fontFamily)||!translationProfile.matches("[A-Za-z0-9._-]{0,80}")||!member(encoding,new String[]{"sjis","gbk","utf8"}) || !member(profile,EngineProfiles.NAMES) ||
             scale < 0 || scale > 2 || touch < 0 || touch > 1 || saveKey < 1 || saveKey > 255 ||
             loadKey < 1 || loadKey > 255 || backlogKey < 0 || backlogKey > 255 || menuKey < 1 || menuKey > 255 || skipKey < 1 || skipKey > 255)
             throw new IOException("无效的游戏设置");
         File config = new File(game,".openbgi"); Files.createDirectories(config.toPath());
         Properties p = new Properties();
         p.setProperty("encoding",encoding); p.setProperty("profile",profile);
+        p.setProperty("fontFamily",fontFamily);p.setProperty("translationProfile",translationProfile);
         p.setProperty("encodingMode",automaticEncoding?"auto":"manual");
         p.setProperty("encodingDetection",encodingDetection);
         p.setProperty("encodingDetectorVersion",Integer.toString(encodingDetectorVersion));
@@ -103,6 +107,11 @@ final class GameSettings {
             try(OutputStream stream = Files.newOutputStream(temp)) { p.store(stream,"OpenBGI per-game settings"); }
             Files.move(temp,file,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temp); }
+    }
+    private static boolean validFontFamily(String value){
+        if(value.length()>128)return false;
+        for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return false;
+        return true;
     }
     static File activeGame(File files) throws IOException {
         String id = new String(Files.readAllBytes(new File(files,"active-game.txt").toPath()),StandardCharsets.UTF_8).trim();

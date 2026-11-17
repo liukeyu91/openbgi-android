@@ -90,6 +90,21 @@ struct OsFont
 
 static FT_Library gFt;    // NULL until the first font is opened
 static FaceRec_t* gFaces; // the open faces
+typedef struct AppFont {
+	struct AppFont* next;
+	char path[1024],family[256];
+	int index,bold,italic;
+	uint8_t* memory;
+	size_t bytes;
+} AppFont_t;
+static AppFont_t* gAppFonts;
+static unsigned gMemoryFontId;
+static char gFontFamily[512];
+
+void OsPosix_SetFontFamily(const char* family)
+{
+	snprintf(gFontFamily,sizeof gFontFamily,"%s",family?family:"");
+}
 
 // the FreeType library, created on the first use; 0 when that fails
 static int FtInit(void)
@@ -104,6 +119,8 @@ void OsPosix_FontShutdown(void)
 {
 	if(gFaces) // fonts the engine never closed: leave the faces to the process exit
 		return;
+	while(gAppFonts){AppFont_t* next=gAppFonts->next;free(gAppFonts->memory);free(gAppFonts);gAppFonts=next;}
+	gFontFamily[0]=0;
 	if(gFt)
 	{
 		FT_Done_FreeType(gFt);
@@ -259,6 +276,7 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 	const char* env;
 	int mincho;
 	OsPosix_SjisToUtf8(sjisFace, utf8, sizeof utf8);
+	if(gFontFamily[0])snprintf(utf8,sizeof utf8,"%s",gFontFamily);
 	mincho = IsMinchoName(utf8);
 	*index = 0;
 	env = getenv(mincho ? "BGI_FONT_MINCHO" : "BGI_FONT_GOTHIC");
@@ -269,6 +287,12 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 		snprintf(out, n, "%s", env);
 		return 1;
 	}
+	AppFont_t* best=NULL;int bestScore=-1;
+	for(AppFont_t* app=gAppFonts;app;app=app->next)if(!strcasecmp(app->family,utf8)){
+		int score=(app->bold==!!bold)+(app->italic==!!italic);
+		if(score>bestScore){best=app;bestScore=score;}
+	}
+	if(best){snprintf(out,n,"%s",best->path);*index=best->index;return 1;}
 #ifdef BGI_HAVE_FONTCONFIG
 	if(ResolveByFontconfig(utf8, mincho, bold, italic, out, n, index))
 		return 1;
@@ -276,9 +300,20 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 	if(!ResolveByScan(mincho, out, n))
 		return 0;
 #ifdef BGI_ANDROID
-	// Android's Noto CJK collection lists JP, KR, SC, TC, HK in that order.
-	if(gOsTextGbk && (strstr(out, "NotoSansCJK-") || strstr(out, "NotoSerifCJK-")) && strstr(out, ".ttc"))
-		*index = 2;
+	// Match the actual family instead of assuming a vendor's TTC face order.
+	if((strstr(out,"NotoSansCJK-")||strstr(out,"NotoSerifCJK-"))&&strstr(out,".ttc")){
+		const char* language=ContainsNoCase(utf8," CJK SC")?" CJK SC":ContainsNoCase(utf8," CJK JP")?" CJK JP":gOsTextGbk?" CJK SC":NULL;
+		if(language&&FtInit()){
+			FT_Face candidate;
+			if(!FT_New_Face(gFt,out,0,&candidate)){
+				long count=candidate->num_faces;FT_Done_Face(candidate);
+				for(long i=0;i<count;i++)if(!FT_New_Face(gFt,out,i,&candidate)){
+					int match=candidate->family_name&&ContainsNoCase(candidate->family_name,language);
+					FT_Done_Face(candidate);if(match){*index=(int)i;break;}
+				}
+			}
+		}
+	}
 #endif
 	return 1;
 }
@@ -298,7 +333,9 @@ static FaceRec_t* FaceAcquire(const char* path, int index)
 	r = (FaceRec_t*)calloc(1, sizeof *r);
 	if(!r)
 		return NULL;
-	if(FT_New_Face(gFt, path, index, &r->face) != 0)
+	AppFont_t* memory=NULL;
+	for(AppFont_t* app=gAppFonts;app;app=app->next)if(app->memory&&!strcmp(app->path,path)){memory=app;break;}
+	if((memory?FT_New_Memory_Face(gFt,memory->memory,(FT_Long)memory->bytes,index,&r->face):FT_New_Face(gFt,path,index,&r->face)) != 0)
 	{
 		free(r);
 		return NULL;
@@ -378,21 +415,43 @@ OsFont_t* OS_FontOpenMono(const char* face, int size, int bold)
 	return OS_FontOpen(face, size, size / 2, bold, 0);
 }
 
-// "B0 C2": add the file to fontconfig's application fonts, so that its family name resolves; 0 without fontconfig
+static int RegisterFont(const char* path,const void* data,uint32_t bytes)
+{
+	FT_Face face;
+	if(!FtInit())return 0;
+	if((data?FT_New_Memory_Face(gFt,data,bytes,0,&face):FT_New_Face(gFt,path,0,&face))!=0)return 0;
+	long count=face->num_faces;FT_Done_Face(face);int added=0;
+	for(long i=0;i<count;i++){
+		if((data?FT_New_Memory_Face(gFt,data,bytes,i,&face):FT_New_Face(gFt,path,i,&face))!=0)continue;
+		if(!face->family_name){FT_Done_Face(face);continue;}
+		int exists=0;for(AppFont_t* app=gAppFonts;app;app=app->next)if(app->index==i&&!strcmp(app->path,path)){exists=1;break;}
+		if(exists){FT_Done_Face(face);added++;continue;}
+		AppFont_t* app=calloc(1,sizeof *app);if(!app){FT_Done_Face(face);continue;}
+		if(data){app->memory=malloc(bytes);if(!app->memory){free(app);FT_Done_Face(face);continue;}memcpy(app->memory,data,bytes);app->bytes=bytes;}
+		snprintf(app->path,sizeof app->path,"%s",path);snprintf(app->family,sizeof app->family,"%s",face->family_name);
+		app->index=(int)i;app->bold=!!(face->style_flags&FT_STYLE_FLAG_BOLD);app->italic=!!(face->style_flags&FT_STYLE_FLAG_ITALIC);
+		app->next=gAppFonts;gAppFonts=app;FT_Done_Face(face);added++;
+	}
+	return added!=0;
+}
+
+// "B0 C2": usable with FreeType alone, including Android without fontconfig.
 int OS_FontAddFile(const char* path)
 {
 	char native[0x400];
-	OsPosix_SjisToUtf8(path, native, sizeof native);
+	OsPosix_Path(path,native,sizeof native);
+	int result=RegisterFont(native,NULL,0);
 #ifdef BGI_HAVE_FONTCONFIG
-	if(FcInit() && FcConfigAppFontAddFile(NULL, (const FcChar8*)native))
-		return 1;
+	if(result&&FcInit())FcConfigAppFontAddFile(NULL,(const FcChar8*)native);
 #endif
-	return 0;
+	return result;
 }
 
 // 1 when fontconfig lists a font of exactly that family; without fontconfig every face "exists"
 int OS_FontFaceExists(const char* face)
 {
+	char registered[0x200];OsPosix_SjisToUtf8(face,registered,sizeof registered);
+	for(AppFont_t* app=gAppFonts;app;app=app->next)if(!strcasecmp(registered,app->family))return 1;
 #ifdef BGI_HAVE_FONTCONFIG
 	char utf8[0x200];
 	FcPattern* pat;
@@ -422,6 +481,20 @@ int OS_FontFaceExists(const char* face)
  * Shift-JIS, zh-tw for Big5, zh-cn for GB2312, ko for Hangul, any for
  * ANSI), each family once; a name that the text encoding cannot spell is
  * left out.  Without fontconfig the list is empty. */
+static int FamilyToText(const char* family,char* out,size_t size)
+{
+	if(gOsTextUtf8)return snprintf(out,size,"%s",family);
+	size_t at=0;const uint8_t* p=(const uint8_t*)family;
+	while(*p&&at+3<size){
+		int len=1;uint32_t cp=OsCommon_Utf8SeqLen(p)?OsCommon_Utf8Decode(p,&len):*p;
+		if(gOsTextGbk){uint16_t code=OS_CodePointToGbk(cp);if(!code&&cp)return -1;if(code>255)out[at++]=(char)(code>>8);out[at++]=(char)code;}
+		else {int n=OsPosix_UnicodeToSjis(cp,out+at);if(!n)return -1;at+=(size_t)n;}
+		p+=len;
+	}
+	if(*p)return -1;
+	out[at]=0;return (int)at;
+}
+
 int OS_FontEnumFaces(char* buf, int charset, int* outBytes)
 {
 	int count = 0, bytes = 0;
@@ -508,28 +581,28 @@ int OS_FontEnumFaces(char* buf, int charset, int* outBytes)
     BGI_UNUSED(buf);
     BGI_UNUSED(charset);
 #endif
+	for(AppFont_t* app=gAppFonts;app;app=app->next){
+		int duplicate=0;for(AppFont_t* earlier=gAppFonts;earlier!=app;earlier=earlier->next)if(!strcasecmp(earlier->family,app->family)){duplicate=1;break;}
+		char name[512];int n=FamilyToText(app->family,name,sizeof name);if(duplicate||n<=0||n>=(int)sizeof name)continue;
+#ifdef BGI_HAVE_FONTCONFIG
+		for(int i=0;i<nseen;i++)if(!strncmp(seen[i],name,sizeof seen[i]))duplicate=1;
+#elif defined(BGI_ANDROID)
+		if(!strcmp(name,"Noto Sans CJK SC")||!strcmp(name,"Noto Serif CJK SC"))duplicate=1;
+#endif
+		if(duplicate)continue;
+		if(buf)memcpy(buf+bytes,name,(size_t)n+1);
+		bytes+=n+1;count++;
+	}
 	*outBytes = bytes;
 	return count;
 }
 
-// "B0 C3": a font from an archive; 0 without fontconfig or when the file cannot be written
+// "B0 C3": retain font bytes in memory, including Android without /tmp.
 int OS_FontAddMemory(const void* data, uint32_t size)
 {
-	// fontconfig takes files: the data goes to a temporary file under /tmp that is never removed
-	static int counter;
-	char path[0x100];
-	FILE* f;
-	snprintf(path, sizeof path, "/tmp/bgi-font-%d-%d.ttf", (int)getpid(), counter++);
-	f = fopen(path, "wb");
-	if(!f)
-		return 0;
-	fwrite(data, 1, size, f);
-	fclose(f);
-#ifdef BGI_HAVE_FONTCONFIG
-	if(FcInit() && FcConfigAppFontAddFile(NULL, (const FcChar8*)path))
-		return 1;
-#endif
-	return 0;
+	char key[64];if(!data||!size)return 0;
+	snprintf(key,sizeof key,":memory-font-%u",gMemoryFontId++);
+	return RegisterFont(key,data,size);
 }
 
 /* open a font as CreateFontA would: the face resolved to a file, scaled so
@@ -567,6 +640,7 @@ OsFont_t* OS_FontOpen(const char* face, int height, int width, int bold, int ita
 	{
 		char utf8[0x200];
 		OsPosix_SjisToUtf8(face, utf8, sizeof utf8);
+		if(gFontFamily[0])snprintf(utf8,sizeof utf8,"%s",gFontFamily);
 		f->serif = IsMinchoName(utf8);
 	}
 

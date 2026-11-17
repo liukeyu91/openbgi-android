@@ -24,6 +24,8 @@ uint32_t OsPosix_SjisChar(uint16_t code);
 int OsPosix_UnicodeToSjis(uint32_t cp, char out[2]);
 // ~/.config/bgi (created by OS_Init): the registry file and the instance lock files live there
 const char* OsPosix_ConfigDir(void);
+// UTF-8 family override for translation font hooks; empty restores script choice.
+void OsPosix_SetFontFamily(const char* family);
 // SIGTERM / SIGINT (process.c) -> the window's close request (window.c)
 void OsPosix_RequestClose(void);
 

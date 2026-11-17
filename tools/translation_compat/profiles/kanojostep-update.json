@@ -2,8 +2,18 @@
   "schema": 1,
   "id": "kanojostep-evb-update",
   "description": "External update container only; does not recover the EXE's embedded translation resources.",
-  "runtime": {"engine": "1.636", "text_encoding": "gbk"},
+  "runtime": {
+    "engine": "1.636",
+    "text_encoding": "gbk",
+    "font_family": "Noto Sans CJK SC"
+  },
   "sources": [
-    {"format": "evb-external", "path": "Update0.pck", "select": ["*"]}
+    {
+      "format": "evb-external",
+      "path": "Update0.pck",
+      "select": [
+        "*"
+      ]
+    }
   ]
 }

@@ -15,7 +15,8 @@ final class EncodingPreview {
         final Thread[] worker=new Thread[1];
         AlertDialog dialog=new AlertDialog.Builder(a).setTitle("编码预览").setView(scroll).setNegativeButton("取消",null).create();
         dialog.setOnDismissListener(d->{if(worker[0]!=null)worker[0].interrupt();});dialog.show();Ui.style(dialog);
-        File resource=game;
+        File resource;
+        try{resource=DirectGame.resources(game);}catch(IOException error){status.setText(error.getMessage());return;}
         if(game.getName().equals("external") && !GameImport.gamePresent(game)){
             File external=a.getExternalFilesDir(null);if(external!=null)resource=new File(external,"game");
         }

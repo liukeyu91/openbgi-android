@@ -2,8 +2,19 @@
   "schema": 1,
   "id": "makinghd-cpk-resources",
   "description": "Complete CPK resources when the EVB distribution is absent.",
-  "runtime": {"engine": "1.659.8", "text_encoding": "utf8"},
+  "runtime": {
+    "engine": "1.659.8",
+    "text_encoding": "utf8",
+    "font_family": "Noto Sans CJK SC"
+  },
   "sources": [
-    {"format": "cpk-v2", "path": "MakingLovers_cn.cpk", "key": "MakingLovers_cn.key", "select": ["*"]}
+    {
+      "format": "cpk-v2",
+      "path": "MakingLovers_cn.cpk",
+      "key": "MakingLovers_cn.key",
+      "select": [
+        "*"
+      ]
+    }
   ]
 }

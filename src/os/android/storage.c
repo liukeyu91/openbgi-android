@@ -25,6 +25,14 @@ int OsAndroid_InitPaths(void)
     if(strcmp(id,"external")==0) {
         if(!host->external[0])return 0;
         snprintf(selected,sizeof selected,"%s/game",host->external);
+    } else {
+        snprintf(path,sizeof path,"%s/source-path.txt",gPosixConfigDir);
+        file=fopen(path,"r");
+        if(file) {
+            if(!fgets(selected,sizeof selected,file) || fgetc(file)!=EOF ||
+                selected[0]!='/' || strpbrk(selected,"\r\n")) {fclose(file);return 0;}
+            fclose(file);
+        } else if(errno!=ENOENT)return 0;
     }
     if(!OS_SetGameDir(selected))return 0;
     OsAndroid_Log(selected);

@@ -8,7 +8,7 @@ OpenBGI is a C99 reimplementation of the BGI / Ethornell engine. This repository
 
 Requires Android 9 or later on an ARM64 device. The app provides the engine; you supply the game files.
 
-- Import complete game directories, manage multiple games, and choose custom covers.
+- Run directly from complete game folders without copying, or use copy import; manage multiple games and custom covers.
 - Separate settings and saves for each game.
 - Import and export save ZIPs, including global progress.
 - Check script instructions after import and save the results.
@@ -16,20 +16,24 @@ Requires Android 9 or later on an ARM64 device. The app provides the engine; you
 - Touch controls, screen shortcuts, keyboard support, and basic controller mappings.
 - In-game text input, system dialogs, and runtime log export.
 - Built-in FFmpeg playback for standard movie formats, with audio/video synchronization, tap to skip, and background pause.
+- Translation profiles can override runtime fonts, register game-provided fonts, and update generated resources while preserving manual overrides.
 
 ## Getting started
 
 1. Download an APK from [Releases](https://github.com/liukeyu91/openbgi-android/releases) and prepare a complete, extracted game directory.
-2. In the library, select **Add game** (`添加游戏`) and choose the game root containing `system.arc` or `ipl._bp`.
+2. Select **Add game** (`添加游戏`) → **Use directory directly** (`直接使用目录`), grant storage access, and choose the game root containing `system.arc` or `ipl._bp`.
 3. Launch the game. If encoding detection is uncertain, preview the text and choose an encoding in **Game settings** (`游戏设置`).
 
-Import copies the files into app storage, so enough free space is required. Updating with the same package name and signing certificate preserves app data. Uninstalling removes the app's internal data; export your saves first.
+Direct directory mode stores only library metadata and settings in the app. Resources are read in place; saves and extracted translation resources stay in the original folder. Removing a library entry leaves that folder and its saves intact. Copy import remains available for a separate copy in app storage.
+Updating with the same package name and signing certificate preserves app data. Uninstalling removes internal app data; files and saves in directly linked folders remain at their original location.
 
 Import automatically extracts supported Chinese translation packages and applies recognized engine and encoding settings. Existing games can use **Process translation patch** (`处理汉化补丁`) from the game-card menu after exiting the game. Resource extraction runs locally on the device and supports external EVB, EVB embedded in an EXE, and CPK v2 with its matching key. Windows EXE and DLL code is not executed.
 
 For MakingHD imports affected by the equal-size compression bug, update to **0.10.21-preview** or later, exit the game, and run **Process translation patch** once. It repairs files that exactly match the previously extracted compression envelopes, while preserving other overrides and saves. Reimporting the game is unnecessary.
 
 The Android port is still under development. Compatibility needs to be verified per title. Static instruction checks and successful resource extraction do not establish full-game compatibility. Streamed BF_Movie formats remain unsupported; see the [movie implementation notes](docs/android-movie.md) (Chinese) for details.
+
+For 1.0, the new direct-folder flow and fixes passed host tests and Android builds; a fresh on-device/full-route regression pass is still pending. See [supported scope and known limitations](docs/known-issues.md).
 
 ## AI collaboration
 

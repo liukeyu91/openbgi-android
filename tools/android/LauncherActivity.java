@@ -23,6 +23,7 @@ public final class LauncherActivity extends Activity {
     private ProgressBar progress;
     private File coverTarget;
     private String saveExportGame="",saveImportGame="";
+    private String storageAction="";
     private SaveRestore.Prepared pendingRestore;
     private String search="",page="library",importStatus="正在读取目录…";
     private boolean byName;
@@ -33,7 +34,7 @@ public final class LauncherActivity extends Activity {
         super.onCreate(state); games=new File(getFilesDir(),"games"); games.mkdirs();
         getWindow().setStatusBarColor(Ui.BG);getWindow().setNavigationBarColor(Ui.BG);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        if(state!=null){page=state.getString("page","library");search=state.getString("search","");byName=state.getBoolean("byName",false);
+        if(state!=null){page=state.getString("page","library");search=state.getString("search","");byName=state.getBoolean("byName",false);storageAction=state.getString("storageAction","");
             String cover=state.getString("cover","");if(cover.matches("[a-z0-9-]{1,79}"))coverTarget=new File(games,cover);
             String exporting=state.getString("saveExportGame","");if(exporting.matches("[a-z0-9-]{1,79}"))saveExportGame=exporting;
             String restoring=state.getString("saveImportGame","");if(restoring.matches("[a-z0-9-]{1,79}"))saveImportGame=restoring;}
@@ -73,10 +74,41 @@ public final class LauncherActivity extends Activity {
     }
     private int dp(float n){return Ui.dp(this,n);}
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);showLibrary();}
-    @Override protected void onResume(){super.onResume();if(games!=null)showLibrary();}
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("search",search);state.putBoolean("byName",byName);state.putString("saveExportGame",saveExportGame);state.putString("saveImportGame",saveImportGame);if(coverTarget!=null)state.putString("cover",coverTarget.getName());}
+    @Override protected void onResume(){
+        super.onResume();if(games!=null)showLibrary();
+        if(!engineRunning()) {
+            String failure=CrashLogs.takeFailureNotice(this);
+            if(failure!=null)new AlertDialog.Builder(this).setTitle("运行异常").setMessage(failure)
+                .setPositiveButton("导出日志",(dialog,which)->exportLogs()).setNegativeButton("稍后",null).show();
+        }
+    }
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("search",search);state.putBoolean("byName",byName);state.putString("saveExportGame",saveExportGame);state.putString("saveImportGame",saveImportGame);state.putString("storageAction",storageAction);if(coverTarget!=null)state.putString("cover",coverTarget.getName());}
     private void addGame(){
         if(importing){toast("请等待当前操作完成");return;}
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("添加游戏")
+            .setItems(new String[]{"直接使用目录（不复制）","复制导入到应用存储"},(d,which)->{
+                if(which==0)directAccess("add");else copyGame();
+            }).setNegativeButton("取消",null).create();dialog.show();Ui.style(dialog);
+    }
+    private void directAccess(String action){
+        storageAction=action;
+        if(GameStorage.granted(this)){storageReady();return;}
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("允许读取游戏目录")
+            .setMessage("开启存储访问后，可直接运行手机或存储卡中的游戏，无需再复制一份。")
+            .setNegativeButton("取消",(d,w)->storageAction="").setPositiveButton("去授权",(d,w)->{
+                try{GameStorage.request(this);}catch(ActivityNotFoundException unavailable){storageAction="";toast("无法打开存储权限设置，可使用复制导入");}
+            }).create();dialog.setOnCancelListener(d->storageAction="");dialog.show();Ui.style(dialog);
+    }
+    private void storageReady(){
+        String action=storageAction;storageAction="";
+        if(!GameStorage.granted(this)){toast("未授予存储访问，可选择复制导入");return;}
+        if(action.equals("add"))GameStorage.choose(this,this::registerDirect);
+        else if(action.startsWith("play:")&&action.substring(5).matches("[a-z0-9-]{1,79}"))play(new File(games,action.substring(5)));
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
+        super.onRequestPermissionsResult(request,permissions,grants);if(request==GameStorage.REQUEST)storageReady();
+    }
+    private void copyGame(){
         Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try{startActivityForResult(picker,1);}catch(ActivityNotFoundException e){toast("无法打开系统文件选择器");}
     }
@@ -90,7 +122,7 @@ public final class LauncherActivity extends Activity {
         if(engineRunning()){toast("请先存档并退出游戏，再导出存档");return;}
         importing=true;importStatus="正在查找存档…";showLibrary();
         new Thread(()->{
-            try(GameDataLock lock=GameDataLock.acquire(dir)){
+            try(GameDataLock lock=GameDataLock.acquire(resourceDirectory(dir))){
                 SaveRestore.recover(resourceDirectory(dir));
                 if(SaveBackup.count(resourceDirectory(dir))==0)throw new IOException("未找到可导出的存档或全局进度");
                 runOnUiThread(()->{
@@ -111,7 +143,7 @@ public final class LauncherActivity extends Activity {
         String name=title(dir),version=versionName();
         new Thread(()->{
             SaveBackup.Backup backup=null;
-            try(GameDataLock lock=GameDataLock.acquire(dir)){
+            try(GameDataLock lock=GameDataLock.acquire(resourceDirectory(dir))){
                 SaveRestore.recover(resourceDirectory(dir));
                 backup=SaveBackup.create(resourceDirectory(dir),getCacheDir(),name,version,(done,total)->runOnUiThread(()->{
                     importStatus="正在导出存档："+done+" / "+total;if(status!=null)status.setText(importStatus);
@@ -167,7 +199,7 @@ public final class LauncherActivity extends Activity {
     private void applySaveRestore(SaveRestore.Prepared prepared,File dir){
         importStatus="正在导入存档…";showLibrary();
         new Thread(()->{
-            try(SaveRestore.Prepared restore=prepared;GameDataLock lock=GameDataLock.acquire(dir)){
+            try(SaveRestore.Prepared restore=prepared;GameDataLock lock=GameDataLock.acquire(resourceDirectory(dir))){
                 if(engineRunning())throw new IOException("游戏正在运行，请退出后重新导入");
                 restore.apply(resourceDirectory(dir),(done,total)->runOnUiThread(()->{
                     importStatus="正在导入存档："+done+" / "+total;if(status!=null)status.setText(importStatus);
@@ -238,7 +270,7 @@ public final class LauncherActivity extends Activity {
     }
     private List<File> library(){
         List<File> list=new ArrayList<>();File[] folders=games.listFiles();if(folders!=null)for(File dir:folders)
-            if(dir.isDirectory() && (GameImport.gamePresent(dir)||dir.getName().equals("external")))list.add(dir);
+            if(dir.isDirectory() && (GameImport.gamePresent(dir)||DirectGame.linked(dir)||dir.getName().equals("external")))list.add(dir);
         Comparator<File> names=Comparator.comparing(this::title,String.CASE_INSENSITIVE_ORDER);
         list.sort(byName?names:Comparator.<File>comparingLong(dir->new File(dir,".openbgi/last-played.txt").lastModified()).reversed().thenComparing(names));return list;
     }
@@ -271,14 +303,14 @@ public final class LauncherActivity extends Activity {
         LinearLayout empty=Ui.column(this);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(24),dp(40),dp(24),dp(36));empty.setBackground(Ui.border(this,Ui.PAPER,22));
         ImageView book=new ImageView(this);book.setImageDrawable(new Ui.Icon("library",Ui.ACCENT));book.setPadding(dp(20),dp(20),dp(20),dp(20));book.setBackground(Ui.shape(this,Ui.TINT,24));empty.addView(book,new LinearLayout.LayoutParams(dp(88),dp(88)));Ui.space(empty,24);
         empty.addView(Ui.text(this,"尚未添加游戏",18,Ui.INK,true));Ui.space(empty,12);
-        TextView tip=Ui.text(this,"选择已解压的完整游戏目录。\n导入会复制文件到应用存储。",13,Ui.MUTED,false);tip.setGravity(Gravity.CENTER);empty.addView(tip);Ui.space(empty,26);empty.addView(Ui.button(this,"选择游戏目录",true,this::addGame));content.addView(empty);
+        TextView tip=Ui.text(this,"选择已解压的完整游戏目录。\n直接读取原目录，无需复制游戏。",13,Ui.MUTED,false);tip.setGravity(Gravity.CENTER);empty.addView(tip);Ui.space(empty,26);empty.addView(Ui.button(this,"选择游戏目录",true,this::addGame));content.addView(empty);
     }
     private void infoCard(String title,String text){
         LinearLayout box=Ui.column(this);box.setPadding(dp(20),dp(20),dp(20),dp(20));box.setBackground(Ui.border(this,Ui.PAPER,20));box.addView(Ui.text(this,title,17,Ui.INK,true));Ui.space(box,10);TextView body=Ui.text(this,text,14,Ui.MUTED,false);body.setLineSpacing(dp(6),1);box.addView(body);content.addView(box);Ui.space(content,14);
     }
     private void showGuide(){
         content.addView(Ui.text(this,"使用说明",30,Ui.INK,true));Ui.space(content,8);content.addView(Ui.text(this,"导入游戏后，可分别设置文字编码和操作方式。",13,Ui.MUTED,false));Ui.space(content,24);
-        infoCard("导入游戏","选择已解压的完整游戏目录，包含 system.arc 或 ipl._bp 及其他资源文件。导入会复制全部文件和子目录，再检查程序指令并显示结果，需要足够的手机存储空间。");
+        infoCard("添加游戏","优先选择“直接使用目录”：授权存储访问后，直接读取手机或存储卡中的完整游戏目录，不复制游戏本体。存档和展开的汉化资源写在原目录，应用只保存游戏库信息和设置。也可选择“复制导入”使用应用内副本。");
         infoCard("文字编码","导入后会抽样检测脚本文字。无法确定时，请在“游戏设置”中预览并选择编码。日文原版通常使用 SJIS，汉化版可能使用 GBK 或 UTF-8；混合编码和 EXE 内的补丁可能无法正确识别。保存设置后重启游戏。");
         infoCard("触摸与按键","单指点击模拟鼠标左键，双指点击或长按模拟右键。阅读模式中，上下滑动模拟滚轮；拖拽模式可按住左键移动。返回键发送 Esc。");
         infoCard("快进","展开游戏内快捷键，点击“快进”开始，再点“停止快进”结束。默认发送持续按住的 Ctrl，可在游戏设置中修改。点击画面、收起快捷键或离开游戏时停止；能否跳过未读内容取决于游戏设置。");
@@ -298,7 +330,8 @@ public final class LauncherActivity extends Activity {
     }
     private void gameMenu(File dir,String name) {
         if(importing)return;
-        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面","删除游戏及存档","兼容性检查","导出存档","导入存档","处理汉化补丁"},(d,which)->{
+        boolean linked=DirectGame.linked(dir);
+        AlertDialog menu=new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"开始游戏","游戏设置","重命名","更换封面",linked?"从游戏库移除":"删除游戏及存档","兼容性检查","导出存档","导入存档","处理汉化补丁"},(d,which)->{
             if(which==0) play(dir);
             if(which==1) SettingsDialog.show(this,dir,name,this::showLibrary);
             if(which==2)rename(dir,name);
@@ -308,7 +341,7 @@ public final class LauncherActivity extends Activity {
             if(which==7)importSaves(dir);
             if(which==8)processTranslation(dir);
             if(which==4 && engineRunning()) { toast("请先退出正在运行的游戏，再删除游戏"); return; }
-            if(which==4) new AlertDialog.Builder(this).setTitle("删除“"+name+"”？").setMessage("将永久删除此游戏的应用内数据（含存档和设置）。导入源目录会保留。")
+            if(which==4) new AlertDialog.Builder(this).setTitle((linked?"移除“":"删除“")+name+"”？").setMessage(linked?"只移除游戏库条目和应用设置。原目录中的游戏、存档和汉化资源全部保留。":"将永久删除此游戏的应用内数据（含存档和设置）。导入源目录会保留。")
                 .setNegativeButton("取消",null).setPositiveButton("删除",(dialog,w)->new Thread(()->{
                     try { GameImport.remove(dir.toPath()); runOnUiThread(this::showLibrary); }
                     catch(IOException error) { runOnUiThread(()->toast(error.getMessage())); }
@@ -349,14 +382,15 @@ public final class LauncherActivity extends Activity {
             if(process.processName.equals(getPackageName()+":engine"))return true;
         return false;
     }
-    private File resourceDirectory(File dir) {
+    private File resourceDirectory(File dir) throws IOException {
         if(dir.getName().equals("external")){
             File external=getExternalFilesDir(null);if(external!=null)return new File(external,"game");
         }
-        return dir;
+        return DirectGame.resources(dir);
     }
     private ProgramCompatibility.Result scanCompatibility(File dir,String profile) {
-        File resources=resourceDirectory(dir);ProgramCompatibility.Result result;
+        File resources;ProgramCompatibility.Result result;
+        try{resources=resourceDirectory(dir);}catch(IOException error){result=new ProgramCompatibility.Result();result.error=error.getMessage();return result;}
         try {
             synchronized(NativeProgramInspector.class) {
                 result=ProgramCompatibility.scan(dir,resources,profile,new NativeProgramInspector(),(done,total)->{
@@ -392,10 +426,11 @@ public final class LauncherActivity extends Activity {
     }
     private void play(File dir) {
         if(importing)return;
-        File resources=dir;
-        if(dir.getName().equals("external")){File external=getExternalFilesDir(null);resources=external==null?null:new File(external,"game");}
+        if(DirectGame.linked(dir)&&!GameStorage.granted(this)){directAccess("play:"+dir.getName());return;}
+        File resources;
+        try{resources=resourceDirectory(dir);}catch(IOException error){toast(error.getMessage());return;}
         if(!GameImport.gamePresent(resources)){
-            toast("未找到游戏启动文件，或文件为空。请选择完整的游戏目录。");return;
+            toast(DirectGame.linked(dir)?"无法读取原游戏目录，请检查目录位置、存储卡和存储权限。":"未找到游戏启动文件，或文件为空。请选择完整的游戏目录。");return;
         }
         if(engineRunning() && !read(new File(getFilesDir(),"active-game.txt"),"").equals(dir.getName())) {
             toast("请先退出当前游戏，再启动其他游戏"); return;
@@ -403,7 +438,7 @@ public final class LauncherActivity extends Activity {
         // Do not change a running VM's settings or repeat the scan on resume.
         if(engineRunning()){launchGame(dir);return;}
         try {
-            GameSettings settings=GameSettings.load(dir);
+            GameSettings settings=TranslationRuntime.prepare(dir,resources);
             if(!settings.needsEncodingDetection()) { encodingPrepared(dir,settings);return; }
         } catch(IOException error) { toast("读取设置失败："+error.getMessage());return; }
         final File input=resources;
@@ -433,6 +468,7 @@ public final class LauncherActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==GameStorage.REQUEST){storageReady();return;}
         if(request==5){
             String id=saveImportGame;saveImportGame="";
             if(result==RESULT_OK && data!=null && data.getData()!=null){
@@ -492,6 +528,33 @@ public final class LauncherActivity extends Activity {
     }
     private void importProgress(String message){
         runOnUiThread(()->{importStatus=message;if(!isDestroyed()&&status!=null)status.setText(message);});
+    }
+    private void registerDirect(File selected){
+        if(importing)return;
+        importing=true;importStatus="正在添加游戏，不复制文件…";showLibrary();
+        new Thread(()->{
+            File entry=new File(games,UUID.randomUUID().toString());boolean published=false;
+            try{
+                File source=DirectGame.validate(selected);
+                if(DirectGame.find(games,source)!=null)throw new IOException("该目录已在游戏库中");
+                PatchImport.Result patch;
+                try(GameDataLock lock=GameDataLock.acquire(source)){
+                    patch=PatchImport.process(source,PatchProfiles.ALL,this::importProgress);
+                    DirectGame.register(entry,source);published=true;
+                    defaults(entry,null);
+                    GameSettings settings=GameSettings.load(source);patch.apply(settings);settings.save(entry);
+                    write(new File(entry,".openbgi/name.txt"),source.getName());
+                }
+                GameSettings settings=GameEncoding.prepare(entry,source);
+                ProgramCompatibility.Result compatibility=scanCompatibility(entry,settings.profile);
+                runOnUiThread(()->{importing=false;if(isDestroyed())return;showLibrary();toast("已添加，直接使用原目录。"+patch.summary()+settings.encodingStatus());showCompatibility(compatibility);});
+            }catch(Exception error){
+                // Only the metadata entry is ours to remove, never the source.
+                if(!published)try{GameImport.remove(entry.toPath());}catch(IOException ignored){}
+                android.util.Log.w("OpenBGI","Direct directory failed",error);
+                runOnUiThread(()->{importing=false;if(!isDestroyed()){showLibrary();toast("添加失败："+error.getMessage());}});
+            }
+        },"OpenBGI-DirectDirectory").start();
     }
     private void processTranslation(File dir){
         if(importing)return;

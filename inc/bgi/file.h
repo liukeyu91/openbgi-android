@@ -41,6 +41,11 @@ uint32_t File_Write(File_t* f, const void* buf, uint32_t n);
 int File_Seek(File_t* f, uint32_t pos); // from the start; 1 ok
 uint32_t File_Size(File_t* f);
 
+/* An independently owned, positioned file handle. Resolve on the VM thread;
+ * reading this range needs no archive manager or game-path state. */
+typedef struct FileView { File_t file; uint32_t offset, size; } FileView_t;
+int File_OpenView(FileView_t* view, const char* dir, const char* name);
+
 // ---- PackFile / BURIKO ARC20 archives ------------------------------------
 #define PACKFILE_MAGIC "PackFile    " // 12 bytes
 #define ARC20_MAGIC    "BURIKO ARC20" // 12 bytes, 1.573 on (docs/versions.md)
@@ -121,6 +126,7 @@ int FileSetList_SetName(FileSet_t* s, const char* name); // the pseudo archive n
 int FileSetList_SetList(FileSet_t* s, char** names);     // NULL-terminated, copied; 0 for NULL or empty
 
 extern FileSet_t* gArcMgr; // the head of the archive chain, created at start-up
+int ArcMgr_OpenView(FileSet_t* mgr, FileView_t* view, const char* arc, const char* name);
 
 //  --- the file cache, enabled by "90 03" ------------------
 /* an LRU cache of file images keyed by (arc, name): a file larger than
@@ -177,12 +183,20 @@ void Loader_QueueFile(uint32_t* status, void* buf, const char* arc, const char* 
 void Loader_QueueSe(uint32_t* status, int slot, const void* desc, int fadeInMs, double gain, double rate);
 void Loader_Start(void);
 void Loader_Stop(void);
+int Loader_IsRunning(void);
+/* Large CBG reads/decodes own their input handle and output buffer. Poll and
+ * destroy on the VM thread; destroy joins before releasing caller memory. */
+typedef struct BitmapJob BitmapJob_t;
+BitmapJob_t* Loader_StartBitmap(uint8_t** dst, const char* arc, const char* name);
+int Loader_PollBitmap(BitmapJob_t* job, uint32_t* size);
+void Loader_DestroyBitmap(BitmapJob_t* job);
 
 // ---- loading ----------------------------------------------------------
 /* buf receives the whole file, decompressed when it is DSC or
  * CompressedBG.  Returns the size in buf.  Prompts for the disc while the
  * file is missing; throws when the user gives up (or without a disc). */
 uint32_t LoadFile(void* buf, const char* arc, const char* name);
+int LoadFile_OpenView(FileView_t* view, const char* arc, const char* name);
 /* "80 31" up to 1.69 build 444, "81 30" of 1.529 on: part of a file as
  * stored; 0 ok, 1 not found, 2 the range reaches past the end, 3 the size
  * exceeds the file, -1 short read */
@@ -201,6 +215,7 @@ uint32_t ReadWholeFile(void* buf, const char* dir, const char* name);           
 uint32_t ReadFileAt(void* buf, const char* name);                                                                   // base dir, then alt dir
 int WriteTextFile(const char* name, const void* buf, uint32_t len);                                                 // create in the base dir (or an absolute path); bytes written
 uint32_t GetFileSize_(const char* arc, const char* name);                                                           // "80 35": the loaded (DSC-decoded) size, by reading; 0 not found
+uint32_t GetLoadFileSize(const char* arc, const char* name);                                                        // buffer bytes LoadFile needs, including CBG/DSC decoding; 0 not found
 uint32_t GetFileSizeFast(const char* arc, const char* name);                                                        // "81 35" (1.588 on): the stored size without reading; 0 not found
 int FileExists(const char* arc, const char* name);                                                                  // "80 34"
 int Dir_Exists(const char* dir, const char* name);                                                                  // dir + name is a file (search list honoured)

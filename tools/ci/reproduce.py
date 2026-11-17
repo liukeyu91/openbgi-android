@@ -21,7 +21,8 @@ for name in ('first','a-different-length/second'):
     so=dest/'bin/android/arm64-v8a/libopenbgi.so'
     ui_apk=dest/'bin/android-ui-preview/openbgi-unsigned.apk'
     with zipfile.ZipFile(apk) as z: dex=z.read('classes.dex')
-    results.append({'apk':hashlib.sha256(apk.read_bytes()).hexdigest(),'so':hashlib.sha256(so.read_bytes()).hexdigest(),'dex':hashlib.sha256(dex).hexdigest(),'ui_apk':hashlib.sha256(ui_apk.read_bytes()).hexdigest()})
+    debug=so.with_name('libopenbgi.so.debug')
+    results.append({'apk':hashlib.sha256(apk.read_bytes()).hexdigest(),'so':hashlib.sha256(so.read_bytes()).hexdigest(),'symbols':hashlib.sha256(debug.read_bytes()).hexdigest(),'dex':hashlib.sha256(dex).hexdigest(),'ui_apk':hashlib.sha256(ui_apk.read_bytes()).hexdigest()})
 report={'source_date_epoch':env['SOURCE_DATE_EPOCH'],'commit':subprocess.check_output(['git','-c','safe.directory='+str(source),'-C',str(source),'rev-parse','HEAD'],text=True).strip(),'builds':results,'identical':results[0]==results[1]}
 (work/'reproducibility.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

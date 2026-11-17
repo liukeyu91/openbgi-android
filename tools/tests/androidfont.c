@@ -14,6 +14,7 @@
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 #include <stdio.h>
+char gPosixExeDir[4096]=".";
 
 static int checks, failures;
 #define CHECK(c)                                   \
@@ -138,6 +139,30 @@ int main(int argc, char** argv)
 				OS_FontClose(font);
 			}
 		}
+	/* Actual registration without fontconfig: file and copied memory must
+	 * resolve by family and produce identical pixels under a font hook. */
+	char family[256];
+	CHECK(FT_Init_FreeType(&library)==0);
+	CHECK(FT_New_Face(library,path,0,&face)==0);
+	snprintf(family,sizeof family,"%s",face->family_name);FT_Done_Face(face);FT_Done_FreeType(library);
+	CHECK(unsetenv("BGI_FONT")==0);OS_SetTextEncoding(OS_TEXT_UTF8);
+	CHECK(OS_FontAddFile(path));CHECK(OS_FontFaceExists(family));
+	int familyBytes=0;CHECK(OS_FontEnumFaces(NULL,0,&familyBytes)>0);char* familyNames=malloc((size_t)familyBytes);CHECK(familyNames!=NULL);
+	OS_FontEnumFaces(familyNames,0,&familyBytes);int found=0;for(int i=0;i<familyBytes;i+=(int)strlen(familyNames+i)+1)if(!strcmp(familyNames+i,family))found=1;
+	CHECK(found);free(familyNames);
+	OsPosix_SetFontFamily(family);
+	OsFont_t* fileFont=OS_FontOpen("unavailable script font",32,16,0,0);CHECK(fileFont!=NULL);
+	OS_FontRender(fileFont,text[2],3,reference,128,128,128);
+	FILE* fontFile=fopen(path,"rb");CHECK(fontFile!=NULL);CHECK(fseek(fontFile,0,SEEK_END)==0);
+	long fontBytes=ftell(fontFile);CHECK(fontBytes>0);rewind(fontFile);
+	uint8_t* fontData=malloc((size_t)fontBytes);CHECK(fontData!=NULL);
+	CHECK(fread(fontData,1,(size_t)fontBytes,fontFile)==(size_t)fontBytes);fclose(fontFile);
+	CHECK(OS_FontAddMemory(fontData,(uint32_t)fontBytes));memset(fontData,0,(size_t)fontBytes);free(fontData);
+	OsFont_t* memoryFont=OS_FontOpen("another missing script font",32,16,0,0);CHECK(memoryFont!=NULL);
+	OS_FontRender(memoryFont,text[2],3,image,128,128,128);CHECK(!memcmp(reference,image,sizeof image));
+	CHECK(OS_FontCharAdvance(fileFont,text[2],3)==OS_FontCharAdvance(memoryFont,text[2],3));
+	CHECK(!OS_FontAddMemory("not a font",10));
+	OS_FontClose(memoryFont);OS_FontClose(fileFont);OsPosix_SetFontFamily("");
 	OsPosix_FontShutdown();
 	OS_SetTextEncoding(OS_TEXT_SJIS);
 	printf("Android CJK font aspect: %d checks, %d failures\n", checks, failures);

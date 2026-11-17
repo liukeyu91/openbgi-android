@@ -13,7 +13,9 @@ Android 0.10.19 已把这些资源机制接入导入流程，并增加已有游�
 | `evb-pe` | 静态扫描 PE 中结构完整的 EVB，复用外部 EVB 解包器 | KanojoStep 汉化 EXE |
 | `cpk-v2` | 使用配套 key 解析 Camellia/EAX+zlib 资源包 | MakingHD CPK 的 9 个开场/界面脚本 |
 
-本次 MakingHD EVB 完整导出 721 个资源；KanojoStep 内嵌 EVB 与更新包合并导出 745 个资源，跳过 DLL。这里的数量是转换验证结果，不是全流程运行验证。MakingHD 的开场中文显示、回看已另作桌面运行小样；混合编码、字体钩子与排版仍需适配。
+本次 MakingHD EVB 完整导出 721 个资源；KanojoStep 内嵌 EVB 与更新包合并导出 745 个资源，跳过 DLL。这里的数量是转换验证结果，不是全流程运行验证。MakingHD 的开场中文显示、回看已另作桌面运行小样；混合编码与其他逻辑修改仍需按实际行为确认。
+
+本地运行时兼容层会应用共享配置中的 `font_family`；MakingHD、KanojoStep 和 Friend to Lover 的已知配置使用中文 Noto CJK。旧导入会在启动或打开设置时从汉化记录补齐字体配置，保留手动编码、引擎选择和之后的字体选择。设置页可用“字体替代”恢复游戏选择或切换中日文字体。文件及内存字体注册均已接入 FreeType，不再依赖 Android 上不存在的 fontconfig 或 `/tmp`。详见 [运行时适配说明](../../docs/translation-runtime.md)。
 
 `inspect` 还提供 PE32/PE32+ 导入、导出、节表和字体/API 字符串候选。它们是静态线索，不被自动当作 DLL 行为或兼容性结论。壳破坏常规 PE 导入表时，嵌入 EVB 的检测仍独立进行。
 
@@ -58,7 +60,7 @@ Linux 的解释器路径对应 `decoder-venv/bin/python`。工具只运行命令
 
 支持 `select` / `exclude` 的大小写无关通配符。多个来源出现同名资源会报冲突，需要在低优先级来源明确排除旧版本；KanojoStep 配置演示了更新包覆盖。内嵌 EVB 默认只接受唯一的有效候选，有多个时可以配置已核实的 `base_offset`。嵌套 EVB 文件夹需要新布局适配器，当前不会悄悄展平。
 
-电脑工具新增容器机制只需实现 `entries` / `read(entry)` 接口并注册到 `formats.READERS`；不需要修改游戏指令解释器。App 端对应适配器独立实现，已知 `runtime` 配置会在导入时应用。字体别名等运行时钩子的自动替代尚未实现，电脑 CLI 的 `runtime` 仍仅是设置建议。遇到新的 DLL，应先用实际资源/指令证据判断能否沿用这些机制。
+电脑工具新增容器机制只需实现 `entries` / `read(entry)` 接口并注册到 `formats.READERS`；不需要修改游戏指令解释器。App 端对应适配器独立实现，已知 `runtime` 的编码、引擎与字体配置会在导入时应用；电脑 CLI 的 `runtime` 仍仅是设置建议。遇到新的 DLL，按实际行为复用资源和字体适配，不依据 DLL 文件名猜测其逻辑。
 
 ## 校验与边界
 

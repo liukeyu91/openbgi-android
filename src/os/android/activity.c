@@ -8,6 +8,8 @@
 #include "android_internal.h"
 #include "bgi/engine.h"
 #include "renderer.h"
+#include "bgi/crash.h"
+#include "bgi/os_posix.h"
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <fcntl.h>
@@ -54,20 +56,6 @@ static int gLogFd = -1;
 static pthread_mutex_t gLogLock = PTHREAD_MUTEX_INITIALIZER;
 static size_t gLogBytes;
 
-static int gCrashFd = -1;
-static void RecordSignal(int number)
-{
-    /* ART sigchain does not reliably implement SA_RESETHAND. Re-raising can
-     * reenter this handler forever instead of terminating. Keep the minimal
-     * record, then stop the engine with only async-signal-safe operations.
-     * Intercepted native signals therefore do not promise a system tombstone. */
-    char message[] = "Native fatal signal 00\n";
-    message[20] = '0' + number / 10;
-    message[21] = '0' + number % 10;
-    if(gCrashFd >= 0) write(gCrashFd, message, sizeof message - 1);
-    _exit(128 + number);
-}
-
 void OsAndroid_Log(const char* text)
 {
 	__android_log_write(ANDROID_LOG_INFO, "OpenBGI", text);
@@ -90,6 +78,7 @@ static void* RunEngine(void* context)
     JNIEnv* env = NULL;
     int destroyed;
     pthread_setname_np(pthread_self(), "OpenBGI-VM");
+    OsAndroid_CrashThread();
     pthread_mutex_lock(&host->lock);
     while(!host->window && !host->destroyed)
         pthread_cond_wait(&host->changed, &host->lock);
@@ -134,6 +123,17 @@ static void* RunEngine(void* context)
     return NULL;
 }
 
+JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeFontFamily(JNIEnv* env,jobject activity,jstring family)
+{
+    (void)activity;
+    const char* value=(*env)->GetStringUTFChars(env,family,NULL);
+    if(!value)return;
+    OsPosix_SetFontFamily(value);
+    int enabled=value[0]!=0;
+    (*env)->ReleaseStringUTFChars(env,family,value);
+    OsAndroid_Log(enabled?"Translation font override enabled":"Using script font selection");
+}
+
 JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
     JNIEnv* env, jobject activity, jstring internalPath, jstring externalPath, jint scaleMode)
 {
@@ -155,24 +155,8 @@ JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
         snprintf(current, sizeof current, "%s/logs/engine-current.txt", internal);
         snprintf(previous, sizeof previous, "%s/logs/engine-previous.txt", internal);
         rename(current, previous);
-        snprintf(dir, sizeof dir, "%s/logs/native-crash.txt", internal);
-        gCrashFd = open(dir, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0600);
-        if(gCrashFd >= 0) {
-            struct sigaction action;
-            struct stat status;
-            int signals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
-            size_t i;
-            /* Bound legacy logs before installing handlers, never in one. */
-            if(fstat(gCrashFd, &status) == 0 && status.st_size > 64 * 1024) {
-                static const char reset[] = "Older native fatal signal records truncated\n";
-                if(ftruncate(gCrashFd, 0) == 0) write(gCrashFd, reset, sizeof reset - 1);
-            }
-            memset(&action, 0, sizeof action);
-            action.sa_handler = RecordSignal;
-            sigemptyset(&action.sa_mask);
-            for(i = 0; i < sizeof signals / sizeof signals[0]; ++i)
-                sigaction(signals[i], &action, NULL);
-        }
+        snprintf(dir, sizeof dir, "%s/logs", internal);
+        OsAndroid_CrashInstall(dir);
         gLogFd = open(current, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0600);
         if(gLogFd >= 0) {
             dup2(gLogFd, STDERR_FILENO);

@@ -32,6 +32,9 @@
 #include "bgi/sound.h"
 #include "bgi/os.h"
 #include "bgi/dbg.h"
+#ifdef BGI_ANDROID
+#include "bgi/crash.h"
+#endif
 
 uint32_t gSwitchThreadId;   // the thread that gets the turn after scheduler code 3 ("80 5E")
 int gExclusiveOn;           // 1 while only gExclusiveThread runs ("80 5D")
@@ -178,6 +181,18 @@ static int Vm_RunThread(Thread_t* t)
 	while(rc == 0 && count < gDbgInsnLimit) // 0x100000, or 1 while the debugger steps by instruction
 	{
 		uint8_t op = Thread_FetchOp(t);
+#ifdef BGI_ANDROID
+        {
+            ModuleNode_t* module=t->modules;
+            uint32_t opcode=op;
+            while(module && module->base>t->opIP) module=module->next;
+            if((op==0x7f || op==0x80 || op==0x81 || op==0x90 || op==0x91 || op==0x92 ||
+                op==0xa0 || op==0xb0 || op==0xc0 || op==0xd0 || op==0xe0 || op==0xef) &&
+                t->opIP+1<t->codeUsed) opcode=(opcode<<8)|t->code[t->opIP+1];
+            OsAndroid_CrashInstruction(t->id,t->opIP,module?t->opIP-module->base:t->opIP,
+                opcode,module?module->name:"-");
+        }
+#endif
 		if(gDbgHooked && Dbg_OnInsn(t, t->opIP, op))
 		{ // a breakpoint: the instruction is not executed, the turn ends here
 			Thread_SetIP(t, t->opIP);

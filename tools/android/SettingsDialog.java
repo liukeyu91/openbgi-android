@@ -41,7 +41,11 @@ final class SettingsDialog {
         Switch s=new Switch(a);s.setChecked(checked);s.setContentDescription(title);s.setShowText(false);int[][] states={{android.R.attr.state_checked},{}};s.setThumbTintList(new ColorStateList(states,new int[]{Ui.ACCENT,0xffa7afa7}));s.setTrackTintList(new ColorStateList(states,new int[]{0xffb9d2c2,Ui.LINE}));row.addView(s);row.setOnClickListener(v->s.setChecked(!s.isChecked()));parent.addView(row);return s;
     }
     static void show(Activity a,File game,String name,Runnable saved){
-        final GameSettings settings;try{settings=GameSettings.load(game);}catch(IOException error){Toast.makeText(a,error.getMessage(),Toast.LENGTH_LONG).show();return;}
+        final GameSettings settings;try{
+            File resources=DirectGame.resources(game);
+            if(game.getName().equals("external")){File external=a.getExternalFilesDir(null);if(external!=null)resources=new File(external,"game");}
+            settings=TranslationRuntime.prepare(game,resources);
+        }catch(IOException error){Toast.makeText(a,error.getMessage(),Toast.LENGTH_LONG).show();return;}
         Dialog dialog=new Dialog(a);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);LinearLayout root=Ui.column(a);root.setBackground(Ui.shape(a,Ui.BG,24));
         LinearLayout header=Ui.row(a);header.setPadding(Ui.dp(a,22),Ui.dp(a,22),Ui.dp(a,14),Ui.dp(a,16));LinearLayout heading=Ui.column(a);heading.addView(Ui.text(a,"游戏设置",25,Ui.INK,true));Ui.space(heading,6);
         TextView subtitle=Ui.text(a,name,12,Ui.MUTED,false);subtitle.setMaxLines(1);subtitle.setEllipsize(TextUtils.TruncateAt.END);heading.addView(subtitle);header.addView(heading,new LinearLayout.LayoutParams(0,-2,1));header.addView(Ui.iconButton(a,"back","关闭设置",dialog::dismiss));root.addView(header);
@@ -50,6 +54,10 @@ final class SettingsDialog {
         TextView encodingStatus=Ui.text(a,settings.encodingStatus(),11,Ui.MUTED,false);encodingStatus.setPadding(Ui.dp(a,16),Ui.dp(a,6),Ui.dp(a,16),Ui.dp(a,10));text.addView(encodingStatus);
         Button probe=Ui.button(a,"编码预览",false,()->EncodingPreview.show(a,game,value->encoding.select(Arrays.asList(enc).indexOf(value))));LinearLayout.LayoutParams probeParams=new LinearLayout.LayoutParams(-1,Ui.dp(a,46));probeParams.setMargins(Ui.dp(a,12),Ui.dp(a,4),Ui.dp(a,12),Ui.dp(a,12));text.addView(probe,probeParams);
         String[] profiles=EngineProfiles.NAMES.clone();profiles[0]="自动识别";Choice profile=choose(a,text,"引擎版本",profiles,Arrays.asList(EngineProfiles.NAMES).indexOf(settings.profile));
+        ArrayList<String> fontNames=new ArrayList<>(Arrays.asList("","Noto Sans CJK SC","Noto Serif CJK SC","Noto Sans CJK JP","Noto Serif CJK JP"));
+        if(!fontNames.contains(settings.fontFamily))fontNames.add(settings.fontFamily);
+        String[] fontLabels=fontNames.toArray(new String[0]);fontLabels[0]="跟随游戏";
+        Choice font=choose(a,text,"字体替代",fontLabels,fontNames.indexOf(settings.fontFamily));
         LinearLayout display=group(a,box,"显示与操作");Choice scale=choose(a,display,"画面缩放",new String[]{"保持比例","拉伸全屏","整数倍（过大时等比缩小）"},settings.scale);Choice touch=choose(a,display,"触摸方式",new String[]{"阅读：点击左键，滑动滚轮","拖拽：按住左键移动"},settings.touch);
         Switch virtual=toggle(a,display,"屏幕按键","显示游戏内快捷键按钮",settings.virtualKeys),swap=toggle(a,display,"交换手柄 A / B","交换 A、B 对应的 Enter 和 Esc",settings.swapAB);
         box.addView(Ui.section(a,"按键映射"));LinearLayout mappings=Ui.column(a);mappings.setBackground(Ui.border(a,Ui.PAPER,17));Choice save=key(a,mappings,"存档",settings.saveKey,false),load=key(a,mappings,"读档",settings.loadKey,false),backlog=key(a,mappings,"回看",settings.backlogKey,true),menu=key(a,mappings,"菜单",settings.menuKey,false);
@@ -59,6 +67,7 @@ final class SettingsDialog {
         LinearLayout footer=Ui.row(a);footer.setPadding(Ui.dp(a,22),Ui.dp(a,12),Ui.dp(a,22),Ui.dp(a,18));footer.addView(Ui.button(a,"取消",false,dialog::dismiss),new LinearLayout.LayoutParams(0,Ui.dp(a,48),1));
         Button commit=Ui.button(a,"保存设置",true,()->{
             settings.chooseEncoding(enc[encoding.selected]);settings.profile=EngineProfiles.NAMES[profile.selected];settings.scale=scale.selected;settings.touch=touch.selected;settings.virtualKeys=virtual.isChecked();settings.swapAB=swap.isChecked();
+            settings.fontFamily=fontNames.get(font.selected);
             settings.saveKey=selectedKey(save,false,settings.saveKey);settings.loadKey=selectedKey(load,false,settings.loadKey);settings.backlogKey=selectedKey(backlog,true,settings.backlogKey);settings.menuKey=selectedKey(menu,false,settings.menuKey);
             settings.skipKey=selectedKey(skip,false,settings.skipKey);
             try{settings.save(game);dialog.dismiss();saved.run();}catch(IOException error){Toast.makeText(a,error.getMessage(),Toast.LENGTH_LONG).show();}

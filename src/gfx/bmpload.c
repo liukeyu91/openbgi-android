@@ -42,11 +42,25 @@
  * this code. */
 int BmpOp_LoadFile(int slot, const char* arc, const char* name)
 {
-	uint8_t* buf = (uint8_t*)BGI_Alloc(LOAD_BUFFER);
-	uint32_t size = 0;
+	uint8_t* buf;
+	uint32_t size = 0, capacity = 0;
+	int cached = Loader_CacheLookup(NULL, &capacity, arc, name);
 	int r;
 
-	if(!Loader_CacheLookup(buf, &size, arc, name))
+	/* Synchronous loads (skip/configuration windows) need the same sizing
+	 * as WaitLoader_Ctor. Full HD backgrounds can decode beyond 32 MiB;
+	 * cache hits must also be sized before copying their decoded bytes. */
+	if(!cached)
+		capacity = GetLoadFileSize(arc, name);
+	if(gEngine->gen < GEN_1_69_472 && capacity < LOAD_BUFFER)
+		capacity = LOAD_BUFFER;
+	if(capacity < 16)
+		capacity = 16;
+	buf = (uint8_t*)BGI_Alloc((size_t)capacity + 0x30);
+	memset(buf + capacity, 0, 0x30);
+	if(cached)
+		Loader_CacheLookup(buf, &size, arc, name);
+	else
 	{
 		size = LoadFile(buf, arc, name);
 		Loader_CacheAdd(arc, name, buf, size);
@@ -217,15 +231,20 @@ int BmpOp_PutRaw(int slot, const void* data)
 	uint32_t bpp = *(const uint16_t*)(d + 4);
 	uint32_t w = *(const uint16_t*)d, h = *(const uint16_t*)(d + 2);
 	int mode = RawHeaderMode(d), r;
-	uint8_t* buf;
+	uint8_t* buf=NULL;
+	const uint8_t* unpacked=d;
 
 	if(mode < 0)
 		return 1;
-	buf = (uint8_t*)BGI_Alloc((size_t)(bpp >> 3) * h * w + 0x10);
-	if(!RawImage_Unpack(buf, data))
-		r = 1;
-	else
-		r = BmpMgr_PutPixels(gBmpMgr, slot, *(const uint16_t*)buf, *(const uint16_t*)(buf + 2), mode, buf + 0x10) ? 0 : 2;
+	/* Decoded CBG and plain raw images already have packed pixels. Avoid
+	 * allocating and copying the entire picture merely to unpack format 0. */
+	if(*(const uint16_t*)(d+6)!=0) {
+		buf = (uint8_t*)BGI_Alloc((size_t)(bpp >> 3) * h * w + 0x10);
+		if(!RawImage_Unpack(buf,data)) {BGI_Free(buf);return 1;}
+		unpacked=buf;
+	}
+	r = BmpMgr_PutPixels(gBmpMgr, slot, *(const uint16_t*)unpacked,
+		*(const uint16_t*)(unpacked+2), mode, unpacked+0x10) ? 0 : 2;
 	/* 1.529 on: the header word at +0xA set to 1 flags a base size in the
 	 * words at +0xC / +0xE (see BmpSlot_t) */
 	if(r == 0 && *(const uint16_t*)(d + 0xa) == 1)

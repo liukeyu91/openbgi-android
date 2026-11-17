@@ -66,6 +66,19 @@ int Arc_Exists(const char* arcPath, const char* name)
 static uint32_t LoadFileDecoded(void* buf, const char* arc, const char* name);
 static uint32_t GetFileSizeDecoded(const char* arc, const char* name);
 
+int LoadFile_OpenView(FileView_t* view, const char* arc, const char* name)
+{
+	char path[0x104];
+	if(File_OpenView(view,gBaseDir,name))return 1;
+	if(!arc)return File_OpenView(view,gAltDir,name);
+	CheckArcName(name);
+	PathJoin(path,gBaseDir,arc);
+	if(ArcMgr_OpenView(gArcMgr,view,path,name))return 1;
+	if(!DriveReady(gAltDir))return 0;
+	PathJoin(path,gAltDir,arc);
+	return ArcMgr_OpenView(gArcMgr,view,path,name);
+}
+
 /* Load a whole file into buf (which must be large enough: GetFileSize_
  * says how large), prompting for the disc until it is found, and decode
  * DSC / CompressedBG data in place - from 1.69 build 472 on through a
@@ -525,6 +538,29 @@ uint32_t GetFileSize_(const char* arc, const char* name)
 		n = BGI_DscOutSize(buf);
 	BGI_Free(buf);
 	return n;
+}
+
+/* The buffer LoadFile needs is not the "80 35" result on old builds:
+ * CompressedBG reports its stored size there, and that query itself uses
+ * the original 32 MiB scratch buffer.  Size raw files without reading them
+ * and inspect just the codec header.  The stored size remains a lower bound
+ * because the old loader reads the compressed bytes before decoding in place. */
+uint32_t GetLoadFileSize(const char* arc, const char* name)
+{
+	uint8_t header[0x30] = {0};
+	uint32_t size, decoded;
+	if(gEngine->gen >= GEN_1_69_472)
+		return GetFileSize_(arc, name);
+	size = GetFileSizeFast(arc, name);
+	if(LoadFileRange(header, arc, name, 0, sizeof header) != 0)
+		return size;
+	if(BGI_IsCbg(header))
+		decoded = BGI_CbgOutSize(header);
+	else if(BGI_IsDsc(header))
+		decoded = BGI_DscOutSize(header);
+	else
+		return size;
+	return decoded > size ? decoded : size;
 }
 
 // Whether dir + name (also through the search list) exists and is not a directory.

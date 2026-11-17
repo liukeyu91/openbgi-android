@@ -11,11 +11,9 @@
  * "90 .." / "A0 ..": 0 while a file job is pending, the loaded size (or
  * -1) when done; -1 while a sound job is pending, then 0 or an error code.
  *
- * This implementation performs every job immediately when it is queued.
- * Nothing in the engine can observe the difference: the status word is
- * only read through the wait objects, which run after the queuing
- * instruction has returned, and the original gives no ordering guarantee
- * between the loader and the script other than the status word itself.
+ * Generic file/sound jobs run inline here. Large CBG bitmap waits use
+ * bitmapjob.c to read and decode through an independently owned handle
+ * on a worker; VM state and bitmap creation remain on the engine thread.
  */
 #include "bgi/file.h"
 #include "bgi/sound.h"
@@ -78,6 +76,8 @@ void Loader_Start(void)
 {
 #ifdef BGI_ANDROID
 	BGI_CbgCacheSetLimit(64u * 1024u * 1024u);
+#else
+	BGI_CbgCacheSetLimit(0); // initialise its lock before any decoder workers
 #endif
 	gLoaderRun = 1;
 }
