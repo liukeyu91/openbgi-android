@@ -1,6 +1,9 @@
 # Android 更新记录
 
+[简体中文](CHANGELOG.md) | [English](CHANGELOG.en.md)
+
 Android 移植各版本的主要变化，按版本倒序排列。
+本文档由维护者与 AI 协作整理。
 
 | 版本 | 主要更新 |
 | --- | --- |
