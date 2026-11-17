@@ -33,7 +33,7 @@ The Android port is still under development. Compatibility needs to be verified 
 
 ## AI collaboration
 
-The Android port in this repository is developed collaboratively by its maintainer and AI coding assistants, including **OpenAI Codex**. The maintainer directs the work and provides device-test feedback; AI assists with implementation, debugging, automated tests, and documentation. Upstream authorship and license notices are preserved.
+The Android port in this repository is developed collaboratively by its maintainer and Codex
 
 ## Documentation
 
