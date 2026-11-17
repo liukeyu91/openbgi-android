@@ -445,6 +445,13 @@ static void TestLayoutExtensions(void)
 	memset(&rich, 0, sizeof rich);
 	memset(&dict, 0, sizeof dict);
 
+	// Fit two words with room for part of the next, using the actual
+	// font widths: fallback Latin glyphs need not fit a half-width cell.
+	{
+		int pair0 = Text_LineWidth("aaaaaaa bbbbbbb", font, 0);
+		int pair1 = Text_LineWidth("ccccccc ddddddd", font, 0);
+		area.r = (pair0 > pair1 ? pair0 : pair1) * 5 / 4 + 23;
+	}
 	// word wrap off, then on: where the lines start
 	for(mode = 0; mode < 2; mode++)
 	{
@@ -457,7 +464,7 @@ static void TestLayoutExtensions(void)
 		y = -1;
 		for(c = rich.head; c; c = c->next)
 		{
-			CHECK(c->x >= 0 && c->x + 12 <= 240);
+			CHECK(c->x >= 0 && c->x + c->glyph.w <= area.r + 1);
 			if(c->y != y)
 			{
 				y = c->y;
@@ -471,6 +478,7 @@ static void TestLayoutExtensions(void)
 		RichState_Free(&rich);
 	}
 	Text_SetWordWrap(0);
+	area.r = 239;
 
 	CHECK(Text_LineWidth("", font, 0) == 0);
 	CHECK(Text_LineWidth("ab", font, 0) > 0);
@@ -575,21 +583,20 @@ static void TestGbkText(void)
 	CHECK(IsKinsokuChar(0x8142));
 }
 
-static void TestGbkLatinLayout(void)
+static int TestMixedLatinLayoutCase(int encoding, const char* mixed)
 {
-	const char* mixed = "\xc4\xe3\xba\xc3OK?WiW";
 	BmpMgr_t* mgr = BmpMgr_New(8);
 	RichState_t rich = {0};
 	RubyDict_t dict = {0};
 	Rect_t area = {0, 0, 639, 199};
 	int32_t cur[2] = {0}, lines, widths[3], style[5] = {2, 5, 5, 0, 0};
 	int font = 0;
+	int result = -1;
 	FontInfo_t fi;
 	Glyph_t wideLatin = {.code = 'W', .right = 19};
 
-	printf("GBK mixed layout\n");
-	CHECK(Font_GlyphCellW(&wideLatin, 24, 0) == 12);
-	Text_SetEncoding(TEXT_GBK);
+	printf("Mixed Latin layout encoding=%d\n", encoding);
+	Text_SetEncoding(encoding);
 	CHECK(Font_GlyphCellW(&wideLatin, 24, 0) == 21);
 	CHECK(Font_GlyphCellW(&wideLatin, 24, 1) == 24);
 	Engine_SelectProfile("1.616");
@@ -602,6 +609,7 @@ static void TestGbkLatinLayout(void)
 		CHECK(Text_LayoutCoreH(&rich, &lines, mixed, 0, &dict, cur, &area, 24, font, 0, 0, 0xffffff, style) == 1);
 		CHECK(lines == 1);
 		CHECK(Text_MeasureInfo(widths, mixed, &fi, 0) == 1 && widths[0] == cur[0]);
+		result = widths[0];
 		for(c = rich.head; c; c = c->next)
 		{
 			Glyph_t g;
@@ -616,6 +624,27 @@ static void TestGbkLatinLayout(void)
 		}
 		RichState_Free(&rich);
 
+		/* A plain bitmap and its ABC widths must also keep the entire W.
+		 * Compare actual alpha coverage with the uncropped rasterised glyph. */
+		{
+			Bmp_t plain, reference;
+			Glyph_t g;
+			int measured = 0;
+			int32_t abc[3], count;
+			Bmp_AllocScreen(&plain, 48, 24, 1);
+			Bmp_AllocScreen(&reference, 48, 24, 1);
+			Bmp_Fill(&plain, NULL, 0); Bmp_Fill(&reference, NULL, 0);
+			Font_PaintGlyph(&reference, &g, 'W', fi.font, 0xffffff);
+			CHECK(BmpMgr_DrawTextEx(mgr, &plain, &measured, 0, 0, "W", font, 0xffffff, 0, 0x100, 0, 0, 0) == 1);
+			CHECK(measured > g.right);
+			for(int y = 0; y < 24; y++)
+				for(int x = 0; x < 24; x++)
+					CHECK(plain.pixels[y * plain.pitch + x * 4 + 3] == reference.pixels[y * reference.pitch + x * 4 + 3]);
+			CHECK(Text_AbcWidths(abc, &count, "W", font) == 1 && count == 1);
+			CHECK(abc[0] + abc[1] + abc[2] == measured && abc[2] >= 1);
+			BGI_Free(plain.pixels); BGI_Free(reference.pixels);
+		}
+
 		area.r = widths[0] - 2; // one pixel too narrow for the same line
 		cur[0] = cur[1] = 0;
 		CHECK(Text_LayoutCoreH(&rich, &lines, mixed, 0, &dict, cur, &area, 24, font, 0, 0, 0xffffff, style) == 1);
@@ -627,6 +656,17 @@ static void TestGbkLatinLayout(void)
 	Text_SetBmpMgrPtr(NULL);
 	BmpMgr_Delete(mgr);
 	Text_SetEncoding(TEXT_SJIS);
+	return result;
+}
+
+static void TestMixedLatinLayout(void)
+{
+	/* The same Japanese/Latin text in CP932, GBK and UTF-8. */
+	int sjis = TestMixedLatinLayoutCase(TEXT_SJIS, "\x93\xfa\x96\x7b" "OK?WiW STAR GENERATION");
+	int gbk = TestMixedLatinLayoutCase(TEXT_GBK, "\xc8\xd5\xb1\xbe" "OK?WiW STAR GENERATION");
+	int utf8 = TestMixedLatinLayoutCase(TEXT_UTF8, "\xe6\x97\xa5\xe6\x9c\xac" "OK?WiW STAR GENERATION");
+	if(sjis >= 0 && gbk >= 0 && utf8 >= 0)
+		CHECK(sjis == gbk && gbk == utf8);
 }
 
 // run every group; exit status 1 when any check failed
@@ -639,7 +679,7 @@ int main(void)
 	TestMarkup();
 	TestLayoutExtensions();
 	TestGbkText();
-	TestGbkLatinLayout();
+	TestMixedLatinLayout();
 	OS_Shutdown();
 	if(gFails)
 	{

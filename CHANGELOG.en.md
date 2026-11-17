@@ -5,6 +5,7 @@
 
 | Version | Changes |
 | --- | --- |
+| 0.10.22-preview | Fix clipped Latin letters in mixed SJIS/UTF-8 text; keep rendering, measurement and wrapping widths consistent. |
 | 0.10.21-preview | Fix equal-size compressed translation resources being treated as uncompressed; repair affected images in existing imports. |
 | 0.10.20-preview | Bundle FFmpeg for standard movie playback, with audio/video synchronization, tap to skip, and background pause. |
 | 0.10.19-preview | Extract supported translation resources during import or for existing games, and apply recognized encoding and engine settings. |

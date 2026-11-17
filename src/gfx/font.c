@@ -545,9 +545,9 @@ int Font_GlyphCellW(const Glyph_t* g, int fullWidth, int wide)
 	int halfWidth = fullWidth / 2;
 	if(wide)
 		return fullWidth;
-	/* A GBK fallback font can have Latin ink wider than half an em.
-	 * Leave one blank column after that ink for outlined dialogue. */
-	if(gTextGbk && g->code >= '!' && g->code <= '~' && g->right >= halfWidth - 1)
+	/* CJK fallback fonts can draw Latin wider than half an em, regardless
+	 * of the text encoding. Keep that ink and one trailing blank column. */
+	if(g->code >= '!' && g->code <= '~' && g->right >= halfWidth - 1)
 		return g->right + 2;
 	return halfWidth;
 }

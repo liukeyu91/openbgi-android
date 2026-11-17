@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbgi.port"
-    android:versionCode="34"
-    android:versionName="0.10.21-preview">
+    android:versionCode="35"
+    android:versionName="0.10.22-preview">
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34" />
     <application android:name=".CrashLogs"
