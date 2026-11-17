@@ -2,8 +2,6 @@
 
 [简体中文](CHANGELOG.md) | English
 
-Major Android port changes, newest first.
-This document is maintained collaboratively by the maintainer and AI assistants.
 
 | Version | Changes |
 | --- | --- |
