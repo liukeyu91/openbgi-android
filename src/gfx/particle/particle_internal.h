@@ -36,7 +36,7 @@
 /* particles per engine: 0x1000 up to 1.69, 0x4000 in 1.494, 0x8000 from
  * 1.529; the tables take the largest, the checks the generation's */
 #define PTCL_MAX  0x8000
-#define PtclMax() (gEngine->gen >= GEN_1_529 ? 0x8000 : gEngine->gen >= GEN_1_494 ? 0x4000 \
+#define PtclMax() (gEngine->gen >= GEN_1_529 ? 0x8000 : gEngine->gen >= GEN_1_492 ? 0x4000 \
 																				  : 0x1000)
 /* 8 patterns per type until 1.616; 64 from 1.636 on.
  * The tables are sized for 64, the checks use the generation's count. */

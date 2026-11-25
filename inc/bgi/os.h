@@ -144,12 +144,15 @@ size_t OS_SjisToUtf8(const char* sjis, char* out, size_t n);
 uint32_t OS_SjisToCodePoint(uint16_t sjis);
 // UTF-8 to Shift-JIS ("81 20" of 1.653 on); a character without a code becomes '?'; the length written
 size_t OS_Utf8ToSjis(const char* utf8, char* out, size_t n);
-enum { OS_TEXT_SJIS, OS_TEXT_UTF8, OS_TEXT_GBK };
+enum { OS_TEXT_SJIS, OS_TEXT_UTF8, OS_TEXT_GBK, OS_TEXT_BIG5 };
 /* Script text encoding. UTF-8 also affects titles and messages; GBK is
  * used for game glyphs and edit fields. Paths and engine messages keep
  * their CP932 conversion in GBK mode. */
 void OS_SetTextEncoding(int encoding);
 int OS_GbkCharLen(const char* s); // one byte, or two for a complete GBK pair
+int OS_Big5CharLen(const char* s);
+uint32_t OS_Big5ToCodePoint(uint16_t code);
+uint16_t OS_CodePointToBig5(uint32_t cp);
 uint32_t OS_GbkToCodePoint(uint16_t code); // U+FFFD for an unmapped code
 uint16_t OS_CodePointToGbk(uint32_t cp); // packed GBK code, zero if unrepresentable
 int OS_SetCurrentDir(const char* dir); // SetCurrentDirectory; 1 on success
@@ -485,6 +488,7 @@ void OS_ChildReleaseDc(OsChild_t* c, OsDc_t* dc);
  * without an edit control draws the field itself (src/os/posix/edit.c). */
 void OS_EditShow(int show);                   // ShowWindow(SW_SHOW / SW_HIDE) + WM_SETFONT (the font when shown, none when hidden)
 void OS_EditMove(int x, int y, int w, int h); // MoveWindow in client coordinates, repaint
+void OS_EditSetAlignment(int mode); // horizontal alignment: 0 left, 1 centre, 2 right
 /* replace the font: CreateFontA(height, width, 0, 0, FW_THIN, 0, 0, 0,
  * SHIFTJIS_CHARSET, OUT_TT_PRECIS, 0, PROOF_QUALITY, FIXED_PITCH, face) and
  * WM_SETFONT with redraw; the width is half the height unless "B0 22"
@@ -668,6 +672,10 @@ int OS_PlaySoundFile(const char* path);
 #define OS_MOVIE_VIDEO_NOT_RENDERED 3 // VFW_S_VIDEO_NOT_RENDERED
 #define OS_MOVIE_AUDIO_NOT_RENDERED 4 // VFW_S_AUDIO_NOT_RENDERED
 int OS_MovieOpen(const char* path);   // build the graph for the file: one of the codes above (everything is released again on OS_MOVIE_FAILED)
+#ifdef BGI_HAVE_FFMPEG
+struct FileView;
+int OS_MovieOpenView(struct FileView* view);
+#endif
 /* show the video as a child at the client rectangle, start it and report
  * its length in ms (the stop position converted to media time); 1 ok */
 int OS_MovieStart(int x, int y, int w, int h, int32_t volume, int32_t* lengthMs);

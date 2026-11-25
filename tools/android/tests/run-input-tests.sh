@@ -8,7 +8,7 @@ trap 'rm -rf "$out"' EXIT HUP INT TERM
 src="$root/tools/android"
 sh "$src/generate-profiles.sh" "$out/EngineProfiles.java"
 "${JAVAC:-javac}" -encoding UTF-8 -d "$out" "$out/EngineProfiles.java" \
-    "$src/GameSettings.java" "$src/Viewport.java" "$src/InputKeys.java" \
+    "$src/ArchiveLanguage.java" "$src/GameSettings.java" "$src/Viewport.java" "$src/InputKeys.java" \
     "$src/TouchInput.java" "$src/InputContractTest.java"
 "${JAVA:-java}" -cp "$out" org.openbgi.port.InputContractTest
 "${CC:-cc}" -std=c99 -Wall -Wextra -Werror "$src/tests/viewport.c" -o "$out/viewport"

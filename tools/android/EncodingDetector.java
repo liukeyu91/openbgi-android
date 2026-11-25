@@ -8,7 +8,7 @@ import java.util.*;
 final class EncodingDetector {
     static final String[] ENCODINGS={"sjis","gbk","utf8"};
     private static final String CHINESE="的了这们说没吗个为会来时对从过还让给着后里样么话欢爱觉现开关档读设选确键欢应当处与渐进";
-    static Charset charset(int i){return Charset.forName(i==0?"windows-31j":i==1?"GBK":"UTF-8");}
+    static Charset charset(int i){return GameTextCodec.charset(i==1?2:i==2?1:i==3?3:0);}
     static String decode(byte[] bytes,int i){
         try{return charset(i).newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();}
         catch(CharacterCodingException error){return null;}

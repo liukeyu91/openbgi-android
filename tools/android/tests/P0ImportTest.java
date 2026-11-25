@@ -24,6 +24,10 @@ public class P0ImportTest {
             Files.writeString(a.toPath().resolve("UserData.sav"),"save-a");
             GameImport.install(b,Arrays.asList(file("ipl._bp","second-boot"),file("Sub/Other.arc","other")),(x,y)->{});
             Files.writeString(b.toPath().resolve("UserData.sav"),"save-b");
+            File localized=root.resolve("localized").toFile();
+            GameImport.install(localized,Arrays.asList(file("SYSTEM.T2.ARC","boot"),
+                file("SysPrg.TC.arc","programs")),(x,y)->{});
+            check(ArchiveLanguage.resolve(localized,"")==ArchiveLanguage.TC,"Recognize localized archive import");
             check(Files.readString(a.toPath().resolve("UserData.sav")).equals("save-a"),"Save isolation");
             reject(root.resolve("bad").toFile(),Arrays.asList(file("../escape","x"),file("ipl._bp","x")));
             reject(root.resolve("bad").toFile(),Arrays.asList(file("/absolute","x")));

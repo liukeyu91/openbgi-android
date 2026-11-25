@@ -29,7 +29,7 @@ public final class ProgramCompatibilityTest {
     static void tests(Path root)throws Exception {
         ProgramCompatibility.Result platform=new ProgramCompatibility.Result();platform.profile="1.616";
         platform.findings.put(0x381e0,new ProgramCompatibility.Finding(0x81e0,3));
-        check(platform.report().contains("当前平台无法启动外部程序") && !platform.report().contains("尚未实现"));
+        check(platform.status()==ProgramCompatibility.Status.FINDINGS && platform.findings.get(0x381e0).kind==3);
         Path game=Files.createDirectory(root.resolve("game"));Files.createDirectory(game.resolve("Archive"));
         byte[] archive=EncodingProbeTest.archive(new String[]{"ipl._bp","scrgrp7._bp"},
             new byte[][]{EncodingProbeTest.dsc(program(0x17)),EncodingProbeTest.dsc(program(0x56))},true);
@@ -38,26 +38,35 @@ public final class ProgramCompatibilityTest {
         check(result.programs==2 && result.checked==2 && result.findings.size()==1);
         check(result.profile.equals("1.636") && result.instructions==4);
         check(Arrays.equals(a.boot,program(0x17)) && a.preference.equals("auto"));
-        check(result.report().contains("$56") && result.report().contains("scrgrp7._bp") && result.report().contains("$00000000"));
+        ProgramCompatibility.Finding missing=result.findings.get(0x10056);
+        check(missing!=null && missing.locations.get(0).contains("scrgrp7._bp") && missing.locations.get(0).endsWith("$00000000"));
         check(Arrays.equals(archive,Files.readAllBytes(arc)));
         Files.write(game.resolve("scrgrp7._bp"),program(0x5d));result=scan(game,"auto",new Analyzer());
         check(result.programs==2 && result.checked==2 && result.findings.isEmpty());
-        check(result.summary().equals("静态检查未发现缺失指令"));
+        check(result.status()==ProgramCompatibility.Status.PASS);
         Path hidden=Files.createDirectory(game.resolve(".openbgi"));Files.write(hidden.resolve("ignored._bp"),program(0x56));
         Path saves=Files.createDirectory(game.resolve("UserData"));Files.write(saves.resolve("ignored._bp"),program(0x56));
         result=scan(game,"auto",new Analyzer());check(result.programs==2 && result.findings.isEmpty());
-        ProgramCompatibility.save(game.toFile(),game.toFile(),"auto","test-build",result);
-        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").equals(result.summary()));
-        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","other-build").contains("重新检查"));
-        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"1.616","test-build").contains("重新检查"));
+        ProgramCompatibility.save(game.toFile(),game.toFile(),"auto","test-build",result,"Localized report");
+        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").status==result.status());
+        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","other-build").status==ProgramCompatibility.Status.RECHECK);
+        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"1.616","test-build").status==ProgramCompatibility.Status.RECHECK);
+        Path cached=hidden.resolve("compatibility.properties");
+        Properties legacy=new Properties();
+        try(InputStream in=Files.newInputStream(cached)){legacy.load(in);}
+        legacy.remove("status");legacy.remove("findingCount");
+        legacy.setProperty("summary","发现 6 种缺失或不支持的指令");
+        try(OutputStream out=Files.newOutputStream(cached)){legacy.store(out,null);}
+        ProgramCompatibility.Summary old=ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build");
+        check(old.status==ProgramCompatibility.Status.FINDINGS && old.findingCount==6);
         Files.write(game.resolve("games.json"),"{}".getBytes(StandardCharsets.UTF_8));a=new Analyzer();scan(game,"auto",a);
         check(a.table.equals(game.resolve("games.json").toString()));
-        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").contains("重新检查"));
+        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").status==ProgramCompatibility.Status.RECHECK);
         Files.write(hidden.resolve("compatibility.properties"),"bad=\\uZZZZ".getBytes(StandardCharsets.US_ASCII));
-        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").contains("未检查"));
+        check(ProgramCompatibility.cachedSummary(game.toFile(),game.toFile(),"auto","test-build").status==ProgramCompatibility.Status.RECHECK);
         Path empty=Files.createDirectory(root.resolve("empty"));result=scan(empty,"auto",new Analyzer());
-        check(result.checked==0 && result.profile.isEmpty() && result.summary().equals("检查未完成"));
-        result=scan(empty,"1.636",new Analyzer());check(result.summary().equals("检查不完整"));
+        check(result.checked==0 && result.profile.isEmpty() && result.status()==ProgramCompatibility.Status.INCOMPLETE);
+        result=scan(empty,"1.636",new Analyzer());check(result.status()==ProgramCompatibility.Status.PARTIAL);
         Path broken=Files.createDirectory(root.resolve("broken"));Files.write(broken.resolve("bad._bp"),new byte[]{1});
         result=scan(broken,"1.636",new Analyzer());check(result.skipped==1 && result.programs==1 && result.checked==0);
         try(RandomAccessFile file=new RandomAccessFile(broken.resolve("large._bp").toFile(),"rw")){file.setLength(ProgramCompatibility.MAX_PROGRAM+1L);}
@@ -69,14 +78,14 @@ public final class ProgramCompatibilityTest {
         EncodingProbeTest.put(shortFile,4,32);Files.write(shortened.resolve("shortened._bp"),shortFile);
         result=scan(shortened,"1.636",new Analyzer());
         check(result.checked==1 && result.skipped==0 && result.problems==1 && result.findings.isEmpty());
-        check(result.report().contains("文件头或代码存在异常") && result.report().contains("shortened._bp"));
-        check(result.summary().equals("检查不完整"));
+        check(result.problemLocations.get(0).contains("shortened._bp"));
+        check(result.status()==ProgramCompatibility.Status.PARTIAL);
         Thread.currentThread().interrupt();
         try{scan(game,"auto",new Analyzer());throw new AssertionError("Cancellation ignored");}catch(InterruptedIOException expected){checks++;}finally{Thread.interrupted();}
         Path config=Files.createDirectory(root.resolve("external-entry"));
         result=ProgramCompatibility.scan(config.toFile(),game.toFile(),"1.616",new Analyzer(),(done,total)->{});
         check(result.profile.equals("1.616") && result.checked==2);
-        ProgramCompatibility.save(config.toFile(),game.toFile(),"1.616","test",result);
+        ProgramCompatibility.save(config.toFile(),game.toFile(),"1.616","test",result,"Localized report");
         check(Files.isRegularFile(config.resolve(".openbgi/compatibility.properties")) && !Files.exists(config.resolve(".openbgi/compatibility.properties.tmp")));
         System.out.println("Program compatibility: "+checks+" checks passed");
     }

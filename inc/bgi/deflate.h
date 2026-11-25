@@ -32,6 +32,11 @@ uint8_t* Deflate_Compress(const uint8_t* data, size_t n, int level, size_t* outS
  * wrong or memory runs out. */
 uint8_t* Deflate_Uncompress(const uint8_t* data, size_t n, size_t hint, size_t* outSize);
 
+/* Decompress a raw deflate stream (RFC 1951 without the zlib wrapper), as a
+ * ZIP entry stores it: the same decoder without the header and the Adler-32
+ * check, so the caller checks the archive's CRC-32 instead. */
+uint8_t* Deflate_InflateRaw(const uint8_t* data, size_t n, size_t hint, size_t* outSize);
+
 /* The code lengths of a Huffman code for `n` symbols (at most
  * HUFFMAN_SYMBOLS_MAX) with the frequencies `freq`: an optimal prefix
  * code whose lengths are limited to `maxBits`, 0 for a symbol that does

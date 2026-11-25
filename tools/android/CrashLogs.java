@@ -10,9 +10,11 @@ import java.util.zip.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
+import java.util.*;
 import android.os.Process;
 
 public final class CrashLogs extends Application {
+    private static volatile long sessionEpoch;
     static File directory(Context context) {
         File dir = new File(context.getFilesDir(), "logs");
         dir.mkdirs();
@@ -29,6 +31,7 @@ public final class CrashLogs extends Application {
             } catch(IOException ignored) {}
             try (PrintWriter out = new PrintWriter(new File(dir, "java-crash.txt"))) {
                 out.println(identity(this));
+                if(sessionEpoch!=0)out.println("Session epoch ms: "+sessionEpoch);
                 out.println("PID: "+Process.myPid()+" Native TID: "+Process.myTid());
                 out.println(new java.util.Date());
                 out.println("Thread: " + thread.getName());
@@ -58,10 +61,39 @@ public final class CrashLogs extends Application {
             return out.toString();
         } catch(Exception unavailable) { return "unavailable: "+unavailable.getClass().getSimpleName(); }
     }
-    static void beginSession(Context context, File game, GameSettings settings) {
+    private static String buildInfo(Context context) {
+        try (InputStream input=context.getAssets().open("build-info.txt");
+             ByteArrayOutputStream output=new ByteArrayOutputStream()) {
+            copy(input,output,1024);
+            return new String(output.toByteArray(),StandardCharsets.UTF_8);
+        } catch(IOException unavailable) { return "Source baseline: unavailable\n"; }
+    }
+    private static String gameTitle(File game) {
+        Path name=game.toPath().resolve(".openbgi/name.txt");
+        try {
+            if(Files.isRegularFile(name)&&Files.size(name)<=1024)
+                return new String(Files.readAllBytes(name),StandardCharsets.UTF_8).trim().replace('\r',' ').replace('\n',' ');
+        } catch(IOException ignored) {}
+        return game.getName();
+    }
+    static long beginSession(Context context, File game, File storage, File data, GameSettings settings) {
+        sessionEpoch=System.currentTimeMillis();
         File dir=directory(context);
-        String info=identity(context)+"Session epoch ms: "+System.currentTimeMillis()+"\nPID: "+Process.myPid()
-            +"\nGame entry: "+game.getName()+"\nEncoding: "+settings.encoding+"\nEngine selection: "+settings.profile
+        String overlayId="none", overlayHash="none", extracted="unavailable";
+        try {
+            File patch=GamePatch.active(game);
+            if(patch!=null){
+                overlayId=patch.getName();
+                overlayHash=GamePatch.recordedFingerprint(patch);
+                if(overlayHash.isEmpty())overlayHash="unavailable";
+            }
+        }catch(IOException error){overlayHash="unavailable";}
+        try{extracted=GamePatch.extractionFingerprint(data,storage);}
+        catch(IOException|IllegalArgumentException ignored){}
+        String info=identity(context)+buildInfo(context)+"Session epoch ms: "+sessionEpoch+"\nPID: "+Process.myPid()
+            +"\nGame entry: "+game.getName()+"\nGame title: "+gameTitle(game)+"\nEncoding: "+settings.encoding+
+            "\nEngine selection: "+settings.profile+"\nArchive language: "+(settings.archiveLanguage.isEmpty()?"default":settings.archiveLanguage)
+            +"\nOverlay id: "+overlayId+"\nOverlay content SHA256: "+overlayHash+"\nExtracted patch record SHA256: "+extracted
             +"\nTranslation adapter: "+settings.translationProfile+"\nFont override: "+settings.fontFamily
             +"\nScale mode: "+settings.scale+"\nNative SHA256: "+nativeHash(context)+"\n";
         try {
@@ -71,6 +103,7 @@ public final class CrashLogs extends Application {
             Files.write(temp,info.getBytes(StandardCharsets.UTF_8));
             Files.move(temp,current,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
         } catch(IOException error) { android.util.Log.w("OpenBGI","Could not record session metadata",error); }
+        return sessionEpoch;
     }
     static String takeFailureNotice(Context context) {
         File latest=null;
@@ -84,9 +117,9 @@ public final class CrashLogs extends Application {
         android.content.SharedPreferences seen=context.getSharedPreferences("crash-reports",Context.MODE_PRIVATE);
         if(id.equals(seen.getString("lastNotice","")))return null;
         seen.edit().putString("lastNotice",id).apply();
-        return "上次运行发生异常，诊断日志已保留。\n时间："
-            +new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.ROOT).format(new java.util.Date(latest.lastModified()))
-            +"\n可导出日志用于排查。";
+        return context.getString(R.string.failure_notice,
+            android.text.format.DateFormat.getMediumDateFormat(context).format(latest.lastModified())+" "+
+            android.text.format.DateFormat.getTimeFormat(context).format(latest.lastModified()));
     }
     private static String reason(int value) {
         switch(value) {
@@ -106,10 +139,27 @@ public final class CrashLogs extends Application {
     static void export(Context context, OutputStream target) throws IOException {
         StringBuilder notes=new StringBuilder();
         try (ZipOutputStream zip = new ZipOutputStream(target)) {
-            entry(zip,"device.txt","Report schema: 2\nExport epoch ms: "+System.currentTimeMillis()+"\n"+identity(context)
+            String device="Report schema: 3\nExport epoch ms: "+System.currentTimeMillis()+"\n"+identity(context)
                 +"Android: "+Build.VERSION.RELEASE+" API "+Build.VERSION.SDK_INT+"\nDevice: "+Build.MANUFACTURER+" "+Build.MODEL
-                +"\nABIs: "+java.util.Arrays.toString(Build.SUPPORTED_ABIS)+"\n");
+                +"\nABIs: "+java.util.Arrays.toString(Build.SUPPORTED_ABIS)+"\n";
+            entry(zip,"device.txt",device);
+            String summary;
+            try {
+                File logs=directory(context);
+                Map<String,String> session=RunReport.fields(new File(logs,"session-current.txt"));
+                String id=session.getOrDefault("Game entry","");
+                if(id.matches("[a-z0-9-]{1,79}") && "unavailable".equals(session.get("Overlay content SHA256"))){
+                    try {
+                        File patch=GamePatch.active(new File(context.getFilesDir(),"games/"+id));
+                        if(patch!=null && patch.getName().equals(session.get("Overlay id")))
+                            session.put("Overlay content SHA256",GamePatch.fingerprint(patch));
+                    }catch(IOException error){notes.append("Overlay hash unavailable\n");}
+                }
+                summary=RunReport.render(logs,session);
+            }catch(IOException error){summary="Game session: unavailable\n";notes.append("Run summary unavailable\n");}
+            entry(zip,"run-report.txt",device+buildInfo(context)+"\n"+summary);
             entry(zip,"READ-ME.txt","Native crashes: native-crash*.txt contains signal, fault address, registers, caller candidates, VM activity and maps.\n"
+                +"Run-report.txt summarizes the latest session. A VM program is the observed script location. A player-facing scene label may be unavailable.\n"
                 +"A VM breadcrumb is the last observed instruction, not proof of the faulting thread. Match native SHA256 before symbolizing.\n"
                 +"Frame-pointer walking and /proc access are best effort; a complete native backtrace/tombstone is not guaranteed.\n"
                 +"Native fallback exits use status 128+signal (139=SIGSEGV, 134=SIGABRT). Android may label these SELF_EXIT.\n"

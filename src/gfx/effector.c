@@ -8,7 +8,7 @@
  * An effector is a screen-sized object that snapshots everything painted
  * below it and writes back a distorted version, in one of four modes:
  * 0 a displacement through vector maps ("91 65"), 1 the "gradient", a
- * horizontal blur ("91 66"), 2 a ripple ("91 67"), 3 a rotation / zoom
+ * box blur ("91 66"), 2 a ripple ("91 67"), 3 a rotation / zoom
  * about a point, animatable through the progress ("91 68").  The level is
  * the strength of the distortion.  Every effector is on the global list
  * `gEffectors`: while any of them is visible the compositor paints whole
@@ -20,6 +20,7 @@
 #include "bgi/common.h"
 #include "bgi/gfx/objects.h"
 #include "bgi/gfx/compositor.h"
+#include "bgi/version.h"
 
 EffNode_t* gEffectors; // every live effector, newest first
 
@@ -106,7 +107,10 @@ static void Effector_Draw(DispObj_t* o, Bmp_t* dst, const Rect_t* local, uint32_
 			Blit_Displace(dst, &e->snap, &v1, e->vec2 != -1 ? &v2 : NULL, level, e->amount);
 			break;
 		case 1:
-			Blit_Gradient(dst, &e->snap, e->gradType, level);
+			if(gEngine->gen == GEN_1_680)
+				Blit_Gradient680(dst, &e->snap, e->gradType, level);
+			else
+				Blit_Gradient(dst, &e->snap, e->gradType, level);
 			break;
 		case 2:
 			if(!EffCurrent(&map, e->rippleMap, e->rippleMapGen))
@@ -155,12 +159,11 @@ int Effector_SetVector(Effector_t* e, int vec1, int vec2, int level, int amount,
 	return 0;
 }
 
-/* "91 66", mode 1: the "gradient", a horizontal blur of width 2 * level + 1;
- * type 0 pads with black, 1 repeats the edge.  0 ok, 0x80000005 unknown
- * type. */
+/* "91 66": types 0/1 blur horizontally. 1.680 adds vertical (2/3)
+ * and two-pass (4/5) blur. Even types pad with black, odd repeat the edge. */
 int Effector_SetGradient(Effector_t* e, int type, int level, int prio)
 {
-	if((uint32_t)type > 1)
+	if((uint32_t)type > (gEngine->gen == GEN_1_680 ? 5u : 1u))
 		return (int)0x80000005;
 	Effector_FreeTable(e);
 	e->mode = 1;

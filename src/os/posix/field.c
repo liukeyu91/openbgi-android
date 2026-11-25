@@ -18,8 +18,8 @@
 // byte length of the character starting at s[i]
 static int CharLen(const char* s, int i)
 {
-	if(gOsTextGbk)
-		return OS_GbkCharLen(s + i);
+	if(gOsTextGbk || gOsTextBig5)
+		return OsCommon_ChineseCharLen(s + i);
 	return OsCommon_SjisIsLead((uint8_t)s[i]) && s[i + 1] ? 2 : 1;
 }
 
@@ -50,7 +50,7 @@ void X11Field_SetText(X11Field_t* f, const char* text)
 			i += CharLen(f->text, i);
 		}
 		uint8_t lead = (uint8_t)f->text[last];
-		int isLead = gOsTextGbk ? lead >= 0x81 && lead <= 0xfe : OsCommon_SjisIsLead(lead);
+		int isLead = (gOsTextGbk || gOsTextBig5) ? lead >= 0x81 && lead <= 0xfe : OsCommon_SjisIsLead(lead);
 		if(isLead && !f->text[last + 1])
 			f->text[last] = 0;
 	}
@@ -195,11 +195,11 @@ void Ui_FillRect(uint32_t* pix, int pitch, int bufW, int bufH, int x, int y, int
 }
 
 /* draw the field (see os_x11.h): the optional sunken box, the text
- * centred or left-aligned behind 2 pixels of padding, the selection
+ * positioned by the alignment, the selection
  * highlight when the whole text is selected, and a one-pixel caret in
  * the text colour */
 void X11Field_Draw(const X11Field_t* f, uint32_t* pix, int pitch, int bufW, int bufH, int x, int y, int w, int h,
-	struct OsFont* font, uint32_t rgb, int centred, int focused, int frame)
+	struct OsFont* font, uint32_t rgb, int alignment, int focused, int frame)
 {
 	int fontH = OsPosix_FontHeight(font);
 	int textW = OsPosix_FontEditWidth(font, f->text, -1);
@@ -215,9 +215,13 @@ void X11Field_Draw(const X11Field_t* f, uint32_t* pix, int pitch, int bufW, int 
 		Ui_FillRect(pix, pitch, bufW, bufH, x, y + h - 1, w, 1, UI_LIGHT);
 		Ui_FillRect(pix, pitch, bufW, bufH, x + w - 1, y, 1, h, UI_LIGHT);
 	}
-	tx = centred ? x + (w - textW) / 2 : x + inner + 2;
+	tx = x + inner + 2;
+	if(alignment == 1)
+		tx = x + (w - textW) / 2;
+	else if(alignment == 2)
+		tx = x + w - inner - 2 - textW;
 	// keep the caret in view when the text is wider than the field
-	if(!centred && textW > w - 2 * inner - 4)
+	if(!alignment && textW > w - 2 * inner - 4)
 	{
 		int caretX = OsPosix_FontEditWidth(font, f->text, f->caret);
 		if(caretX > w - 2 * inner - 6)

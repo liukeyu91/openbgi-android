@@ -18,6 +18,7 @@
 #include <stdio.h>
 
 #include "cp936.inc"
+#include "cp950.inc"
 
 // ---- Shift-JIS --------------------------------------------------------------------
 
@@ -31,11 +32,13 @@ int OsCommon_SjisIsLead(uint8_t c)
 
 int gOsTextUtf8;
 int gOsTextGbk;
+int gOsTextBig5;
 
 void OS_SetTextEncoding(int encoding)
 {
 	gOsTextUtf8 = encoding == OS_TEXT_UTF8;
 	gOsTextGbk = encoding == OS_TEXT_GBK;
+	gOsTextBig5 = encoding == OS_TEXT_BIG5;
 }
 
 static int GbkIndex(uint8_t lead, uint8_t trail)
@@ -80,6 +83,58 @@ uint16_t OS_CodePointToGbk(uint32_t cp)
 	if(lo < BGI_COUNTOF(kCp936ByUnicode) && OS_GbkToCodePoint(kCp936ByUnicode[lo]) == cp)
 		return kCp936ByUnicode[lo];
 	return 0;
+}
+
+static int Big5Index(uint8_t lead, uint8_t trail)
+{
+	if(lead < 0x81 || lead > 0xfe)
+		return -1;
+	if(trail >= 0x40 && trail <= 0x7e)
+		return (lead - 0x81) * 157 + trail - 0x40;
+	if(trail >= 0xa1 && trail <= 0xfe)
+		return (lead - 0x81) * 157 + 63 + trail - 0xa1;
+	return -1;
+}
+
+int OS_Big5CharLen(const char* s)
+{
+	uint8_t lead = (uint8_t)s[0];
+	return lead >= 0x81 && lead <= 0xfe && Big5Index(lead, (uint8_t)s[1]) >= 0 ? 2 : 1;
+}
+
+uint32_t OS_Big5ToCodePoint(uint16_t code)
+{
+	if(code < 0x80)
+		return code;
+	int i = Big5Index((uint8_t)(code >> 8), (uint8_t)code);
+	return i >= 0 && kCp950[i] ? kCp950[i] : 0xfffd;
+}
+
+uint16_t OS_CodePointToBig5(uint32_t cp)
+{
+	size_t lo = 0, hi = BGI_COUNTOF(kCp950ByUnicode);
+	if(cp < 0x80)
+		return (uint16_t)cp;
+	while(lo < hi)
+	{
+		size_t mid = lo + (hi - lo) / 2;
+		if(OS_Big5ToCodePoint(kCp950ByUnicode[mid]) < cp)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo < BGI_COUNTOF(kCp950ByUnicode) && OS_Big5ToCodePoint(kCp950ByUnicode[lo]) == cp
+		? kCp950ByUnicode[lo] : 0;
+}
+
+int OsCommon_ChineseCharLen(const char* s)
+{
+	return gOsTextBig5 ? OS_Big5CharLen(s) : OS_GbkCharLen(s);
+}
+
+uint16_t OsCommon_CodePointToChinese(uint32_t cp)
+{
+	return gOsTextBig5 ? OS_CodePointToBig5(cp) : OS_CodePointToGbk(cp);
 }
 
 /* a well-formed UTF-8 sequence at `s` (a lead byte with its continuation
@@ -129,6 +184,8 @@ uint32_t OsCommon_Utf8Decode(const uint8_t* u, int* outLen)
 uint32_t OsCommon_CodePoint(const char* s, int len, OsCommon_SjisLookup_t lookup)
 {
 	const uint8_t* u = (const uint8_t*)s;
+	if(gOsTextBig5)
+		return OS_Big5ToCodePoint(len >= 2 ? (uint16_t)((u[0] << 8) | u[1]) : u[0]);
 	if(gOsTextGbk)
 		return OS_GbkToCodePoint(len >= 2 ? (uint16_t)((u[0] << 8) | u[1]) : u[0]);
 	if(gOsTextUtf8)

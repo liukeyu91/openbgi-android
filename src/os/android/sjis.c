@@ -81,10 +81,10 @@ size_t OsAndroid_ScriptToUtf8(const char* text,char* out,size_t size)
 {
     const uint8_t* p=(const uint8_t*)(text?text:"");size_t at=0;
     if(!size)return 0;
-    if(!gOsTextGbk)return OS_SjisToUtf8((const char*)p,out,size);
+    if(!gOsTextGbk && !gOsTextBig5)return OS_SjisToUtf8((const char*)p,out,size);
     while(*p){
-        int len=OS_GbkCharLen((const char*)p);
-        uint32_t cp=OS_GbkToCodePoint(len==2?(uint16_t)((p[0]<<8)|p[1]):p[0]);
+        int len=OsCommon_ChineseCharLen((const char*)p);
+        uint32_t cp=OsCommon_CodePoint((const char*)p,len,NULL);
         size_t bytes=cp<0x80?1:cp<0x800?2:3;
         if(bytes>=size-at)break;
         if(bytes==1)out[at++]=(char)cp;

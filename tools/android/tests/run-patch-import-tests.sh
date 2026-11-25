@@ -8,7 +8,7 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT HUP INT TERM
 sh "$src/generate-profiles.sh" "$out/EngineProfiles.java"
 python3 "$src/generate-patch-profiles.py" "$out/PatchProfiles.java"
-"${JAVAC:-javac}" -encoding UTF-8 -d "$out" "$src/GameImport.java" "$src/GameSettings.java" \
+"${JAVAC:-javac}" -encoding UTF-8 -d "$out" "$src/GameImport.java" "$src/ArchiveLanguage.java" "$src/GameSettings.java" \
     "$out/EngineProfiles.java" "$out/PatchProfiles.java" "$src/PatchImport.java" "$src/PatchEvb.java" \
     "$src/PatchAplib.java" "$src/PatchCamellia.java" "$src/PatchCpk.java" "$src/PatchCpkTest.java" \
     "$src/PatchImportTest.java" "$src/tests/P0ImportTest.java" "$src/TranslationRuntime.java" "$src/TranslationRuntimeTest.java"

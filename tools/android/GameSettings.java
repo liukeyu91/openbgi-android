@@ -8,7 +8,9 @@ import java.util.*;
 
 final class GameSettings {
     static final int ENCODING_DETECTOR_VERSION = 1;
+    private static final String[] ENCODINGS = {"sjis","gbk","utf8","big5"};
     String encoding = "sjis", profile = "auto";
+    String archiveLanguage = "";
     String fontFamily="",translationProfile="";
     boolean automaticEncoding = true;
     String encodingDetection = "";
@@ -28,16 +30,18 @@ final class GameSettings {
         File legacy = new File(config, "encoding.txt");
         if(legacy.isFile()) {
             String value = new String(Files.readAllBytes(legacy.toPath()), StandardCharsets.UTF_8).trim();
-            if(member(value, new String[]{"sjis","gbk","utf8"})) s.encoding = value;
+            if(member(value, ENCODINGS)) s.encoding = value;
         }
         Properties p = new Properties(); File file = new File(config, "settings.ini");
         if(file.isFile()) try(InputStream in = new FileInputStream(file)) { p.load(in); }
         catch(IllegalArgumentException bad) { throw new IOException("设置文件格式错误", bad); }
         String value = p.getProperty("encoding", s.encoding);
-        if(member(value, new String[]{"sjis","gbk","utf8"})) s.encoding = value;
+        if(member(value, ENCODINGS)) s.encoding = value;
+        value = p.getProperty("archiveLanguage", "");
+        if(ArchiveLanguage.fromId(value) != null) s.archiveLanguage = value;
         // Old imports wrote encoding.txt=sjis without consulting the detector.
         // The settings page always saved an explicit encoding in settings.ini.
-        boolean explicit = member(p.getProperty("encoding", ""),new String[]{"sjis","gbk","utf8"});
+        boolean explicit = member(p.getProperty("encoding", ""),ENCODINGS);
         s.automaticEncoding = !explicit && s.encoding.equals("sjis");
         String mode = p.getProperty("encodingMode", "");
         if(mode.equals("auto")) s.automaticEncoding = true;
@@ -68,31 +72,20 @@ final class GameSettings {
             if(!automaticEncoding) { encodingDetection=""; encodingDetectorVersion=0; }
             automaticEncoding=true;
         } else {
-            if(!member(choice,new String[]{"sjis","gbk","utf8"}))throw new IllegalArgumentException("Invalid encoding");
+            if(!member(choice,ENCODINGS))throw new IllegalArgumentException("Invalid encoding");
             encoding=choice; automaticEncoding=false;
         }
     }
-    String encodingLabel() {
-        if(!automaticEncoding)return encoding.equals("utf8")?"UTF-8":encoding.toUpperCase(Locale.ROOT);
-        if(encodingReady())return "自动："+(encoding.equals("utf8")?"UTF-8":encoding.toUpperCase(Locale.ROOT));
-        return needsEncodingDetection()?"自动：待检测":"自动：未确定";
-    }
-    String encodingStatus() {
-        if(!automaticEncoding)return "已手动选择 "+encodingLabel()+"。";
-        if(encodingReady())return "自动识别结果："+(encoding.equals("utf8")?"UTF-8":encoding.toUpperCase(Locale.ROOT))+"。";
-        if(encodingDetection.equals("mixed"))return "样本可能使用多种编码，请预览并手动选择。";
-        if(encodingDetection.equals("error"))return "无法读取文字样本，请预览或手动选择编码。";
-        if(needsEncodingDetection())return "将在导入完成或启动游戏前检测文字编码。";
-        return "样本不足或结果不明确，请预览并手动选择编码。";
-    }
     void save(File game) throws IOException {
-        if(!validFontFamily(fontFamily)||!translationProfile.matches("[A-Za-z0-9._-]{0,80}")||!member(encoding,new String[]{"sjis","gbk","utf8"}) || !member(profile,EngineProfiles.NAMES) ||
+        if(!validFontFamily(fontFamily)||!translationProfile.matches("[A-Za-z0-9._-]{0,80}")||!member(encoding,ENCODINGS) || !member(profile,EngineProfiles.NAMES) ||
+            (!archiveLanguage.isEmpty() && ArchiveLanguage.fromId(archiveLanguage)==null) ||
             scale < 0 || scale > 2 || touch < 0 || touch > 1 || saveKey < 1 || saveKey > 255 ||
             loadKey < 1 || loadKey > 255 || backlogKey < 0 || backlogKey > 255 || menuKey < 1 || menuKey > 255 || skipKey < 1 || skipKey > 255)
             throw new IOException("无效的游戏设置");
         File config = new File(game,".openbgi"); Files.createDirectories(config.toPath());
         Properties p = new Properties();
         p.setProperty("encoding",encoding); p.setProperty("profile",profile);
+        p.setProperty("archiveLanguage",archiveLanguage);
         p.setProperty("fontFamily",fontFamily);p.setProperty("translationProfile",translationProfile);
         p.setProperty("encodingMode",automaticEncoding?"auto":"manual");
         p.setProperty("encodingDetection",encodingDetection);

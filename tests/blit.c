@@ -644,9 +644,12 @@ static uint32_t SamplePixel(const Bmp_t* b,int x,int y)
 }
 static void TestSmoothSample(void)
 {
-	Bmp_t src,dst;
+	const uint32_t background = 0xc9713519u;
+	const int level = 93, inv = 256 - level;
+	Bmp_t src, dst, blend;
 	int x,y,fx,fy,k;
 	Bmp_Alloc(&src,3,3,PM_ARGB32);Bmp_Alloc(&dst,1,1,PM_ARGB32);FillPattern(&src,18273);
+	Bmp_Alloc(&blend, 1, 1, PM_RGB32);
 	for(y=-2;y<=3;y++)for(x=-2;x<=3;x++)for(fy=0;fy<16;fy++)for(fx=0;fx<16;fx++)
 	{
 		uint32_t samples[4]={SamplePixel(&src,x,y),SamplePixel(&src,x+1,y),SamplePixel(&src,x,y+1),SamplePixel(&src,x+1,y+1)},expected=0;
@@ -655,10 +658,76 @@ static void TestSmoothSample(void)
 			int top=b+(((a-b)*(16-fx))>>4),bottom=d+(((c-d)*(16-fx))>>4);
 			expected|=(uint32_t)(bottom+(((top-bottom)*(16-fy))>>4))<<k;
 		}
-		Blit_XformCopy(&dst,0,0,&src,x*65536+fx*4096,y*65536+fy*4096,0,65536,65536,0,1);
-		CHECK(*(const uint32_t*)dst.pixels==expected);
+		int32_t sx = x * 65536 + fx * 4096, sy = y * 65536 + fy * 4096;
+		uint32_t dimmed = expected & 0xff000000u;
+		uint32_t rgb = background & 0xff000000u, argb = rgb;
+		int alphaWeight = ((int)(expected >> 25) * inv) >> 8;
+		for(k = 0; k < 24; k += 8)
+		{
+			int d = (background >> k) & 255, srcByte = (expected >> k) & 255;
+			dimmed |= (uint32_t)((srcByte * inv) >> 8) << k;
+			rgb |= (uint32_t)(d + (((srcByte - d) * inv) >> 8)) << k;
+			argb |= (uint32_t)(d + (((srcByte - d) * alphaWeight) >> 7)) << k;
+		}
+		Blit_XformCopy(&dst, 0, 0, &src, sx, sy, 0, 65536, 65536, 0, 1);
+		CHECK(*(const uint32_t*)dst.pixels == expected);
+		Blit_XformCopy(&dst, 0, 0, &src, sx, sy, 0, 65536, 65536, level, 1);
+		CHECK(*(const uint32_t*)dst.pixels == dimmed);
+		if(fx || fy)
+		{
+			*(uint32_t*)blend.pixels = background;
+			Blit_Xform(&blend, 0, 0, &src, sx, sy, 0, 65536, 65536, level, 1);
+			CHECK(*(const uint32_t*)blend.pixels == argb);
+			src.mode = PM_RGB32;
+			Blit_Xform(&blend, 0, 0, &src, sx, sy, 0, 65536, 65536, 0, 1);
+			CHECK(*(const uint32_t*)blend.pixels == expected);
+			*(uint32_t*)blend.pixels = background;
+			Blit_Xform(&blend, 0, 0, &src, sx, sy, 0, 65536, 65536, level, 1);
+			CHECK(*(const uint32_t*)blend.pixels == rgb);
+			src.mode = PM_ARGB32;
+		}
 	}
+	Bmp_Free(&blend);
 	Bmp_Free(&src);Bmp_Free(&dst);
+}
+
+static void TestEffectorGradient680(void)
+{
+	static const uint8_t expected[][9] = {
+		{84, 84, 0, 0, 0, 0, 0, 0, 0},
+		{169, 84, 0, 0, 0, 0, 0, 0, 0},
+		{84, 0, 0, 84, 0, 0, 0, 0, 0},
+		{169, 0, 0, 84, 0, 0, 0, 0, 0},
+		{28, 28, 0, 28, 28, 0, 0, 0, 0},
+		{112, 56, 0, 56, 28, 0, 0, 0, 0},
+	};
+	Effector_t eff = {0};
+	Bmp_t screen;
+	const EngineProfile_t* previous = gEngine;
+	eff.obj.vt = &Effector_Vtbl;
+	Bmp_Alloc(&eff.snap, 3, 3, PM_RGB32);
+	Bmp_Alloc(&screen, 3, 3, PM_RGB32);
+	CHECK(Engine_SelectProfile("1.669"));
+	CHECK((uint32_t)Effector_SetGradient(&eff, 5, 1, 0) == 0x80000005u);
+	CHECK(Engine_SelectProfile("1.680"));
+	for(int type = 0; type < 6; type++)
+	{
+		memset(screen.pixels, 0, (size_t)screen.pitch * screen.h);
+		*(uint32_t*)screen.pixels = 0xfefefeu;
+		CHECK(Effector_SetGradient(&eff, type, 1, 0) == 0);
+		eff.obj.vt->draw(&eff.obj, &screen, NULL, 0);
+		for(int y = 0; y < screen.h; y++)
+			for(int x = 0; x < screen.w; x++)
+				CHECK(SamplePixel(&screen, x, y) == (uint32_t)expected[type][y * 3 + x] * 0x010101u);
+	}
+	CHECK((uint32_t)Effector_SetGradient(&eff, 6, 1, 0) == 0x80000005u);
+	CHECK(Effector_SetGradient(&eff, 5, 0, 0) == 0);
+	FillPattern(&screen, 17);
+	eff.obj.vt->draw(&eff.obj, &screen, NULL, 0);
+	CHECK(SameView(&screen, &eff.snap));
+	gEngine = previous;
+	Bmp_Free(&eff.snap);
+	Bmp_Free(&screen);
 }
 
 // run every group; exit status 1 when any check failed
@@ -673,6 +742,7 @@ int main(void)
 	TestTransforms();
 	TestPackedBlends();
 	TestSmoothSample();
+	TestEffectorGradient680();
 	TestBicubic();
 	TestHalfSize();
 	TestColourSubtract();

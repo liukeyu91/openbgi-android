@@ -135,7 +135,7 @@ int Gfx_EffectorSetVector(Gfx_t* g, uint32_t h, int vec1, int vec2, int level, i
 	return (int)h;
 }
 
-// "91 66": the box blur; 0 ok, 5 the type is not 0 or 1, 0xFF unknown handle
+// "91 66": the box blur; 0 ok, 5 unknown type, 0xFF unknown handle
 int Gfx_EffectorSetGradient(Gfx_t* g, uint32_t h, int type, int level, int prio)
 {
 	DispObj_t* o = Gfx_FindEffector(g, h);

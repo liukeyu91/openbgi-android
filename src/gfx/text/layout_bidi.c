@@ -91,6 +91,8 @@ static uint32_t CodePointOf(uint32_t code)
 {
 	if(gTextUtf8 || code < 0x80)
 		return code;
+	if(gTextBig5)
+		return OS_Big5ToCodePoint((uint16_t)code);
 	if(gTextGbk)
 		return OS_GbkToCodePoint((uint16_t)code);
 	if(code < 0x100)
@@ -130,7 +132,7 @@ static void BuildGlyph(BidiCtx_t* x, BidiChar_t* ch, int delay)
 		gap = Font_GapFor2(&g, x->glyphW);
 		width = view.w;
 		ch->dx = gap >> 1;
-		ch->advance = width + gap;
+		ch->advance = width + gap + Layout_Pitch(1, x->fi);
 	}
 	else
 	{

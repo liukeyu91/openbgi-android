@@ -35,7 +35,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private boolean ready, resumed, focused, surfaceReady, framePosted;
     private SurfaceView surface;
     private GameSettings settings;
-    private GameDataLock saveLock;
+    private GameDataLock saveLock,patchLock;
     private TouchInput touch;
     private InputKeys keys;
     private InputManager inputManager;
@@ -50,7 +50,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native void nativeInputResult(int serial, byte[][] values, int month, int day);
     private native void nativeDialogResult(int serial, int result);
     private native void nativeEditChanged(byte[] text, int revision, boolean ime);
-    private native boolean nativeCreate(String internal, String external, int scaleMode);
+    private native boolean nativeCreate(String internal, String external, int scaleMode,long sessionEpoch);
     private native void nativeFontFamily(String family);
     private native void nativeSurface(Surface surface);
     private native void nativeVsync();
@@ -64,10 +64,10 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             int status=nativeAudioStatus();
             if(status<0 && !audioWarningShown) {
                 audioWarningShown=true;
-                Toast.makeText(GameActivity.this,"音频输出暂不可用，可在“关于”页导出日志。",Toast.LENGTH_LONG).show();
+                Toast.makeText(GameActivity.this,getString(R.string.audio_output_error),Toast.LENGTH_LONG).show();
             } else if(status>0)audioWarningShown=false;
             int movie=nativeMovieStatus();
-            if(movie<0&&!movieWarningShown){movieWarningShown=true;Toast.makeText(GameActivity.this,"影片无法播放，已跳过；可在“关于”页导出日志。",Toast.LENGTH_LONG).show();}
+            if(movie<0&&!movieWarningShown){movieWarningShown=true;Toast.makeText(GameActivity.this,getString(R.string.movie_skipped),Toast.LENGTH_LONG).show();}
             else if(movie>=0)movieWarningShown=false;
             ui.postDelayed(this,1000);
         }
@@ -87,30 +87,40 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native void nativeKey(int action, int key, int repeat);
     private native void nativePointer(int action,int button,float x,float y,float wheel,int width,int height);
 
+    @Override protected void attachBaseContext(android.content.Context base){super.attachBaseContext(AppLanguage.wrap(base));}
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        File game;
+        File game,storage,data;
         try {
             game=GameSettings.activeGame(getFilesDir());
-            File storage=DirectGame.resources(game);
+            storage=DirectGame.resources(game);
             if(game.getName().equals("external")){
-                File base=getExternalFilesDir(null);if(base==null)throw new java.io.IOException("游戏目录不可用");storage=new File(base,"game");
+                File base=getExternalFilesDir(null);if(base==null)throw new java.io.IOException(getString(R.string.game_folder_unavailable));storage=new File(base,"game");
             }
-            saveLock=GameDataLock.acquire(storage);
-            SaveRestore.recover(storage);settings=TranslationRuntime.prepare(game,storage);
+            if(DirectGame.linked(game)||ContainerGame.linked(game))saveLock=GameDataLock.acquire(game);
+            else {
+                if(!game.equals(storage))patchLock=GameDataLock.acquire(game);
+                saveLock=GameDataLock.acquire(storage);
+            }
+            // The container is read-only: the writable layer lives beside the entry.
+            if(ContainerGame.linked(game)){
+                data=ContainerGame.data(game);
+                if(data==null)data=ContainerGame.data(game,null);
+            } else data=DirectGame.data(game,storage);
+            SaveRestore.recover(data);settings=TranslationRuntime.prepare(game,storage);
         }
         catch(java.io.IOException error) { Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();engineFinished();return; }
         if(!settings.encodingReady()) {
-            Toast.makeText(this,"文字编码尚未确定，请在游戏设置中选择。",Toast.LENGTH_LONG).show();engineFinished();return;
+            Toast.makeText(this,getString(R.string.encoding_unset),Toast.LENGTH_LONG).show();engineFinished();return;
         }
-        CrashLogs.beginSession(this,game,settings);
+        long sessionEpoch=CrashLogs.beginSession(this,game,storage,data,settings);
         nativeFontFamily(settings.fontFamily);
         File external = getExternalFilesDir(null);
-        ready = nativeCreate(getFilesDir().getAbsolutePath(), external == null ? "" : external.getAbsolutePath(), settings.scale);
+        ready = nativeCreate(getFilesDir().getAbsolutePath(), external == null ? "" : external.getAbsolutePath(), settings.scale,sessionEpoch);
         if(!ready) {
-            Toast.makeText(this, "引擎启动失败，可在“关于”页导出日志。", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, getString(R.string.engine_start_error), Toast.LENGTH_LONG).show();
             engineFinished(); return;
         }
         keys=new InputKeys((action,vk,repeat)->{if(ready)nativeKey(action,vk,repeat);});
@@ -150,7 +160,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         interruption.setBackgroundColor(0xcc000000); interruption.setClickable(true);
         interruptionText = new TextView(this); interruptionText.setTextColor(0xffffffff); interruptionText.setTextSize(18); interruptionText.setGravity(Gravity.CENTER);
         interruption.addView(interruptionText, new LinearLayout.LayoutParams(-2, -2));
-        Button resumeGame = new Button(this); resumeGame.setText("继续游戏");
+        Button resumeGame = new Button(this); resumeGame.setText(getString(R.string.resume_game));
         resumeGame.setOnClickListener(v -> { if(audioFocus != null) audioFocus.retry(); });
         interruption.addView(resumeGame, new LinearLayout.LayoutParams(-2, -2)); interruption.setVisibility(View.GONE);
         root.addView(interruption, new FrameLayout.LayoutParams(-1, -1));
@@ -196,7 +206,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         else nativePointer(TouchInput.WHEEL,0,surface.getWidth()/2f,surface.getHeight()/2f,1,surface.getWidth(),surface.getHeight());
     }
     private void updateSkipButton(){
-        if(skipButton!=null){boolean on=keys!=null && keys.shortcutHeld();skipButton.setText(on?"停止快进":"快进");skipButton.setSelected(on);
+        if(skipButton!=null){boolean on=keys!=null && keys.shortcutHeld();skipButton.setText(on?getString(R.string.stop_skip):getString(R.string.skip));skipButton.setSelected(on);
             skipButton.setBackground(Ui.touch(this,on?0xe091452d:0xe0246f5d,12));}
     }
     private void stopFastForward(){if(keys!=null)keys.releaseShortcut();updateSkipButton();}
@@ -207,20 +217,20 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     }
     private void addVirtualKeys(FrameLayout root) {
         LinearLayout container=Ui.column(this);
-        Button toggle=Ui.button(this,"快捷键  ⌄",false,()->{});toggle.setTextSize(12);toggle.setTextColor(0xfff5f5f0);
+        Button toggle=Ui.button(this,getString(R.string.shortcuts),false,()->{});toggle.setTextSize(12);toggle.setTextColor(0xfff5f5f0);
         toggle.setBackground(Ui.touch(this,0xc0202d2a,14));
         container.addView(toggle,new LinearLayout.LayoutParams(-2,Ui.dp(this,48)));
         HorizontalScrollView scroll=new HorizontalScrollView(this);scroll.setVisibility(View.GONE);
         LinearLayout row=Ui.row(this);scroll.addView(row,new FrameLayout.LayoutParams(-2,-2));
         LinearLayout.LayoutParams scrollParams=new LinearLayout.LayoutParams(-2,-2);scrollParams.topMargin=Ui.dp(this,6);container.addView(scroll,scrollParams);
-        String[] names={"菜单","回看","存档","读档"};int[] codes={settings.menuKey,settings.backlogKey,settings.saveKey,settings.loadKey};
+        String[] names={getString(R.string.menu),getString(R.string.backlog),getString(R.string.quick_save),getString(R.string.quick_load)};int[] codes={settings.menuKey,settings.backlogKey,settings.saveKey,settings.loadKey};
         for(int i=0;i<names.length;i++){
             final int code=codes[i];Button button=Ui.button(this,names[i],false,()->shortcut(code));button.setTextSize(12);button.setTextColor(0xfff5f5f0);button.setBackground(Ui.touch(this,0xe0246f5d,12));
             LinearLayout.LayoutParams keyParams=new LinearLayout.LayoutParams(-2,Ui.dp(this,48));keyParams.rightMargin=Ui.dp(this,6);row.addView(button,keyParams);
         }
-        skipButton=Ui.button(this,"快进",false,this::toggleFastForward);skipButton.setTextSize(12);skipButton.setTextColor(0xfff5f5f0);
+        skipButton=Ui.button(this,getString(R.string.skip),false,this::toggleFastForward);skipButton.setTextSize(12);skipButton.setTextColor(0xfff5f5f0);
         skipButton.setBackground(Ui.touch(this,0xe0246f5d,12));row.addView(skipButton,new LinearLayout.LayoutParams(-2,Ui.dp(this,48)));
-        toggle.setOnClickListener(v->{boolean open=scroll.getVisibility()!=View.VISIBLE;if(!open)stopFastForward();scroll.setVisibility(open?View.VISIBLE:View.GONE);toggle.setText(open?"收起快捷键  ⌃":"快捷键  ⌄");});
+        toggle.setOnClickListener(v->{boolean open=scroll.getVisibility()!=View.VISIBLE;if(!open)stopFastForward();scroll.setVisibility(open?View.VISIBLE:View.GONE);toggle.setText(open?getString(R.string.shortcuts_collapse):getString(R.string.shortcuts));});
         FrameLayout.LayoutParams floating=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT);floating.setMargins(Ui.dp(this,12),Ui.dp(this,12),Ui.dp(this,12),0);root.addView(container,floating);
     }
     @Override public void onInputDeviceAdded(int deviceId) {}
@@ -266,6 +276,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         surfaceReady=false;updateFrames();
         if(ready) { ready = false; nativeDestroy(); }
         if(saveLock!=null){saveLock.close();saveLock=null;}
+        if(patchLock!=null){patchLock.close();patchLock=null;}
         if(messageDialog != null) messageDialog.dismiss();
         ui.removeCallbacksAndMessages(null);
         super.onDestroy();
@@ -307,11 +318,11 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             if(!ready || isFinishing() || isDestroyed()) { nativeDialogResult(serial, cancel); return; }
             AlertDialog.Builder builder = new AlertDialog.Builder(this)
                 .setTitle(new String(caption, StandardCharsets.UTF_8)).setMessage(new String(text, StandardCharsets.UTF_8));
-            if(kind == 4) builder.setPositiveButton("是", (d, w) -> nativeDialogResult(serial, 6)).setNegativeButton("否", (d, w) -> nativeDialogResult(serial, 7));
-            else if(kind == 5) builder.setPositiveButton("重试", (d, w) -> nativeDialogResult(serial, 4)).setNegativeButton("取消", (d, w) -> nativeDialogResult(serial, 2));
+            if(kind == 4) builder.setPositiveButton(getString(R.string.yes), (d, w) -> nativeDialogResult(serial, 6)).setNegativeButton(getString(R.string.no), (d, w) -> nativeDialogResult(serial, 7));
+            else if(kind == 5) builder.setPositiveButton(getString(R.string.retry), (d, w) -> nativeDialogResult(serial, 4)).setNegativeButton(getString(R.string.cancel), (d, w) -> nativeDialogResult(serial, 2));
             else {
-                builder.setPositiveButton("确定", (d, w) -> nativeDialogResult(serial, 1));
-                if(kind == 1) builder.setNegativeButton("取消", (d, w) -> nativeDialogResult(serial, 2));
+                builder.setPositiveButton(getString(R.string.ok), (d, w) -> nativeDialogResult(serial, 1));
+                if(kind == 1) builder.setNegativeButton(getString(R.string.cancel), (d, w) -> nativeDialogResult(serial, 2));
             }
             builder.setOnCancelListener(d -> nativeDialogResult(serial, cancel));
             messageDialog = builder.create(); messageDialog.setCanceledOnTouchOutside(false);

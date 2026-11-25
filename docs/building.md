@@ -4,6 +4,14 @@ Plain `make` only - no autotools, no CMake.  Objects go to
 `obj/<platform>/`, binaries to `bin/`.  The Makefile's header comment is
 the short form of this file.
 
+For a local disc-image test, pass an ISO 9660, Joliet or UDF image and a
+writable game directory. OpenBGI reads the game files from the image and
+writes into the directory.
+
+```sh
+BGI_DISC_IMAGE=/path/to/game.iso bin/bgi /path/to/game-data
+```
+
 ## Prerequisites on Linux
 
 * a C99 compiler - gcc (the default) or clang (`make CC=clang`) - and GNU

@@ -57,7 +57,7 @@ int Se_SetChannelVolume(int slot, uint32_t vol)
 // "A0 09": the same for an effect slot
 int Se_SetMasterVolume(int slot, uint32_t vol)
 {
-	if((uint32_t)slot >= SE_SLOTS || vol > 0x80)
+	if((uint32_t)slot >= (uint32_t)Wm_SeSlotCount() || vol > 0x80)
 		return 0;
 	gSeMasterVolume[slot] = vol;
 	if(!gSoundOff)
@@ -71,7 +71,7 @@ void Sound_ApplyMasterVolumes(void)
 	int i;
 	for(i = 0; i < BGM_CHANNELS; i++)
 		Wm_BgmSetMasterVolume(i, gBgmMasterVolume[i]);
-	for(i = 0; i < SE_SLOTS; i++)
+	for(i = 0; i < Wm_SeSlotCount(); i++)
 		Wm_SeSetMasterVolume(i, gSeMasterVolume[i]);
 }
 
@@ -95,7 +95,7 @@ void Sound_StopAll(void)
 	gSoundOff = 1;
 	for(i = 0; i < BGM_CHANNELS; i++)
 		Wm_BgmSetMasterVolume(i, 0);
-	for(i = 0; i < SE_SLOTS; i++)
+	for(i = 0; i < Wm_SeSlotCount(); i++)
 		Wm_SeSetMasterVolume(i, 0);
 }
 

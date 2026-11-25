@@ -31,15 +31,21 @@ static int gEditShown;        // OS_EditShow's last value: OS_EditRefresh only r
 static int gEditRejectAscii;  // "B0 29" of 1.69/472 on: single-byte printable characters are swallowed
 static int gEditLimit;        // OS_EditLimitText: the most the text may take, in bytes of the text encoding; 0 for no limit
 
+static HWND CreateEditWindow(HWND parent, DWORD alignment)
+{
+	WCHAR text[0x100];
+	Win32_ToWide(MSG_EDIT_DEFAULT_TEXT, text, (int)BGI_COUNTOF(text));
+	return CreateWindowExW(0, L"EDIT", text, WS_CHILD | ES_AUTOHSCROLL | ES_NOHIDESEL | alignment,
+		0, 0, 1, 1, parent, NULL, gWin32Instance, NULL);
+}
+
 /* Create the text entry of "B0 2x" as a child of the main window: a 1 x 1
  * EDIT with ES_CENTER | ES_AUTOHSCROLL | ES_NOHIDESEL and the text
  * MSG_EDIT_DEFAULT_TEXT, subclassed and hidden until the script shows it.
  * The colour starts black. */
 void Win32Edit_Create(HWND parent)
 {
-	WCHAR text[0x100];
-	Win32_ToWide(MSG_EDIT_DEFAULT_TEXT, text, (int)BGI_COUNTOF(text));
-	gEdit = CreateWindowExW(0, L"EDIT", text, 0x40000181, 0, 0, 1, 1, parent, NULL, gWin32Instance, NULL);
+	gEdit = CreateEditWindow(parent, ES_CENTER);
 	if(gEdit)
 	{
 		gEditOrigProc = (WNDPROC)SetWindowLongPtrW(gEdit, GWLP_WNDPROC, (LONG_PTR)Win32Edit_SubclassProc);
@@ -48,6 +54,24 @@ void Win32Edit_Create(HWND parent)
 	gEditLimit = 0;
 	gEditShown = 0;
 	gWin32EditColour = RGB(0, 0, 0);
+}
+
+/* A style change takes effect at the next script setup, which configures
+ * the rectangle, font, text, selection and focus on the new control. */
+void OS_EditSetAlignment(int mode)
+{
+	HWND replacement;
+	DWORD alignment = mode == 2 ? ES_RIGHT : mode == 1 ? ES_CENTER : ES_LEFT;
+	if(!gEdit || ((DWORD)GetWindowLongPtrW(gEdit, GWL_STYLE) & (ES_CENTER | ES_RIGHT)) == alignment)
+		return;
+	replacement = CreateEditWindow(GetParent(gEdit), alignment);
+	if(!replacement)
+		return;
+	SetWindowLongPtrW(gEdit, GWLP_WNDPROC, (LONG_PTR)gEditOrigProc);
+	DestroyWindow(gEdit);
+	gEdit = replacement;
+	gEditOrigProc = (WNDPROC)SetWindowLongPtrW(gEdit, GWLP_WNDPROC, (LONG_PTR)Win32Edit_SubclassProc);
+	gEditShown = 0;
 }
 
 /* The subclass procedure: Tab (WM_KEYDOWN) and Enter (WM_CHAR) select the

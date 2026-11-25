@@ -2,10 +2,9 @@
  * This file is part of OpenBGI (https://openbgi.net).
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * androidfont.c - exercise Android's actual FreeType and CP932 back ends
- * on a host. BGI_TEST_CJK_FONT names a Noto CJK font; no Android device
- * or game resources are needed. The same code point must rasterise
- * identically in GBK, SJIS and UTF-8, without a change to its advance.
+ * androidfont.c - exercise Android's actual FreeType and text converters
+ * on a host. BGI_TEST_CJK_FONT names a Noto CJK or Source Han font.
+ * Both the pixels and glyph advance must agree across all four encodings.
  */
 #include "bgi/os.h"
 #include "bgi/os_common.h"
@@ -66,10 +65,13 @@ int main(int argc, char** argv)
 	const char* path = getenv("BGI_TEST_CJK_FONT");
 	if(!path || !*path)
 	{
-		puts("SKIP Android font aspect: set BGI_TEST_CJK_FONT to a Noto Sans/Serif CJK font");
+		puts("SKIP Android font aspect: set BGI_TEST_CJK_FONT to a Noto CJK or Source Han font");
 		return 0;
 	}
 	CHECK(setenv("BGI_FONT", path, 1) == 0);
+	uint32_t coverage[] = {0x4e2d, 0x10ffff};
+	CHECK(OsPosix_MissingGlyphs("Noto Sans CJK JP", coverage, 2) == 1);
+	CHECK(coverage[0] == 0x10ffff);
 	FT_Library library;
 	FT_Face face;
 	FT_Error error = FT_Init_FreeType(&library);
@@ -84,27 +86,28 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	const TT_OS2* os2 = (const TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-	CHECK(face->family_name && (strstr(face->family_name, "Noto Sans CJK") || strstr(face->family_name, "Noto Serif CJK")));
 	CHECK(os2 != NULL);
 	if(!os2)
 		return 1;
+	CHECK(os2->sTypoAscender - os2->sTypoDescender == face->units_per_EM);
+	CHECK(os2->usWinAscent + os2->usWinDescent > face->units_per_EM);
 	printf("Font %s: em=%u Win=%u+%u Typo=%d+%d\n", face->family_name, face->units_per_EM, os2->usWinAscent, os2->usWinDescent, os2->sTypoAscender, -os2->sTypoDescender);
 	FT_Done_Face(face);
 	FT_Done_FreeType(library);
 	const int sizes[] = {16, 32, 48, 64}, widths[] = {80, 100, 120};
-	const int encodings[] = {OS_TEXT_GBK, OS_TEXT_SJIS, OS_TEXT_UTF8};
-	const char* names[] = {"gbk", "sjis", "utf8"};
-	/* U+56FD, encoded by the actual production converters. */
-	const char* text[] = {"\xb9\xfa", "\x8d\x91", "\xe5\x9b\xbd"};
+	const int encodings[] = {OS_TEXT_GBK, OS_TEXT_SJIS, OS_TEXT_UTF8, OS_TEXT_BIG5};
+	const char* names[] = {"gbk", "sjis", "utf8", "big5"};
+	/* U+4E2D is present in every legacy encoding, including CP950. */
+	const char* text[] = {"\xd6\xd0", "\x92\x86", "\xe4\xb8\xad", "\xa4\xa4"};
 	uint8_t reference[128 * 128], image[128 * 128], monoReference[16 * 128], mono[16 * 128];
 	for(size_t si = 0; si < BGI_COUNTOF(sizes); si++)
 		for(size_t wi = 0; wi < BGI_COUNTOF(widths); wi++)
 		{
 			int referenceAdvance = 0, referenceW = 0, referenceH = 0;
-			for(int e = 0; e < 3; e++)
+			for(size_t e = 0; e < BGI_COUNTOF(encodings); e++)
 			{
 				OS_SetTextEncoding(encodings[e]);
-				CHECK(OsCommon_CodePoint(text[e], (int)strlen(text[e]), OsPosix_SjisChar) == 0x56fd);
+				CHECK(OsCommon_CodePoint(text[e], (int)strlen(text[e]), OsPosix_SjisChar) == 0x4e2d);
 				OsFont_t* font = OS_FontOpen("MS Gothic", sizes[si], sizes[si] * widths[wi] / 200, 0, 0);
 				CHECK(font != NULL);
 				if(!font)
@@ -141,6 +144,16 @@ int main(int argc, char** argv)
 		}
 	/* Actual registration without fontconfig: file and copied memory must
 	 * resolve by family and produce identical pixels under a font hook. */
+	char defaultFaces[64];
+	int defaultFaceBytes = 0;
+	OS_SetTextEncoding(OS_TEXT_BIG5);
+	CHECK(OS_FontEnumFaces(defaultFaces, 0x80, &defaultFaceBytes) == 2);
+	CHECK(!strcmp(defaultFaces, "Noto Sans CJK TC"));
+	CHECK(!strcmp(defaultFaces + sizeof "Noto Sans CJK TC", "Noto Serif CJK TC"));
+	OS_SetTextEncoding(OS_TEXT_GBK);
+	CHECK(OS_FontEnumFaces(defaultFaces, 0x80, &defaultFaceBytes) == 2);
+	CHECK(!strcmp(defaultFaces, "Noto Sans CJK SC"));
+
 	char family[256];
 	CHECK(FT_Init_FreeType(&library)==0);
 	CHECK(FT_New_Face(library,path,0,&face)==0);

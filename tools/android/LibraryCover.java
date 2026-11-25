@@ -49,7 +49,7 @@ final class LibraryCover extends View {
         String first=mark.isEmpty()?"O":mark.substring(0,mark.offsetByCodePoints(0,1));
         p.setAlpha(160);c.drawText(first,w*.08f,h*.72f,p);p.setAlpha(255);
         p.setTypeface(Typeface.create("sans-serif-medium",0));p.setTextSize(h*.065f);
-        c.drawText("默认封面",w*.085f,h*.16f,p);
+        c.drawText(getContext().getString(R.string.default_cover),w*.085f,h*.16f,p);
         p.setColor(colors[1]);c.drawRect(w*.085f,h*.84f,w*.24f,h*.85f,p);
     }
 }

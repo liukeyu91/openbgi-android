@@ -81,7 +81,9 @@ void FontRaster_Close(FontRaster_t* f)
 	OS_FontClose(f->os);
 	f->os = NULL;
 	BGI_Free(f->ss);
+	BGI_Free(f->source);
 	f->ss = NULL;
+	f->source = NULL;
 	f->open = 0;
 }
 
@@ -118,8 +120,24 @@ static void FontRaster_AllocCells(FontRaster_t* f, int size, int capacity)
  * full-width glyph fills the whole cell, and allocate the oversampling
  * buffer of renderW * gAaScale x gAaScale * size bytes (rows dword
  * aligned).  1 ok, 0 when the OS refuses the font. */
-static int FontRaster_CreateFont(FontRaster_t* f, const char* face, int size, int widthPct, int bold, int italic)
+static void FontRaster_SetTracking(FontRaster_t* f, const FontFaceExtension_t* ext)
 {
+	int32_t scale = ext->sx ? ext->sx : ext->sy ? ext->sy : 0x10000;
+	int width = f->glyphW * scale / 0x10000;
+	f->tracking = (int)((int64_t)width * ext->spacing / 0x10000);
+}
+
+static int FontRaster_CreateFont(FontRaster_t* f, const char* face, int size, int widthPct, int bold, int italic,
+	const FontFaceExtension_t* ext)
+{
+	int scaledW, scaledH, nominalWidth;
+	int32_t sx = 0x10000, sy = 0x10000;
+	nominalWidth = (gAaScale * size * widthPct) / 200;
+	if(ext && ext->sy)
+	{
+		sx = ext->sx ? ext->sx : ext->sy;
+		sy = ext->sy;
+	}
 	f->glyphW = (size * widthPct) / 100;
 	// an italic font gets a DIB a quarter wider for the shear
 	f->renderW = italic ? (size * widthPct * 5) / 400 : f->glyphW;
@@ -127,12 +145,25 @@ static int FontRaster_CreateFont(FontRaster_t* f, const char* face, int size, in
 		f->renderW = f->cellW;
 	f->ssH = gAaScale * size;
 	f->ssW = f->renderW * gAaScale;
-	f->os = OS_FontOpen(face, f->ssH, (gAaScale * size * widthPct) / 200, bold, italic);
+	scaledW = f->ssW * sx / 0x10000;
+	scaledH = f->ssH * sy / 0x10000;
+	f->cropX = ext ? (int)((int64_t)(f->ssH * sx / 0x10000) * ext->dx / 0x10000) : 0;
+	f->cropY = ext ? (int)((int64_t)scaledH * ext->dy / 0x10000) : 0;
+	f->os = OS_FontOpen(face, scaledH, ext && ext->sy && !ext->sx ? 0 : nominalWidth * sx / 0x10000, bold, italic);
 	if(!f->os)
 		return 0;
 	f->ssPitch = (f->ssW + 3) & ~3; // DIB rows are dword aligned
 	f->ssBytes = f->ssPitch * f->ssH;
 	f->ss = (uint8_t*)BGI_Alloc((size_t)(f->ssBytes ? f->ssBytes : 1));
+	f->sourceW = scaledW;
+	f->sourceH = scaledH;
+	f->sourcePitch = (scaledW + 3) & ~3;
+	f->source = NULL;
+	if(scaledW != f->ssW || scaledH != f->ssH || f->cropX || f->cropY)
+		f->source = (uint8_t*)BGI_Alloc((size_t)f->sourcePitch * f->sourceH);
+	f->tracking = 0;
+	if(ext)
+		FontRaster_SetTracking(f, ext);
 	f->size = size;
 	f->widthPct = widthPct;
 	f->bold = bold;
@@ -143,7 +174,8 @@ static int FontRaster_CreateFont(FontRaster_t* f, const char* face, int size, in
 /* (re)open the rasteriser: `capacity` glyphs are cached.  0 ok, 0x80000001
  * capacity < 2, 0x80000002 size not 4..200, 0x80000003 width not 25..200,
  * 0x80000004 the font could not be created. */
-int FontRaster_Init(FontRaster_t* f, const char* face, int size, int widthPct, int bold, int italic, int capacity)
+static int FontRaster_InitExtension(FontRaster_t* f, const char* face, int size, int widthPct, int bold, int italic,
+	int capacity, const FontFaceExtension_t* ext)
 {
 	FontRaster_Close(f);
 	if(capacity < 2)
@@ -153,10 +185,36 @@ int FontRaster_Init(FontRaster_t* f, const char* face, int size, int widthPct, i
 	if(widthPct < 25 || widthPct > 200)
 		return (int)0x80000003;
 	FontRaster_AllocCells(f, size, capacity);
-	if(!FontRaster_CreateFont(f, face, size, widthPct, bold, italic))
+	if(!FontRaster_CreateFont(f, face, size, widthPct, bold, italic, ext))
 		return (int)0x80000004;
 	f->open = 1;
 	return 0;
+}
+
+int FontRaster_Init(FontRaster_t* f, const char* face, int size, int widthPct, int bold, int italic, int capacity)
+{
+	return FontRaster_InitExtension(f, face, size, widthPct, bold, italic, capacity, NULL);
+}
+
+static void FontRaster_Draw(FontRaster_t* f, const char* str, int len)
+{
+	memset(f->ss, 0, (size_t)f->ssBytes);
+	if(!f->source)
+	{
+		OS_FontRender(f->os, str, len, f->ss, f->ssPitch, f->ssW, f->ssH);
+		return;
+	}
+	int x = f->cropX < 0 ? -f->cropX : 0;
+	int y = f->cropY < 0 ? -f->cropY : 0;
+	int right = BGI_MIN(f->ssW, f->sourceW - f->cropX);
+	int bottom = BGI_MIN(f->ssH, f->sourceH - f->cropY);
+	if(x >= right || y >= bottom)
+		return;
+	memset(f->source, 0, (size_t)f->sourcePitch * f->sourceH);
+	OS_FontRender(f->os, str, len, f->source, f->sourcePitch, f->sourceW, f->sourceH);
+	for(; y < bottom; ++y)
+		memcpy(f->ss + (size_t)y * f->ssPitch + x,
+			f->source + (size_t)(y + f->cropY) * f->sourcePitch + (x + f->cropX), (size_t)(right - x));
 }
 
 /* draw one character through the OS layer and reduce it into `cell`
@@ -171,10 +229,9 @@ static void FontRaster_Render(FontRaster_t* f, Glyph_t* g, uint8_t* cell, int co
 	// the character's bytes in the text encoding (Shift-JIS, or UTF-8 from "81 00")
 	len = TextPutChar(str, (uint32_t)code);
 	str[len] = 0;
-	memset(f->ss, 0, (size_t)f->ssBytes);
-	OS_FontRender(f->os, str, len, f->ss, f->ssPitch, f->ssW, f->ssH);
+	FontRaster_Draw(f, str, len);
 
-	if(code == 0x20 || code == (gTextGbk ? 0xa1a1 : gTextUtf8 ? 0x3000 : 0x8140))
+	if(code == 0x20 || code == (gTextBig5 ? 0xa140 : gTextGbk ? 0xa1a1 : gTextUtf8 ? 0x3000 : 0x8140))
 	{ // spaces: blank cell, half advance
 		memset(cell, 0, (size_t)f->cellBytes);
 		g->left = 0;
@@ -309,6 +366,13 @@ int FontRaster_Advance(FontRaster_t* f, int code)
 
 // ---- FontCache ---------------------------------------------------------------------------------
 
+typedef struct FontFaceRule
+{
+	char name[0x60];
+	FontFaceExtension_t ext;
+	struct FontFaceRule* next;
+} FontFaceRule_t;
+
 FontCache_t* FontCache_New(void)
 {
 	FontCache_t* c = (FontCache_t*)BGI_Alloc(sizeof *c);
@@ -336,6 +400,12 @@ void FontCache_Delete(FontCache_t* c)
 		BGI_Free(e);
 		e = n;
 	}
+	while(c->faceRules)
+	{
+		FontFaceRule_t* rule = c->faceRules;
+		c->faceRules = rule->next;
+		BGI_Free(rule);
+	}
 	BGI_Free(c);
 }
 
@@ -344,6 +414,82 @@ void FontCache_Delete(FontCache_t* c)
 static int SameFace(const char* a, const char* b)
 {
 	return strcmp(a, b) == 0;
+}
+
+static FontFaceRule_t* FindFaceRule(FontCache_t* c, const char* name)
+{
+	for(FontFaceRule_t* rule = c ? c->faceRules : NULL; rule; rule = rule->next)
+		if(SameFace(rule->name, name))
+			return rule;
+	return NULL;
+}
+
+int FontCache_InitRaster(FontCache_t* c, FontRaster_t* f, const char* name, int size, int widthPct, int bold,
+	int italic, int capacity)
+{
+	FontFaceRule_t* rule = FindFaceRule(c, name);
+	return FontRaster_InitExtension(f, FontNames_Resolve(name), size, widthPct, bold, italic, capacity,
+		rule ? &rule->ext : NULL);
+}
+
+int FontCache_SetFaceSpacing(FontCache_t* c, const char* face, int32_t spacing)
+{
+	FontFaceRule_t* rule;
+	if(spacing < -0x10000 || spacing > 0x10000)
+		return 7;
+	rule = FindFaceRule(c, face);
+	if(!rule)
+		return 8;
+	rule->ext.spacing = spacing;
+	for(FontEntry_t* e = c->entries; e; e = e->next)
+		if(SameFace(e->name, face))
+			FontRaster_SetTracking(e->font, &rule->ext);
+	return 0;
+}
+
+int FontCache_SetFaceExtension(FontCache_t* c, const char* face, const FontFaceExtension_t* ext)
+{
+	FontFaceRule_t* rule;
+	int32_t sx = ext->sx ? ext->sx : ext->sy;
+	if(ext->spacing < -0x10000 || ext->spacing > 0x10000)
+		return 7;
+	if(sx || ext->sy || ext->dx || ext->dy)
+	{
+		if(sx < 0x10000 || sx > 0x20000 || ext->sy < 0x10000 || ext->sy > 0x20000)
+			return 5;
+		if(ext->dx > (int32_t)(65536.0 - 4294967296.0 / sx) ||
+			ext->dy > (int32_t)(65536.0 - 4294967296.0 / ext->sy))
+			return 6;
+	}
+	if(!*face || strlen(face) >= sizeof rule->name)
+		return 4;
+	rule = FindFaceRule(c, face);
+	if(rule && rule->ext.sx == ext->sx && rule->ext.sy == ext->sy &&
+		rule->ext.dx == ext->dx && rule->ext.dy == ext->dy)
+		return FontCache_SetFaceSpacing(c, face, ext->spacing);
+	if(!rule)
+	{
+		rule = (FontFaceRule_t*)BGI_Calloc(sizeof *rule);
+		strcpy(rule->name, face);
+		rule->next = c->faceRules;
+		c->faceRules = rule;
+	}
+	rule->ext = *ext;
+	for(FontEntry_t* e = c->entries; e; e = e->next)
+	{
+		if(!SameFace(e->name, face))
+			continue;
+		FontRaster_t* f = e->font;
+		FontRaster_t updated = *f;
+		if(FontRaster_CreateFont(&updated, FontNames_Resolve(face), f->size, f->widthPct, f->bold, f->italic, ext))
+		{
+			FontRaster_Close(f);
+			*f = updated;
+			f->used = 0;
+			f->lru = NULL;
+		}
+	}
+	return 0;
 }
 
 /* "90 0E": remember that `amount` glyphs are to be cached for the font
@@ -413,7 +559,7 @@ int FontCache_Open(FontCache_t* c, int* handle, const char* name, int size, int 
 		}
 	}
 	f = FontRaster_New();
-	r = FontRaster_Init(f, FontNames_Resolve(name), size, widthPct, bold, 0, FontCache_AmountFor(c, name, size, widthPct, bold));
+	r = FontCache_InitRaster(c, f, name, size, widthPct, bold, 0, FontCache_AmountFor(c, name, size, widthPct, bold));
 	if(r != 0)
 	{
 		FontRaster_Delete(f); // the original leaks it

@@ -119,7 +119,7 @@ else ifneq ($(filter android-core android-native,$(PLATFORM)),)
     ifeq ($(strip $(ANDROID_FFMPEG_PREFIX)),)
       $(error Set ANDROID_FFMPEG_PREFIX to the ARM64 FFmpeg static library installation)
     endif
-    ANDROID_POSIX := audio files font machine native paths process registry thread time
+    ANDROID_POSIX := audio disc files font iso machine native paths process registry thread time udf zip
     OS_SRC := $(wildcard src/os/android/*.c) $(addprefix src/os/posix/,$(addsuffix .c,$(ANDROID_POSIX)))
     CFLAGS += -I$(FREETYPE_INCLUDE)
     CFLAGS += -DBGI_HAVE_FFMPEG -I$(ANDROID_FFMPEG_PREFIX)/include
@@ -360,8 +360,9 @@ $(BIN_DIR)/test_win32wide$(EXE): $(WIN32WIDE_SRC) inc/bgi/os_win32.h tools/win32
 
 ifeq ($(PLATFORM),posix)
 # Compile the Android font/encoding paths without Android window or JNI services.
-ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/posix/paths.c src/os/android/sjis.c src/os/os_common.c
-$(BIN_DIR)/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc | $(BIN_DIR)
+POSIX_DISC_SRC := src/os/posix/disc.c src/os/posix/iso.c src/os/posix/udf.c src/os/posix/zip.c src/core/deflate.c
+ANDROIDFONT_SRC := tools/tests/androidfont.c src/os/posix/font.c src/os/posix/paths.c $(POSIX_DISC_SRC) src/os/android/sjis.c src/os/os_common.c
+$(BIN_DIR)/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi/os.h inc/bgi/os_common.h src/os/android/cp932.inc src/os/cp936.inc src/os/cp950.inc | $(BIN_DIR)
 	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) $(LDFLAGS) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
 TEST_BIN += $(BIN_DIR)/test_androidfont$(EXE)
 
@@ -370,8 +371,8 @@ $(BIN_DIR)/test_androidoutput$(EXE): $(ANDROIDOUTPUT_SRC) src/os/android/audio_o
 	$(CC) $(CFLAGS) $(LDFLAGS) -Itools/android/tests/stubs -o $@ $(ANDROIDOUTPUT_SRC) -lm
 TEST_BIN += $(BIN_DIR)/test_androidoutput$(EXE)
 
-$(BIN_DIR)/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c | $(BIN_DIR)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ -pthread
+$(BIN_DIR)/test_posixpaths$(EXE): tests/posixpaths.c src/os/posix/paths.c src/os/posix/files.c $(POSIX_DISC_SRC) src/os/os_common.c src/os/cp936.inc src/os/cp950.inc | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(filter %.c,$^) -pthread
 TEST_BIN += $(BIN_DIR)/test_wasmfs$(EXE) $(BIN_DIR)/test_win32wide$(EXE) $(BIN_DIR)/test_posixpaths$(EXE)
 endif
 

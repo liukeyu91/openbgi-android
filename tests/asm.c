@@ -162,6 +162,9 @@ static void TestNames(void)
 	int fam, op;
 	printf("names\n");
 	CHECK(Asm_LookupName("push_i8", 7, GEN_1_69_444, &fam, &op) && fam == 0 && op == 0x00);
+	CHECK(Asm_LookupName("muldiv_store", 12, GEN_1_492, &fam, &op) && fam == 0 && op == 0x47);
+	CHECK(strcmp(Asm_OpName(0, 0x47, GEN_1_492), "muldiv_store") == 0);
+	CHECK(strcmp(Asm_OpName(0, 0x47, GEN_1_662), "lerp_fix") == 0);
 	CHECK(Asm_LookupName("sys.yield", 9, GEN_1_69_444, &fam, &op) && fam == 0x80 && op == 0x5f);
 	CHECK(Asm_LookupName("sys.0x5F", 8, GEN_1_69_444, &fam, &op) && fam == 0x80 && op == 0x5f);
 	CHECK(!Asm_LookupName("sys.nothing_here", 16, GEN_1_69_444, &fam, &op));
@@ -275,6 +278,34 @@ static void TestRoundTrip(void)
  * into a local, loads it back and returns, so the thread has to end with
  * the single value 42 on its stack.  A failure means the assembler's
  * output and the VM's decoder disagree on a real program. */
+static void TestRoundTrip680(void)
+{
+	const uint8_t code[] = {
+		0x12, 0x80, 0x02,                   // add_fp 256
+		0x36, 6, 0xff, 0xff, 0xff, 0xff, 0x77, // 32-bit mask with a noncanonical fifth byte
+		0x03, 0x01, 0x7f, 0x80, 0x01,      // push -1 and 128
+		0x37, 0x80, 10, 0, 0x80, 0x01,     // branch to ret if equal to 128
+		0xe6, 4, 0x80,                     // local dword
+		0x22,                              // packed immediate
+		0x17,
+	};
+	uint8_t file[16 + sizeof code] = {16};
+	uint8_t out[sizeof code];
+	char listing[1024];
+	DisOptions_t opt = {0};
+	FILE* tmp = tmpfile();
+	uint32_t len;
+	file[4] = sizeof code;
+	memcpy(file + 16, code, sizeof code);
+	opt.gen = GEN_1_680;
+	CHECK(Dis_Program(file, sizeof file, &opt, tmp) == 0);
+	rewind(tmp);
+	listing[fread(listing, 1, sizeof listing - 1, tmp)] = 0;
+	fclose(tmp);
+	len = Assemble(listing, GEN_1_680, out, sizeof out, 0);
+	CHECK(len == sizeof code && memcmp(code, out, len) == 0);
+}
+
 static void TestRun(void)
 {
 	// a program the VM runs: 6 * 7 into a local, then onto the stack
@@ -370,6 +401,7 @@ int main(void)
 	TestEncodings();
 	TestNames();
 	TestRoundTrip();
+	TestRoundTrip680();
 	TestRun();
 	TestErrors();
 	OS_Shutdown();

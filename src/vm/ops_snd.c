@@ -10,7 +10,7 @@
  *
  * Same conventions as ops_gfx0.c: operands are popped in the original
  * order, "a, b → r" means b is on top of the stack, the Check* validators
- * raise and never return (channels are 0 .. 15, slots 0 .. 63, volumes
+ * raise and never return (channels are 0 .. 15, slots follow the engine profile, volumes
  * and pans 0 .. 0x80), library result codes map to script errors.  The
  * effect loads (A0 20, A0 21, A0 27, A0 28) install a wait object and return scheduler
  * code 2 (end of turn, the thread blocked until the load completes);

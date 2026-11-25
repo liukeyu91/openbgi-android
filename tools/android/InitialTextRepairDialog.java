@@ -21,8 +21,8 @@ final class InitialTextRepairDialog {
             Activity activity=(Activity)edit.getContext();
             if(activity.isFinishing() || activity.isDestroyed())return false;
             dismissAll(activity);
-            AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("输入框操作")
-                .setItems(new String[]{"初始文字编码","全选","复制","剪切","粘贴","系统文字选择"},(d,which)->{
+            AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(activity.getString(R.string.field_actions))
+                .setItems(new String[]{activity.getString(R.string.initial_encoding),activity.getString(R.string.select_all),activity.getString(R.string.copy),activity.getString(R.string.cut),activity.getString(R.string.paste),activity.getString(R.string.system_selection)},(d,which)->{
                     edit.post(()->{
                         if(!available.getAsBoolean() || activity.isFinishing() || activity.isDestroyed())return;
                         if(which==0)show.run();
@@ -31,7 +31,7 @@ final class InitialTextRepairDialog {
                             edit.onTextContextMenuItem(ids[which-1]);
                         } else {nativeSelection[0]=true;try{edit.performLongClick();}finally{nativeSelection[0]=false;}}
                     });
-                }).setNegativeButton("取消",null).create();
+                }).setNegativeButton(activity.getString(R.string.cancel),null).create();
             dialog.setOnDismissListener(d->{if(open.get(activity)==dialog)open.remove(activity);});
             dialog.setCanceledOnTouchOutside(false);open.put(activity,dialog);dialog.show();
             return true;
@@ -39,7 +39,7 @@ final class InitialTextRepairDialog {
         ActionMode.Callback actions=new ActionMode.Callback(){
             private void update(Menu menu){
                 if(!available.getAsBoolean()){menu.removeItem(REPAIR_ITEM);return;}
-                if(menu.findItem(REPAIR_ITEM)==null)menu.add(0,REPAIR_ITEM,100,"初始文字编码").setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+                if(menu.findItem(REPAIR_ITEM)==null)menu.add(0,REPAIR_ITEM,100,R.string.initial_encoding).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
             }
             public boolean onCreateActionMode(ActionMode mode,Menu menu){update(menu);return true;}
             public boolean onPrepareActionMode(ActionMode mode,Menu menu){update(menu);return true;}
@@ -57,19 +57,19 @@ final class InitialTextRepairDialog {
             BooleanSupplier stillCurrent,Consumer<String> replace){
         if(activity.isFinishing() || activity.isDestroyed() || !stillCurrent.getAsBoolean())return;
         dismissAll(activity);
-        InitialTextRepair.Candidate[] candidates=new InitialTextRepair.Candidate[3];String[] labels=new String[3];
-        for(int i=0;i<3;i++){candidates[i]=snapshot.candidate(i,target,limit,rejectAscii);labels[i]=candidates[i].label(i);}
-        TextView title=new TextView(activity);title.setText("初始文字编码\n选择编码后，将用对应预览替换当前输入栏。");
+        InitialTextRepair.Candidate[] candidates=new InitialTextRepair.Candidate[InitialTextRepair.MODES.length];String[] labels=new String[candidates.length];
+        for(int i=0;i<candidates.length;i++){candidates[i]=snapshot.candidate(i,target,limit,rejectAscii);labels[i]=candidates[i].valid()?candidates[i].label(i):InitialTextRepair.LABELS[i]+" · "+AppMessages.repairError(activity,candidates[i].error);}
+        TextView title=new TextView(activity);title.setText(activity.getString(R.string.initial_encoding_help));
         int pad=(int)(16*activity.getResources().getDisplayMetrics().density);title.setPadding(pad,pad,pad,pad);title.setTextSize(14);
-        AlertDialog dialog=new AlertDialog.Builder(activity).setCustomTitle(title).setItems(labels,null).setNegativeButton("取消",null).create();
+        AlertDialog dialog=new AlertDialog.Builder(activity).setCustomTitle(title).setItems(labels,null).setNegativeButton(activity.getString(R.string.cancel),null).create();
         dialog.setOnDismissListener(d->{if(open.get(activity)==dialog)open.remove(activity);});
         dialog.setCanceledOnTouchOutside(false);open.put(activity,dialog);dialog.show();
         dialog.getListView().setOnItemClickListener((parent,view,at,id)->{
             if(activity.isFinishing() || activity.isDestroyed() || !stillCurrent.getAsBoolean()){
-                Toast.makeText(activity,"输入框已更新，请重新打开预览",Toast.LENGTH_SHORT).show();dialog.dismiss();return;
+                Toast.makeText(activity,activity.getString(R.string.field_changed),Toast.LENGTH_SHORT).show();dialog.dismiss();return;
             }
             InitialTextRepair.Candidate candidate=candidates[at];
-            if(!candidate.valid()){Toast.makeText(activity,candidate.error,Toast.LENGTH_SHORT).show();return;}
+            if(!candidate.valid()){Toast.makeText(activity,AppMessages.repairError(activity,candidate.error),Toast.LENGTH_SHORT).show();return;}
             replace.accept(candidate.text);dialog.dismiss();
         });
     }

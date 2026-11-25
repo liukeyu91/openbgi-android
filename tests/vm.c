@@ -62,6 +62,7 @@
 #include "bgi/version.h"
 #include "bgi/gfx.h"
 #include "bgi/install.h"
+#include "bgi/sound.h"
 
 #include <stdio.h>
 #include <math.h>
@@ -1530,6 +1531,54 @@ static void TestCompatibilityServices(void)
 	remove("bin/test_vm_external.tmp");
 }
 
+static void TestUpstreamOpcodes(void)
+{
+	static const struct { uint32_t a, b, c, result; } cases[] = {
+		{10, 20, 3, 66},
+		{(uint32_t)-10, 20, 3, (uint32_t)-66},
+		{0x40000001u, 4, 2, 2},
+		{0x80000000u, 1, UINT32_MAX, 0x80000000u},
+		{10, 20, 0, UINT32_MAX},
+	};
+	static const char* const alignProfiles[] = {"1.636", "1.669", "1.680"};
+	size_t i;
+	uint32_t mode;
+	printf("upstream opcodes\n");
+	CHECK(Engine_SelectProfile("1.492"));
+	Vm_TablesInit();
+	CHECK(OpSet_Has(OPFAM_MAIN, 0x47, gEngine->gen));
+	CHECK(!OpSet_Has(OPFAM_MAIN, 0x47, GEN_1_494));
+	CHECK(OpSet_Has(OPFAM_MAIN, 0x47, GEN_1_662));
+	for(i = 0; i < BGI_COUNTOF(cases); i++)
+	{
+		Asm_t a = {{0}, 0};
+		uint32_t actual;
+		memset(gT->data + 0x600, 0xa5, 6);
+		PushI32(&a, DataPtr(0x601));
+		PushI32(&a, cases[i].a);
+		PushI32(&a, cases[i].b);
+		PushI32(&a, cases[i].c);
+		Op(&a, 0x47);
+		Ret(&a);
+		CHECK(Run(&a) == 4 && Depth() == 0);
+		memcpy(&actual, gT->data + 0x601, sizeof actual);
+		CHECK(actual == cases[i].result);
+		CHECK(gT->data[0x600] == 0xa5 && gT->data[0x605] == 0xa5);
+	}
+	CHECK(!OpSet_Has(OPFAM_B0, 0x2a, GEN_1_616));
+	for(i = 0; i < BGI_COUNTOF(alignProfiles); i++)
+	{
+		CHECK(Engine_SelectProfile(alignProfiles[i]));
+		Vm_TablesInit();
+		for(mode = 0; mode <= 3; mode++)
+			CHECK(Call(0xb0, 0x2a, &mode, 1) == (mode <= 2));
+	}
+	mode = 0;
+	CHECK(Call(0xb0, 0x2a, &mode, 1) == 1);
+	CHECK(Engine_SelectProfile("1.69/444"));
+	Vm_TablesInit();
+}
+
 static void TestRasterCompatibility(void)
 {
     Engine_SelectProfile("1.659");Vm_TablesInit();
@@ -1540,6 +1589,70 @@ static void TestRasterCompatibility(void)
         CHECK(Run(&a)==4);CHECK(Depth()==2);CHECK(Top()==(uint32_t)(key<2));
         CHECK(Thread_Pop(gT)==(uint32_t)(key<2));CHECK(Thread_Pop(gT)==0x12345678u);
     }
+}
+
+static void Test680(void)
+{
+	Asm_t a = {{0x12, 0x80, 0x02, 0x12, 0x7f, 0x10}, 6};
+	uint32_t first, second, large, value;
+	CHECK(Engine_SelectProfile("1.680"));
+	Vm_TablesInit();
+	CHECK(VM_TAG_SHIFT == 28);
+	CHECK(Se_SetMasterVolume(127, 65) && gSeMasterVolume[127] == 65);
+	CHECK(!Se_SetMasterVolume(128, 65));
+	CHECK(Eval(&a) == 255);
+	a = (Asm_t){{0x00, 2, 0xb0, 0x2a}, 4};
+	CHECK(Eval(&a) == 1);
+	a = (Asm_t){{0x00, 3, 0xb0, 0x2a}, 4};
+	CHECK(Eval(&a) == 0);
+	a = (Asm_t){{0x00, 0, 0x00, 0, 0x00, 0x40, 0x91, 0xf8}, 8};
+	CHECK(Eval(&a) == (uint32_t)-3);
+
+	// Jump forward to a backwards jump, then run the actual return path.
+	a = (Asm_t){{0x13, 13, 0, 0x00, 42, 0x02, 0, 0, 0, 0, 0x11, 0x17, 0, 0x13, 0xf6, 0xff}, 16};
+	CHECK(Run(&a) == 4 && Thread_Pop(gT) == 42);
+
+	a = (Asm_t){{0x12, 16, 0x03, 1, 0x7f, 0xfb, 0, 0x20, 0x0f, 4, 0, 0x19, 4, 0}, 14};
+	CHECK(Eval(&a) == 122);
+	a = (Asm_t){{0x03, 0x83, 0x78, 0x56, 0x34, 0x12, 0xff, 0xff, 0xff, 0xff}, 10};
+	CHECK(Eval(&a) == 0x12345678);
+	a = (Asm_t){{0x03, 0, 0x80, 0x80, 0x80, 0x80, 0x08}, 7};
+	CHECK(Eval(&a) == 0x80000000u);
+	a = (Asm_t){{0x03, 0x82, 0xff, 0xff, 0xff, 0xff, 0x36, 6, 0xff, 0xff, 0xff, 0xff, 0x77}, 13};
+	CHECK(Eval(&a) == 0x7fffffffu);
+	a = (Asm_t){{0x12, 16, 0x00, 0x80, 0x0f, 4, 0, 0x18, 12, 0, 0, 0x20}, 12};
+	CHECK(Eval(&a) == 0xffffff80u);
+	a = (Asm_t){{0x12, 16, 0x0e, 4, 0, 0x14, 0x0e, 8, 0, 0x0c, 0xe3, 1, 4, 0, 8, 0, 0x2e, 2}, 18};
+	CHECK(Eval(&a) == 11);
+	a = (Asm_t){{0x00, 7, 0x2f, 0}, 4};
+	CHECK(Eval(&a) == 0x80000000u);
+	a = (Asm_t){{0x12, 16, 0x0e, 4, 0, 0xf2, 0xee, 0x87, 0xe0, 0x3f, 0x19, 4, 0x80}, 13};
+	CHECK(Eval(&a) == 0xff007ddcu);
+
+	DynMem_Init();
+	first = GAlloc(32);
+	second = GAlloc(32);
+	large = GAlloc(4097);
+	CHECK(first == 0x40000000 && second == 0x40001000 && large == 0x50000000);
+	CHECK(ResolvePtr(second + 1, gT) == (uint8_t*)ResolvePtr(second, gT) + 1);
+	// A signed local word plus an immediate stored through a pool pointer.
+	a = (Asm_t){{0x12, 16, 0x0e, 4, 0, 0x75, 0x02}, 7};
+	A32(&a, second + 1);
+	A8(&a, 0xe6);
+	A16(&a, 0x4004);
+	A8(&a, 0x22);
+	Ret(&a);
+	CHECK(Run(&a) == 4);
+	memcpy(&value, ResolvePtr(second + 1, gT), sizeof value);
+	CHECK(value == 5);
+	CHECK(GFree(first) && GFree(second) && GFree(large));
+	CHECK(Engine_SelectProfile("1.669"));
+	Vm_TablesInit();
+	CHECK(VM_TAG_SHIFT == 26 && !vm_optable_main[0x03] && !vm_optable_main[0x13]);
+	CHECK(!Se_SetMasterVolume(64, 65));
+	first = GAlloc(32);
+	CHECK(first == 0x40000000 && GFree(first));
+	DynMem_FreeAll();
 }
 
 int main(void)
@@ -1565,6 +1678,8 @@ int main(void)
 	TestFixedVectorsAndArrays();
 	TestModuleBounds();
 	TestRasterCompatibility();
+	TestUpstreamOpcodes();
+	Test680();
 	Thread_Delete(gT);
 	OS_Shutdown();
 	if(gFails)

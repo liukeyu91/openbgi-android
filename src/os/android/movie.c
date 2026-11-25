@@ -4,6 +4,7 @@
 #include "android_internal.h"
 #include "bgi/movieav.h"
 #include "bgi/gfx.h"
+#include "bgi/file.h"
 #include "bgi/snd/wavemaster.h"
 #include <math.h>
 
@@ -36,16 +37,29 @@ void OS_MovieStop(void)
     if(OsAndroid_MovieStatus()>0)Status(0);
 }
 
-int OS_MovieOpen(const char* path)
+static int ReportMovieOpen(const char* error)
 {
-    char native[PATH_MAX],error[256];int audio;
-    OS_MovieStop();Status(0);OS_PathNative(path,native,sizeof native);
-    Wm_EnsureMixer();
-    audio=Wm_MixRunning();
-    gMovie.decoder=MovieAv_Open(native,audio,&gMovie.info,error,sizeof error);
     if(!gMovie.decoder){OsAndroid_Log(error);Status(-1);return OS_MOVIE_FAILED;}
     {char log[256];snprintf(log,sizeof log,"Movie opened: %dx%d, length=%dms, audio=%d",gMovie.info.width,gMovie.info.height,gMovie.info.durationMs,gMovie.info.audio);OsAndroid_Log(log);}
     return OS_MOVIE_OK;
+}
+
+int OS_MovieOpen(const char* path)
+{
+    char native[PATH_MAX],error[256];
+    OS_MovieStop();Status(0);OS_PathNative(path,native,sizeof native);
+    Wm_EnsureMixer();
+    gMovie.decoder=MovieAv_Open(native,Wm_MixRunning(),&gMovie.info,error,sizeof error);
+    return ReportMovieOpen(error);
+}
+
+int OS_MovieOpenView(FileView_t* view)
+{
+    char error[256];
+    OS_MovieStop();Status(0);
+    Wm_EnsureMixer();
+    gMovie.decoder=MovieAv_OpenView(view,Wm_MixRunning(),&gMovie.info,error,sizeof error);
+    return ReportMovieOpen(error);
 }
 
 void OS_MovieSetVolume(int32_t volume)

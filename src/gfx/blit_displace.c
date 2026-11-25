@@ -226,7 +226,7 @@ int Blit_Displace(Bmp_t* dst, const Bmp_t* src, const Bmp_t* vec1, const Bmp_t* 
  * row, 1 repeats the edge pixel.  Each byte of the running sum is
  * pre-shifted by 0 .. 2 bits so that it fits a 16-bit lane, and the
  * average is sum * (0x10003 / n) >> 16 as the original's pmulhw does. */
-static void BoxBlur(Bmp_t* dst, const Bmp_t* src, int level, int clamp)
+static void BoxBlur(Bmp_t* dst, const Bmp_t* src, int level, int clamp, int newer)
 {
 	int n, half, shift, q, w = src->w, y, x, i;
 	uint32_t* tmp;
@@ -239,8 +239,8 @@ static void BoxBlur(Bmp_t* dst, const Bmp_t* src, int level, int clamp)
 		level = 0xff;
 	n = 2 * level + 1;
 	half = n >> 1;
-	shift = n < 0x40 ? 0 : (n < 0x80 ? 1 : 2);
-	q = (0x10003 / n) & 0xffff;
+	shift = newer ? 1 : (n < 0x40 ? 0 : n < 0x80 ? 1 : 2);
+	q = newer ? (0x20000 + 2 * n) / n : (0x10003 / n) & 0xffff;
 	tmp = (uint32_t*)BGI_Alloc((size_t)w * 4);
 	for(y = 0; y < src->h; y++)
 	{
@@ -262,10 +262,14 @@ static void BoxBlur(Bmp_t* dst, const Bmp_t* src, int level, int clamp)
 		}
 		for(x = 0; x < w; x++)
 		{
-			int out = 0, c, idx;
+			uint32_t out = 0;
+			int c, idx;
 			for(c = 0; c < 4; c++)
-				out |= Sat8((((int16_t)sum[c] * q) >> 16) << shift) << (c * 8);
-			tmp[x] = (uint32_t)out;
+			{
+				int value = newer ? (sum[c] * q) >> 16 : (((int16_t)sum[c] * q) >> 16) * (1 << shift);
+				out |= (uint32_t)Sat8(value) << (c * 8);
+			}
+			tmp[x] = out;
 			// slide: drop x - half, take x + half + 1
 			idx = x - half;
 			if(clamp ? 1 : idx >= 0)
@@ -300,6 +304,70 @@ int Blit_Gradient(Bmp_t* dst, const Bmp_t* src, int type, int level)
 	if(dst->mode != src->mode || dst->w != src->w || dst->h != src->h)
 		return 0xf;
 	if(src->mode == PM_RGB32 || src->mode == PM_ARGB32)
-		BoxBlur(dst, src, level, type);
+		BoxBlur(dst, src, level, type, 0);
 	return 0;
+}
+
+/* 1.680 keeps each channel's half-intensity sum in a 16-bit lane, then
+ * multiplies by the unsigned reciprocal. Both gradient axes use this rounding. */
+static const uint8_t* BlurRow(const Bmp_t* src, int y, int clamp)
+{
+	if((unsigned)y < (unsigned)src->h)
+		return ROW(src, y);
+	return clamp ? ROW(src, y < 0 ? 0 : src->h - 1) : NULL;
+}
+
+static void BoxBlurVertical(Bmp_t* dst, const Bmp_t* src, int level, int clamp)
+{
+	int columns = src->w * 4;
+	int n = 2 * level + 1;
+	int q = (0x20000 + 2 * n) / n;
+	uint16_t* sum = (uint16_t*)BGI_Alloc((size_t)columns * sizeof *sum);
+	memset(sum, 0, (size_t)columns * sizeof *sum);
+
+	for(int y = -level; y <= level; y++)
+	{
+		const uint8_t* row = BlurRow(src, y, clamp);
+		if(row)
+			for(int x = 0; x < columns; x++)
+				sum[x] += row[x] >> 1;
+	}
+	for(int y = 0; y < src->h; y++)
+	{
+		uint8_t* dstRow = ROW(dst, y);
+		const uint8_t* drop = BlurRow(src, y - level, clamp);
+		const uint8_t* add = BlurRow(src, y + level + 1, clamp);
+		for(int x = 0; x < columns; x++)
+		{
+			dstRow[x] = (uint8_t)Sat8((sum[x] * q) >> 16);
+			sum[x] += (add ? add[x] >> 1 : 0) - (drop ? drop[x] >> 1 : 0);
+		}
+	}
+	BGI_Free(sum);
+}
+
+/* The effector has a private snapshot. For two passes, the horizontal pass
+ * can reuse it one row at a time before the vertical pass writes to dst. */
+void Blit_Gradient680(Bmp_t* dst, Bmp_t* snap, int type, int level)
+{
+	int clamp = type & 1;
+	if((unsigned)type > 5 || (unsigned)level > 0x100 || dst->mode != snap->mode ||
+		dst->w != snap->w || dst->h != snap->h || snap->w <= 0 || snap->h <= 0 ||
+		(snap->mode != PM_RGB32 && snap->mode != PM_ARGB32))
+		return;
+	if(level == 0)
+	{
+		Blit_Copy(dst, snap);
+		return;
+	}
+	if(level == 0x100)
+		level = 0xff;
+	if(type < 2)
+		BoxBlur(dst, snap, level, clamp, 1);
+	else
+	{
+		if(type >= 4)
+			BoxBlur(snap, snap, level, clamp, 1);
+		BoxBlurVertical(dst, snap, level, clamp);
+	}
 }

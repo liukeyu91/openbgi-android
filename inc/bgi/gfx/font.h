@@ -63,6 +63,10 @@ typedef struct FontRaster
 	int cellW;          // 2 * size
 	int cellBytes;      // cellW * size
 	int glyphW;         // size * widthPct / 100
+	int tracking;       // per-face horizontal spacing, in pixels
+	int sourceW, sourceH, sourcePitch;
+	int cropX, cropY;   // viewport origin in the scaled glyph buffer
+	uint8_t* source;    // scaled raster, allocated only for a face with a correction
 	GlyphSlot_t* lru;   // most recently used glyph
 	GlyphSlot_t* slots; // capacity entries
 	int used;           // entries rendered so far
@@ -99,7 +103,7 @@ typedef struct FontReq // a pre-build request of "90 0E"
 typedef struct FontEntry // an open font
 {
 	int handle;      // 1, 2,...
-	char name[0x20]; // face name
+	char name[0x60]; // face name
 	int size, widthPct, bold;
 	FontRaster_t* font;
 	struct FontEntry* next;
@@ -107,11 +111,16 @@ typedef struct FontEntry // an open font
 
 typedef struct FontInfo // what FontCache_GetInfo copies out of an entry
 {
-	char name[0x20];
+	char name[0x60];
 	int size, widthPct, bold;
 	int italic; // 1.494 on: 0 for a cache font, set by the layout's temporary fonts
 	FontRaster_t* font;
 } FontInfo_t;
+
+typedef struct FontFaceExtension
+{
+	int32_t sx, sy, dx, dy, spacing; // signed 16.16
+} FontFaceExtension_t;
 
 typedef struct FontCache
 {
@@ -119,10 +128,15 @@ typedef struct FontCache
 	FontReq_t* requests;  // the "90 0E" requests
 	int lastHandle;       // the handle before the first entry's (0)
 	FontEntry_t* entries; // the open fonts, in opening order
+	struct FontFaceRule* faceRules; // per-face extensions ("92 0E", "92 0F")
 } FontCache_t;
 
 FontCache_t* FontCache_New(void);
 void FontCache_Delete(FontCache_t* c);
+int FontCache_SetFaceExtension(FontCache_t* c, const char* face, const FontFaceExtension_t* extension);
+int FontCache_SetFaceSpacing(FontCache_t* c, const char* face, int32_t spacing);
+int FontCache_InitRaster(FontCache_t* c, FontRaster_t* f, const char* name, int size, int widthPct, int bold,
+	int italic, int capacity);
 /* "90 0E": remember how many glyphs to cache for a font.
  * 0 ok, 0x80000001 amount < 2, 0x80000002 bad size, 0x80000003 bad width */
 int FontCache_Request(FontCache_t* c, const char* name, int size, int widthPct, int bold, int amount);

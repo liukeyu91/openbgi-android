@@ -14,46 +14,30 @@ final class ProgramCompatibility {
     }
     interface Progress { void update(int done,int total); }
     private static final class Entry {
-        final File file;final String name,source;final long offset,size;
-        Entry(File file,String name,String source,long offset,long size){this.file=file;this.name=name;this.source=source;this.offset=offset;this.size=size;}
+        final Blob blob;final String name,source;final long offset,size;
+        Entry(Blob blob,String name,String source,long offset,long size){this.blob=blob;this.name=name;this.source=source;this.offset=offset;this.size=size;}
     }
     static final class Finding {
         final int opcode,kind;int occurrences;
         final List<String> locations=new ArrayList<>();
         Finding(int opcode,int kind){this.opcode=opcode;this.kind=kind;}
     }
+    enum Status { UNCHECKED, RECHECK, INCOMPLETE, FINDINGS, PARTIAL, PASS }
+    static final class Summary {
+        final Status status;
+        final int findingCount;
+        Summary(Status status,int findingCount){this.status=status;this.findingCount=findingCount;}
+    }
     static final class Result {
         String profile="",error="";int programs,checked,skipped,problems;long instructions;boolean limited;
+        ArchiveLanguage language;
         final SortedMap<Integer,Finding> findings=new TreeMap<>();
         final List<String> problemLocations=new ArrayList<>();
-        String summary(){
-            if(!error.isEmpty() || profile.isEmpty())return "检查未完成";
-            if(!findings.isEmpty())return "发现 "+findings.size()+" 种缺失或不支持的指令";
-            if(checked==0 || skipped>0 || problems>0 || limited)return "检查不完整";
-            return "静态检查未发现缺失指令";
-        }
-        String report(){
-            StringBuilder text=new StringBuilder(summary()).append("\n\n引擎版本：").append(profile.isEmpty()?"未识别":profile)
-                .append("\n已检查 ").append(checked).append(" / ").append(programs).append(" 个程序，").append(instructions).append(" 条指令。");
-            if(!error.isEmpty())text.append("\n").append(error);
-            if(profile.isEmpty())text.append("\n请在游戏设置中选择引擎版本后重新检查。");
-            int shown=0;
-            for(Finding finding:findings.values()){
-                if(shown++==MAX_DETAILS){text.append("\n\n其余结果未展开。");break;}
-                text.append("\n\n$").append(String.format(Locale.ROOT,finding.opcode>255?"%04X":"%02X",finding.opcode))
-                    .append(finding.kind==1?"：尚未实现":finding.kind==3?"：当前平台无法启动外部程序":"：当前版本不支持");
-                if(finding.kind==3)text.append("\n指令已接入，启动失败会返回脚本；依赖外部 Windows EXE 的功能仍不可用。");
-                for(String location:finding.locations)text.append("\n").append(location);
-                if(finding.occurrences>finding.locations.size())text.append("\n另有 ").append(finding.occurrences-finding.locations.size()).append(" 个程序使用。");
-            }
-            if(skipped>0)text.append("\n\n未能读取或分析 ").append(skipped).append(" 个程序。");
-            if(problems>0){
-                text.append("\n有 ").append(problems).append(" 个程序的文件头或代码存在异常。");
-                for(String location:problemLocations)text.append("\n").append(location);
-            }
-            if(limited)text.append("\n部分资源未纳入检查，结果不完整。");
-            text.append("\n\n检查范围为导入资源中的 ._bp 程序。动态加载、Windows EXE 内的资源和其他脚本格式不在此检查范围。\n静态检查不代表完整流程兼容。");
-            return text.toString();
+        Status status(){
+            if(!error.isEmpty() || profile.isEmpty())return Status.INCOMPLETE;
+            if(!findings.isEmpty())return Status.FINDINGS;
+            if(checked==0 || skipped>0 || problems>0 || limited)return Status.PARTIAL;
+            return Status.PASS;
         }
     }
     private static void cancelled()throws InterruptedIOException {
@@ -73,31 +57,57 @@ final class ProgramCompatibility {
         }
     }
     private static boolean program(String name){return name.toLowerCase(Locale.ROOT).endsWith("._bp");}
-    private static List<Entry> inventory(File root,Result r)throws IOException {
-        List<File> all=new ArrayList<>();files(root,0,all,r);
+    private static List<Entry> inventory(ResourceLayers layers,Result r)throws IOException {
+        Map<String,Blob> all=new LinkedHashMap<>();Map<String,String> display=new LinkedHashMap<>();
+        if(layers.disc!=null){
+            Map<String,Long> sizes=new LinkedHashMap<>();Map<String,DiscImage.Entry> named=new HashMap<>();
+            for(DiscImage.Entry entry:layers.disc.entries){
+                if(!entry.file())continue;
+                String key=entry.path.toLowerCase(Locale.ROOT);
+                sizes.put(key,entry.size);named.put(key,entry);
+            }
+            Map<String,String> chosen=new LinkedHashMap<>();
+            ArchiveLanguage.addEntries(chosen,sizes,r.language);
+            for(Map.Entry<String,String> item:chosen.entrySet()){
+                DiscImage.Entry entry=named.get(item.getValue());
+                if(entry==null)continue;
+                all.put(item.getKey(),Blob.image(layers.disc,entry));display.put(item.getKey(),item.getValue());
+            }
+        }else{
+            for(File layer:layers.directories()){
+                Map<String,File> foundMap=new LinkedHashMap<>();
+                List<File> found=new ArrayList<>();files(layer,0,found,r);
+                ArchiveLanguage.addLayer(foundMap,layer,found,r.language);
+                for(Map.Entry<String,File> item:foundMap.entrySet()){
+                    all.put(item.getKey(),Blob.file(item.getValue()));
+                    display.put(item.getKey(),ArchiveLanguage.displayPath(layers.directories(),item.getValue()));
+                }
+            }
+        }
         Map<String,Entry> loose=new TreeMap<>();List<Entry> entries=new ArrayList<>();
-        for(File file:all)if(program(file.getName())){
-            String name=root.toPath().relativize(file.toPath()).toString().replace('\\','/');
-            String key=name.toLowerCase(Locale.ROOT);
-            if(loose.containsKey(key)){r.limited=true;continue;}
+        for(Map.Entry<String,Blob> item:all.entrySet())if(program(item.getKey())){
+            Blob blob=item.getValue();String source=display.get(item.getKey());
             if(loose.size()>=MAX_PROGRAMS){r.limited=true;continue;}
-            loose.put(key,new Entry(file,name,name,0,file.length()));
+            loose.put(item.getKey(),new Entry(blob,source,source,0,blob.size()));
         }
         entries.addAll(loose.values());
-        all.sort(Comparator.comparingInt((File f)->f.getName().equalsIgnoreCase("system.arc")?0:1).thenComparing(File::toString));
+        List<String> paths=new ArrayList<>(all.keySet());
+        paths.sort(Comparator.comparingInt((String path)->path.equals("system.arc")?0:1).thenComparing(path->path));
         long budget=32L*1024*1024;int archives=0;
-        for(File file:all){
-            cancelled();if(!file.getName().toLowerCase(Locale.ROOT).endsWith(".arc"))continue;
+        for(String path:paths){
+            cancelled();if(!path.endsWith(".arc"))continue;
+            Blob blob=all.get(path);
             if(++archives>512 || budget<=0){r.limited=true;break;}
-            try(RandomAccessFile in=new RandomAccessFile(file,"r")){
-                byte[] head=new byte[16];in.readFully(head);
+            try{
+                long length=blob.size();
+                byte[] head=blob.read(0,16);
                 String magic=new String(head,0,12,StandardCharsets.US_ASCII);
                 boolean arc20=magic.equals("BURIKO ARC20");
                 if(!arc20 && !magic.equals("PackFile    ")){r.limited=true;continue;}
                 int record=arc20?128:32,names=arc20?96:16;
                 long count=ArchiveTextSamples.u32(head,12),bytes=count*record,base=16+bytes;
-                if(count>32768 || bytes>budget || base>in.length()){r.limited=true;continue;}
-                budget-=bytes;byte[] index=new byte[(int)bytes];in.readFully(index);
+                if(count>32768 || bytes>budget || base>length){r.limited=true;continue;}
+                budget-=bytes;byte[] index=blob.read(16,(int)bytes);
                 for(int i=0;i<count;i++){
                     if((i&255)==0)cancelled();int start=i*record,end=0;
                     while(end<names && index[start+end]!=0)end++;
@@ -105,9 +115,9 @@ final class ProgramCompatibility {
                     if(!program(name) || loose.containsKey(name.toLowerCase(Locale.ROOT)))continue;
                     if(entries.size()>=MAX_PROGRAMS){r.limited=true;break;}
                     long off=base+ArchiveTextSamples.u32(index,start+names),size=ArchiveTextSamples.u32(index,start+names+4);
-                    String source=root.toPath().relativize(file.toPath()).toString()+" / "+name;
-                    if(off>in.length() || size>in.length()-off){r.skipped++;continue;}
-                    entries.add(new Entry(file,name,source,off,size));
+                    String source=display.get(path)+" / "+name;
+                    if(off>length || size>length-off){r.skipped++;continue;}
+                    entries.add(new Entry(blob,name,source,off,size));
                 }
             }catch(InterruptedIOException stop){throw stop;}catch(IOException bad){r.limited=true;}
         }
@@ -117,20 +127,38 @@ final class ProgramCompatibility {
     private static byte[] read(Entry entry)throws IOException {
         cancelled();
         if(entry.size<16 || entry.size>MAX_PROGRAM)throw new IOException("程序大小超出检查范围");
-        byte[] data=new byte[(int)entry.size];
-        try(RandomAccessFile in=new RandomAccessFile(entry.file,"r")){in.seek(entry.offset);in.readFully(data);}
+        byte[] data=entry.blob.read(entry.offset,(int)entry.size);
         byte[] decoded=ArchiveTextSamples.decode(data,MAX_PROGRAM);cancelled();return decoded;
     }
-    private static File table(File game,File resources){
+    static File table(File game,File resources){
         File file=new File(resources,"games.json");return file.isFile()?file:new File(game,".openbgi/games.json");
     }
-    static Result scan(File game,File resources,String preference,Analyzer analyzer,Progress progress)throws IOException {
-        Result r=new Result();List<Entry> entries=inventory(resources,r);byte[] boot=null;long budget=128L*1024*1024;
+    static byte[] bootProgram(File game,File resources,GameSettings settings)throws IOException{
+        try(ResourceLayers layers=ResourceLayers.of(game,resources)){return bootProgram(layers,settings);}
+    }
+    static byte[] bootProgram(ResourceLayers layers,GameSettings settings)throws IOException{
+        Result result=new Result();
+        result.language=layers.resolve(settings.archiveLanguage);
+        for(Entry entry:inventory(layers,result)){
+            if(entry.name.equalsIgnoreCase("ipl._bp") &&
+               (entry.source.equalsIgnoreCase("ipl._bp") ||
+                ArchiveLanguage.logicalName(entry.source.split(" / ",2)[0]).equals("system.arc")))
+                return read(entry);
+        }
+        return null;
+    }
+    static Result scan(File game,File resources,String preference,Analyzer analyzer,Progress progress)throws IOException{
+        try(ResourceLayers layers=ResourceLayers.of(game,resources)){return scan(layers,preference,analyzer,progress);}
+    }
+    static Result scan(ResourceLayers layers,String preference,Analyzer analyzer,Progress progress)throws IOException{
+        Result r=new Result();
+        r.language=layers.resolve(GameSettings.load(layers.game).archiveLanguage);
+        List<Entry> entries=inventory(layers,r);byte[] boot=null;long budget=128L*1024*1024;
         if(preference.equals("auto"))for(Entry entry:entries)if(entry.name.equalsIgnoreCase("ipl._bp")){
             try{boot=read(entry);}catch(InterruptedIOException stop){throw stop;}catch(IOException bad){r.limited=true;}
             break;
         }
-        File config=table(game,resources);
+        File config=table(layers.game,layers.base);
         String profile=analyzer.select(config.isFile()?config.toString():"",preference,boot);
         if(profile==null || profile.isEmpty())return r;
         r.profile=profile;int done=0;
@@ -168,27 +196,51 @@ final class ProgramCompatibility {
         }
         progress.update(entries.size(),entries.size());return r;
     }
-    private static String stamp(File game,File resources,String preference,String version){
-        File file=table(game,resources);
-        return version+"|"+preference+"|"+file.lastModified()+"|"+file.length();
+    private static String stamp(ResourceLayers layers,String preference,String version,ArchiveLanguage language)throws IOException {
+        File game=layers.game;
+        File patch=GamePatch.active(game),file=table(game,layers.base);
+        File data=DirectGame.privateLayer(game);
+        if(data==null)data=ContainerGame.data(game);
+        return version+"|"+preference+"|"+file.lastModified()+"|"+file.length()+
+            (language==null?"":"|"+language.id)+(patch==null?"":"|"+patch.getName())+
+            (data==null?"":"|"+new File(data,".openbgi/translation.properties").lastModified());
     }
-    static void save(File game,File resources,String preference,String version,Result result)throws IOException {
+    static void save(ResourceLayers layers,String preference,String version,Result result,String report)throws IOException {
+        File game=layers.game;
         Path dir=new File(game,".openbgi").toPath();Files.createDirectories(dir);
-        Properties p=new Properties();p.setProperty("stamp",stamp(game,resources,preference,version));
-        p.setProperty("summary",result.summary());p.setProperty("report",result.report());p.setProperty("appVersion",version);
+        Properties p=new Properties();p.setProperty("stamp",stamp(layers,preference,version,result.language));
+        p.setProperty("status",result.status().name());p.setProperty("findingCount",Integer.toString(result.findings.size()));
+        p.setProperty("report",report);p.setProperty("appVersion",version);
         Path target=dir.resolve("compatibility.properties"),temp=dir.resolve("compatibility.properties.tmp");
         try{
             try(OutputStream out=Files.newOutputStream(temp)){p.store(out,"OpenBGI static compatibility check");}
             Files.move(temp,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
         }finally{Files.deleteIfExists(temp);}
     }
-    static String cachedSummary(File game,File resources,String preference,String version){
-        File file=new File(game,".openbgi/compatibility.properties");if(!file.isFile())return "兼容性：未检查";
-        if(file.length()>512*1024)return "兼容性：需要重新检查";
+    static void save(File game,File resources,String preference,String version,Result result,String report)throws IOException {
+        try(ResourceLayers layers=ResourceLayers.of(game,resources)){save(layers,preference,version,result,report);}
+    }
+    static Summary cachedSummary(File game,File resources,String preference,String version){
+        try(ResourceLayers layers=ResourceLayers.summary(game,resources)){return cachedSummary(layers,preference,version);}
+        catch(IOException unavailable){return new Summary(Status.RECHECK,0);}
+    }
+    static Summary cachedSummary(ResourceLayers layers,String preference,String version){
+        File file=new File(layers.game,".openbgi/compatibility.properties");if(!file.isFile())return new Summary(Status.UNCHECKED,0);
+        if(file.length()>512*1024)return new Summary(Status.RECHECK,0);
         try(InputStream in=new FileInputStream(file)){
             Properties p=new Properties();p.load(in);
-            if(!stamp(game,resources,preference,version).equals(p.getProperty("stamp")))return "兼容性：需要重新检查";
-            return p.getProperty("summary","兼容性：未检查");
-        }catch(IOException|IllegalArgumentException bad){return "兼容性：未检查";}
+            ArchiveLanguage language=layers.resolve(GameSettings.load(layers.game).archiveLanguage);
+            if(!stamp(layers,preference,version,language).equals(p.getProperty("stamp")))return new Summary(Status.RECHECK,0);
+            String status=p.getProperty("status");
+            if(status!=null)return new Summary(Status.valueOf(status),Integer.parseInt(p.getProperty("findingCount","0")));
+            String legacy=p.getProperty("summary","");
+            if(legacy.equals("检查未完成"))return new Summary(Status.INCOMPLETE,0);
+            if(legacy.equals("检查不完整"))return new Summary(Status.PARTIAL,0);
+            if(legacy.equals("静态检查未发现缺失指令"))return new Summary(Status.PASS,0);
+            String prefix="发现 ",suffix=" 种缺失或不支持的指令";
+            if(legacy.startsWith(prefix)&&legacy.endsWith(suffix))
+                return new Summary(Status.FINDINGS,Integer.parseInt(legacy.substring(prefix.length(),legacy.length()-suffix.length())));
+            return new Summary(Status.RECHECK,0);
+        }catch(IOException|IllegalArgumentException bad){return new Summary(Status.RECHECK,0);}
     }
 }

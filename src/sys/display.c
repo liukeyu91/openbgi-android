@@ -60,7 +60,7 @@ static void Display_ClientSize(int picW, int picH, int* w, int* h)
 
 int Display_ModeCount(void)
 {
-	return gEngine->screenModes == 16 ? 16 : gEngine->gen >= GEN_1_494 ? 8
+	return gEngine->screenModes == 16 ? 16 : gEngine->gen >= GEN_1_492 ? 8
 																	   : 4;
 }
 
@@ -82,7 +82,7 @@ void Display_InitSizeTable(void)
 		w = w158, h = h158;
 	else if(gEngine->gen >= GEN_1_659)
 		w = w659, h = h659;
-	else if(gEngine->gen >= GEN_1_494)
+	else if(gEngine->gen >= GEN_1_492)
 		w = w494, h = h494;
 	if(gEngine->screenModes == 16)
 	{

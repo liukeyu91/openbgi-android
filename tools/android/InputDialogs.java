@@ -46,7 +46,7 @@ final class InputDialogs {
         Charset charset = GameTextCodec.charset(encoding);
         boolean profile = initial.length == 4;
         final AlertDialog[] parentDialog=new AlertDialog[1];
-        String[] profileNames = {"姓", "名", "昵称", "第一人称"};
+        String[] profileNames = {activity.getString(R.string.surname), activity.getString(R.string.given_name), activity.getString(R.string.nickname), activity.getString(R.string.first_person)};
         LinearLayout fields = new LinearLayout(activity); fields.setOrientation(LinearLayout.VERTICAL);
         int padding = (int)(16 * activity.getResources().getDisplayMetrics().density);
         fields.setPadding(padding, 0, padding, 0);
@@ -94,7 +94,7 @@ final class InputDialogs {
         final Spinner months = new Spinner(activity), days = new Spinner(activity);
         if(profile) {
             LinearLayout birthday = new LinearLayout(activity); birthday.setOrientation(LinearLayout.HORIZONTAL);
-            TextView heading = new TextView(activity); heading.setText("生日（月／日）"); birthday.addView(heading);
+            TextView heading = new TextView(activity); heading.setText(activity.getString(R.string.birthday)); birthday.addView(heading);
             birthday.addView(months); birthday.addView(days); fields.addView(birthday);
             int[] counts = {31,29,31,30,31,30,31,31,30,31,30,31};
             numbers(activity, months, 12, month);
@@ -107,12 +107,12 @@ final class InputDialogs {
             });
         }
         TextView caption = new TextView(activity);
-        caption.setText(profile ? "玩家资料" : new String(title, charset));
+        caption.setText(profile ? activity.getString(R.string.player_profile) : new String(title, charset));
         caption.setTextSize(14); caption.setPadding(padding, 0, padding, 0);
         caption.setMinHeight((int)(24 * activity.getResources().getDisplayMetrics().density));
         AlertDialog.Builder builder = new AlertDialog.Builder(activity).setCustomTitle(caption)
-            .setView(scroll).setPositiveButton("确定", null);
-        if(!profile) builder.setNegativeButton("取消", (d, w) -> result.done(null, 0, 0));
+            .setView(scroll).setPositiveButton(activity.getString(R.string.ok), null);
+        if(!profile) builder.setNegativeButton(activity.getString(R.string.cancel), (d, w) -> result.done(null, 0, 0));
         AlertDialog dialog = builder.create(); dialog.setCancelable(!profile); dialog.setCanceledOnTouchOutside(false);
         parentDialog[0]=dialog;
         dialog.setOnCancelListener(d -> result.done(null, 0, 0));
@@ -127,7 +127,7 @@ final class InputDialogs {
                 String value = edits[i].getText().toString();
                 value = GameTextCodec.insertion(value, 0, value.length(), "", 0, 0, charset, limits[i], false);
                 if(profile && !fullWidth(value, charset, encoding)) {
-                    edits[i].setError("请使用全角字符"); edits[i].requestFocus(); return;
+                    edits[i].setError(activity.getString(R.string.fullwidth_required)); edits[i].requestFocus(); return;
                 }
                 values[i] = value.getBytes(charset);
             }

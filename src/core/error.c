@@ -153,7 +153,7 @@ void FormatErrorContext(char* dst, const char* msg, Thread_t* t)
 	ModuleNode_t* mods;
 	uint32_t count;
 
-	if(insn >= 0x80)
+	if(insn >= 0x80 && !(gEngine->gen == GEN_1_680 && insn >= 0xe3 && insn <= 0xe7))
 		insn = (insn << 8) + code[1];
 
 	count = Thread_ExportModules(t, &mods);

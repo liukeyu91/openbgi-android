@@ -7,10 +7,12 @@ Android 9 及以上的 ARM64 设备。应用只提供引擎，游戏资源需自
 ## 使用方法
 
 1. 安装 APK，在游戏库选择“添加游戏”。
-2. 选择“直接使用目录”，授权存储访问后选择已解压的完整游戏根目录。添加时会展开已识别的汉化资源包，再检查 `system.arc` 或 `ipl._bp`。
-3. 在游戏设置中确认编码、引擎配置、缩放和操作方式，然后启动游戏。
+2. 选择已解压的完整游戏根目录。全功能包可在授权后直接运行，SAF 包通过系统文件选择器复制导入。
+3. 也可选择“使用光盘镜像（ISO）”或“使用游戏压缩包（ZIP）”，在存储中选取 ISO/UDF 镜像或 ZIP 文件，游戏直接从来源运行，不复制、不解包。
+4. 在游戏设置中确认编码、引擎配置、缩放和操作方式，然后启动游戏。
 
-直接目录模式不复制游戏本体，应用内仅保存目录引用、游戏库信息与设置。存档、汉化展开资源写入原目录；移除条目保留这些文件。手机主存储与存储卡均可选择，目录须可读写；首次使用会请求存储访问。也可选择“复制导入”，沿用应用内副本模式。旧的复制导入不会自动迁移或删除。
+直接目录模式原地读取游戏资源，存档和展开的汉化资源写入应用存储。SAF 包只读取所选目录，导入中断后重新打开应用可重试。两种包的游戏库和存档独立。
+镜像与压缩包同样原地读取：添加时只记录来源路径与索引摘要，启动时由原生层挂载来源。存档、设置与展开资源写入该条目的私有目录，来源自带的存档在添加时复制过去。ZIP 的 Stored 条目直接读取，Deflate 条目在首次打开时解压并校验 CRC-32，支持 ZIP64 与未列出的父目录；单条目解压上限 256 MiB。两者都不能就地展开汉化资源，请改用覆盖包（ZIP）。来源文件被替换或移走后条目仍在，但需要重新添加才能启动。
 编码自动检测无法确定时，可使用编码预览手动选择。
 汉化资源的展开在手机本地完成，支持外部 EVB、EXE 内嵌 EVB 与配套密钥的 CPK v2；原生 ARC 汉化直接使用。已知配置由共享 JSON 生成，会应用编码与引擎设置。无需电脑转换或安装 Python。
 已有游戏可从卡片菜单选择“处理汉化补丁”，需先退出游戏。已有根目录覆盖资源与存档会保留；包内 Windows EXE、DLL 和存档不会作为展开资源写入。尚未识别的运行时字体/逻辑钩子仍需适配，资源解包成功不代表全路线兼容。
@@ -22,6 +24,36 @@ Android 9 及以上的 ARM64 设备。应用只提供引擎，游戏资源需自
 
 覆盖安装需使用相同包名和签名密钥；卸载会清除应用内数据。
 主应用与独立 UI Preview 的数据彼此独立。运行日志可在关于页导出。
+
+## 补丁体检
+
+安装 ZIP 或文件夹覆盖包时，应用先检查文件冲突、ARC 文件头和索引、目标游戏和抽样文本。警告可以确认后安装，拒绝会保留当前补丁。上次体检可在游戏的「汉化覆盖包」菜单查看。
+
+补丁根目录的 `.openbgi/patch.json` 可提供以下可选字段。 `bootSha256` 使用原游戏解压后的 `ipl._bp` 的 SHA-256，`engine` 使用 OpenBGI 引擎配置名。
+
+```json
+{
+  "target": {"product": "LovepicalPoppy", "engine": "1.680"},
+  "encoding": "big5",
+  "fontFamily": "Noto Sans CJK TC",
+  "fontSize": 24,
+  "textBoxWidth": 760
+}
+```
+
+编码按场景文本抽样。字形检查读取声明或选定字体的字符映射。只有同时声明字号和文本框宽度时才给出行宽估算，实际断行和字体回退需在游戏中查看。
+
+## 将安装器转成覆盖 ZIP
+
+在电脑上使用 Python 3.11 或更新版本。NSIS 用 [7-Zip](https://www.7-zip.org/)，Inno Setup 用 [innoextract](https://constexpr.org/innoextract/)。在仓库根目录运行以下命令，再在游戏的「汉化覆盖包」菜单导入 `patch.zip`。
+
+```sh
+python tools/translation-compat.py installer "PatchSetup.exe" --out "patch.zip"
+```
+
+转换器提取安装器内已有的完整文件，保留相对游戏根目录的路径。NSIS 优先使用 `$INSTDIR`，Inno 使用 `{app}` 对应的 `app`。目录布局不同时用 `--root` 指定解包目录内的资源根。可用 `--select 'Archive/*'` 或 `--exclude '*.txt'` 筛选文件，也可用 `--manifest patch.json` 附带编码、字体和目标信息。可用 `--format nsis` 或 `--format inno` 选择格式，并用 `--extractor` 指定工具路径。
+
+工具只读取安装器里的文件。仅有差分或依赖安装脚本生成资源的补丁，需要先取得完整的游戏资源文件。
 
 ## 构建环境
 
@@ -61,8 +93,8 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
     sh tools/android/package-smoke.sh
 ```
 
-主应用输出为 `bin/android/openbgi.apk`。同一构建环境下执行
-`sh tools/android/package-ui-preview.sh` 可生成独立预览包。
+全功能包输出至 `bin/android/openbgi.apk`。同一构建环境下运行 `ANDROID_STORAGE_VARIANT=saf sh tools/android/package-smoke.sh`，用同一把签名密钥生成 `bin/android/openbgi-saf.apk`。
+原有独立 UI Preview 仍可用 `sh tools/android/package-ui-preview.sh` 构建。
 正式打包必须显式提供工程外的持久签名密钥和密码环境变量，并通过已固定的证书 SHA-256 校验；脚本不会自动生成替代密钥。详见 [签名、CI 与可复现构建](../../docs/build-integrity.md)。
 
 ## 开发检查
@@ -70,6 +102,7 @@ ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
 `tools/ci/movie-check.sh /tmp/movie-check` 从固定源码构建主机 FFmpeg，并对 MPEG / WMV / MP4、音频重采样、静音、无声影片、变帧率、暂停和阻塞中止运行实际解码测试及 ASan / UBSan 检查。检查覆盖引擎适配层；第三方 FFmpeg 静态库在该检查中未启用 Sanitizer。Android 实机的输出延迟和各游戏片头仍需设备验证。
 
 - `make test`：引擎测试。
+- `sh tools/android/tests/run-disc-image-tests.sh`：镜像与 ZIP 索引、Deflate 读取、档案语言、抽样、存档迁移与摘要。
 - `sh tools/android/tests/run-encoding-tests.sh`：编码检测与配置。
 - `sh tools/android/tests/run-compatibility-tests.sh`：程序收集、归档覆盖和检查结果。
 - `sh tools/android/tests/run-input-tests.sh`：输入、设置与坐标变换。

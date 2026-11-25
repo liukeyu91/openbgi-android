@@ -70,19 +70,14 @@ typedef struct LoaderVtbl
 // the archive argument of the file functions: "0" means a loose file
 #define ARC_ARG(l) ((l)->arc[0] != '0' ? (l)->arc : NULL)
 
-/* the shared start: copy the names lower-cased, allocate the buffer and
- * either satisfy the read from the file cache (useCache, and the cache
- * exists) or queue it with the loader thread.  A NULL name is a script
- * error, which does not return. */
-static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const char* name, int useCache, int bitmap)
+// Begin a counted load and copy the lower-cased names.
+static void WaitLoader_Init(WaitLoader_t* w, Thread_t* t, const char* arc, const char* name)
 {
 	WaitCounted_Ctor(&w->w, t);
-	w->bitmapJob=NULL;
+	w->bitmapJob = NULL;
+	w->buf = NULL;
 	if(!name)
-	{
-		w->buf = NULL;
 		ScriptError(MSG_LOAD_NULL_NAME, t);
-	}
 	WaitCount_Inc();
 	if(arc)
 	{
@@ -93,6 +88,11 @@ static void WaitLoader_Ctor(WaitLoader_t* w, Thread_t* t, const char* arc, const
 		w->arc[0] = 0;
 	strcpy(w->name, name);
 	SjisStrLwr(w->name);
+}
+
+// Satisfy the read from cache or queue it with the loader thread.
+static void WaitLoader_Read(WaitLoader_t* w, int useCache, int bitmap)
+{
 	w->useCache = useCache && gFileCache != NULL;
 	/* The decoded image may be much larger than its compressed entry:
      * Full HD sprite sheets exceed the original 32 MiB scratch buffer. */
@@ -207,7 +207,8 @@ static const LoaderVtbl_t WaitBmpLoad_Vtbl = {
 Wait_t* WaitBmpLoad_New(Thread_t* t, int bmpNo, const char* arc, const char* name)
 {
 	WaitBmpLoad_t* w = (WaitBmpLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 1, 1);
+	WaitLoader_Init(&w->l, t, arc, name);
+	WaitLoader_Read(&w->l, 1, 1);
 	w->l.w.vt = &WaitBmpLoad_Vtbl.base;
 	w->bmpNo = bmpNo;
 	return &w->l.w;
@@ -265,7 +266,8 @@ static const LoaderVtbl_t WaitSeLoad_Vtbl = {
 Wait_t* WaitSeLoad_New(Thread_t* t, int slot, const char* arc, const char* name, int fadeInMs, double gain, double rate)
 {
 	WaitSeLoad_t* w = (WaitSeLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 0, 0);
+	WaitLoader_Init(&w->l, t, arc, name);
+	WaitLoader_Read(&w->l, 0, 0);
 	w->l.w.vt = &WaitSeLoad_Vtbl.base;
 	w->slot = slot;
 	w->fadeInMs = fadeInMs;
@@ -345,12 +347,13 @@ Wait_t* WaitSeMem_New(Thread_t* t, int slot, const void* data, int fadeInMs, dou
 
 // ---- BF_Movie sequences (1.69/472 on) ---------------------------------------------
 
-typedef struct WaitSeqLoad // 0x244 bytes
+typedef struct WaitSeqLoad
 {
 	WaitLoader_t l;
 	int32_t* outNo;  // receives the sequence number
 	int32_t* info;   // five words: width, height, mode, rate, frames
 	uint32_t result; // pushed when the wait ends (0 ok, 1, 2 not a movie, else raw)
+	int streamed;
 } WaitSeqLoad_t;
 
 // the result is pushed by the destructor, so a failed read pushes the initial 1 as well
@@ -376,20 +379,38 @@ static int WaitSeqLoad_Finish(WaitLoader_t* l)
 	return 1;
 }
 
-static const LoaderVtbl_t WaitSeqLoad_Vtbl = {
-	{WaitSeqLoad_Destroy, WaitLoader_Poll, Wait_SetTimer, Wait_IsDirtyBase, Wait_OnMessage}, WaitSeqLoad_Finish};
+static int WaitSeqLoad_Poll(Wait_t* base)
+{
+	WaitSeqLoad_t* w = (WaitSeqLoad_t*)base;
+	if(w->streamed)
+	{
+		w->streamed = 0;
+		if(BmSeq_TryStream(ARC_ARG(&w->l), w->l.name, w->outNo, w->info))
+		{
+			w->result = 0;
+			return 1;
+		}
+		WaitLoader_Read(&w->l, 1, 0);
+	}
+	return WaitLoader_Poll(base);
+}
 
-/* load the BF_Movie file `name` of archive `arc` and register it ("90 F4");
- * *outNo receives the sequence number, info its five description words.
- * Uses the file cache. */
-Wait_t* WaitSeqLoad_New(Thread_t* t, const char* arc, const char* name, int32_t* outNo, int32_t* info)
+static const LoaderVtbl_t WaitSeqLoad_Vtbl = {
+	{WaitSeqLoad_Destroy, WaitSeqLoad_Poll, Wait_SetTimer, Wait_IsDirtyBase, Wait_OnMessage}, WaitSeqLoad_Finish};
+
+/* Load a BF_Movie ("90 F4" / "92 F1"). With streaming requested the
+ * first poll tries a file view before using the regular loader. */
+Wait_t* WaitSeqLoad_New(Thread_t* t, const char* arc, const char* name, int32_t* outNo, int32_t* info, int streamed)
 {
 	WaitSeqLoad_t* w = (WaitSeqLoad_t*)BGI_Alloc(sizeof *w);
-	WaitLoader_Ctor(&w->l, t, arc, name, 1, 0);
+	WaitLoader_Init(&w->l, t, arc, name);
 	w->l.w.vt = &WaitSeqLoad_Vtbl.base;
 	w->outNo = outNo;
 	w->info = info;
 	w->result = 1;
+	w->streamed = streamed;
+	if(!streamed)
+		WaitLoader_Read(&w->l, 1, 0);
 	return &w->l.w;
 }
 

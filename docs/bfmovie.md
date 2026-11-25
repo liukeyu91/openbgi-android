@@ -65,14 +65,13 @@ Three stages (`BfMovie_DecodeFrame` and its helpers in
      taken before the frame is written, so displacements may point at
      pixels the frame has already changed.
 
-The frames of the "streamed" types 0x10000 / 0x10001 have a 0xC0-byte
-header with the offsets at +0xC0 and go through another decoder, with
-the frame data read from the archive on demand.  No game examined ships
-such a file; the engine here reports them as code 0x8000000A (and once on
-stderr) if one turns up.  Their frame codec is known, though: the DCT
-codec of `src/core/cbg2.c` - a version 2 CompressedBG is decoded by the
-original as a one-frame movie of type 0x10001 - with the per-band block
-bitmap marking the blocks a frame changes.
+### Streamed BF_Movie frames
+
+Types `0x10000` and `0x10001` store two quantisation tables at `+0x40`
+and their frame offsets at `+0xC0`. The CBG2 decoder updates only the
+colour blocks selected by each band's bitmap. A 32-bit stream carries
+a full alpha plane or a set of changed alpha blocks. Both formats use
+the bitmap slot's previous frame as their starting point.
 
 ## The registry and the instructions
 
@@ -87,8 +86,8 @@ second number, and the data goes with the last of the pair.
 | `90 F6` | `bmp, no, frame → r` | decode the frame into the slot: 0 ok, 3 no such number, 4 no such frame, 5 the slot's size or pixel mode differs, 6; other codes raw |
 | `90 F7` | `no, &out → r` | a clone of `no` under a new number: 0 ok, 3, 7 already cloned |
 | `80 53` | `→` | the next `90 F6` runs inside a wait object (`WaitSeqDecode`; the original hands the frame to a decoder pool and polls the job, here the frame is decoded on the first poll) which pushes the result instead: 0 ok, 3, 5, 8 decode failed |
-| `92 F1` | `&no, &info, name, arc, streamed →` | the `90 F4` load with a flag choosing the streamed form (only the header and index are read and the frames come from the archive); the whole file is loaded here either way |
-| `92 F0` | `arc, name, x, y, w, h → length` | a DirectShow movie played out of an archive entry; without video playback the answer is 0 like `90 F0`'s |
+| `92 F1` | `&no, &info, arc, name, streamed →` | the `90 F4` load with a flag to read only the header and index of a streamed movie, then read frames on demand |
+| `92 F0` | `arc, name, x, y, w, h → length` | play a movie directly from an archive entry with the linked FFmpeg backend (Android); 0 on failure |
 
 The scripts drive the playback themselves: `moviemngrbm._bp` keeps a
 table of 21 records (312 bytes each: the number, the five info words, the
@@ -118,9 +117,8 @@ bitmap and 0x80000001 (1) for one without a texture:
 | `91 F7` | `bmp, &frame → r` | 1 with the slot's last frame number (0 without a texture), 0 for a bad slot |
 | `92 F4` | `bmp, v → r` | control (1: no texture) |
 
-Without the streamed decoder every attach fails with 1 here and the
-other calls answer as for a slot without a texture, which is what the
-scripts expect of a machine that cannot play video.  The handlers are in
+Video texture attachment returns 1 and the other calls report that the
+slot has no texture.  The handlers are in
 `src/vm/ops_gfx1.c` and `src/vm/ops_gfx2.c`.
 
 ## The other 1.494+ bitmap instructions met on the way

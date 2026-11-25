@@ -14,6 +14,7 @@
  * (Boot_ParseCmdLine).
  */
 #include "bgi/engine.h"
+#include "bgi/edit.h"
 #include "bgi/extract.h"
 #include "bgi/dbg.h"
 #include "bgi/vm.h"
@@ -33,6 +34,9 @@
 #include "bgi/msg.h"
 #include "bgi/os.h"
 #include "bgi/strutil.h"
+#if defined(BGI_POSIX) || defined(BGI_ANDROID)
+#include "bgi/os_posix.h"
+#endif
 
 int gLauncherMode;                       // "Execute as a launcher.": no sound, no saved window position
 int gNoMutex;                            // "Do not use mutex.": several instances may run
@@ -267,6 +271,7 @@ void Engine_Shutdown(void)
 	StrTab_Clear(0);
 	Dict_DeleteAll();
 	OS_EditDestroy();
+	Edit_SetAlignment(0);
 	Child_DestroyAll();
 	Ptcl_FreeGlobals();
 	Knob_UnregisterAll();
@@ -302,7 +307,8 @@ void Engine_Shutdown(void)
 //                      have no handler yet, and exit (after --engine=)
 //   --lang=en|ja       the language of the engine's messages (English by
 //                      default, "ja" the originals); BGI_LANG=ja the same
-//   --text-encoding=utf8|sjis|gbk select display encoding; gbk uses CP936 for a game's display text and text input
+//   --text-encoding=utf8|sjis|gbk|big5 select the game's display and input encoding
+//   --archive-language=cn|tc|en   prefer localized archives (POSIX and Android)
 //   --list=ARCHIVE     print the entries of an archive and what they are, and exit
 //   --extract=ARCHIVE  write the entries into a directory (--out=DIR, default
 //                      the archive's name without its extension) and exit:
@@ -343,6 +349,9 @@ static int gOptDebug;           // --debug: 1 open the debugger, 2 open it pause
 static void Engine_ParseOptions(char* cmd)
 {
 	char* p = cmd;
+#if defined(BGI_POSIX) || defined(BGI_ANDROID)
+	OsPosix_SetArchiveLanguage("");
+#endif
 	if(getenv("BGI_LANG") && !Msg_SetLanguage(getenv("BGI_LANG")))
 		fprintf(stderr, "bgi: unknown language in BGI_LANG (en or ja)\n");
 	while(*p)
@@ -385,6 +394,15 @@ static void Engine_ParseOptions(char* cmd)
 		}
 		else if(strcmp(opt, "--list-engines") == 0)
 			gOptList = 1;
+		else if(strcmp(opt, "--text-encoding=big5") == 0)
+			Text_SetEncoding(TEXT_BIG5);
+#if defined(BGI_POSIX) || defined(BGI_ANDROID)
+		else if(strncmp(opt, "--archive-language=", 19) == 0)
+		{
+			if(!OsPosix_SetArchiveLanguage(opt + 19))
+				fprintf(stderr, "bgi: unknown archive language in %s\n", opt);
+		}
+#endif
 		else if(strcmp(opt, "--text-encoding=gbk") == 0)
             Text_SetEncoding(TEXT_GBK);
         else if(strcmp(opt, "--text-encoding=utf8") == 0)
@@ -585,6 +603,14 @@ int Engine_Main(const char* cmdLine)
 		fprintf(stderr, "bgi: %d entr%s written to %s\n", n, n == 1 ? "y" : "ies", gOptOut);
 		return 0;
 	}
+#if defined(BGI_POSIX) && !defined(BGI_ANDROID)
+	const char* image = getenv("BGI_DISC_IMAGE");
+	if(image && *image && !OsPosix_MountDisc(image))
+	{
+		fprintf(stderr, "bgi: cannot open disc image %s\n", image);
+		return 1;
+	}
+#endif
 	Boot_ParseCmdLine(cmd);
 	Engine_LoadGames();
 	{

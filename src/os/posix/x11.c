@@ -386,9 +386,9 @@ int X11_EventText(XKeyEvent* ev, XIC ic, char* out, int n)
 		}
 		if(cp < 0x20 || cp == 0x7f)
 			continue; // control characters are keys, not text
-		if(gOsTextGbk)
+		if(gOsTextGbk || gOsTextBig5)
 		{
-			uint16_t code = OS_CodePointToGbk(cp);
+			uint16_t code = OsCommon_CodePointToChinese(cp);
 			k = code > 0xff ? 2 : code != 0;
 			if(k == 2)
 				sj[0] = (char)(code >> 8);

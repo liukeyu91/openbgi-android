@@ -28,7 +28,7 @@ void OsAndroid_EditCommand(int op, int a, int b, int c, int d, const char* text)
     }
     if(!(*env)->ExceptionCheck(env))
         (*env)->CallVoidMethod(env, host->activity, host->editCommand,
-            op, a, b, c, d, revision, gTextGbk ? OS_TEXT_GBK : gTextUtf8 ? OS_TEXT_UTF8 : OS_TEXT_SJIS, bytes);
+            op, a, b, c, d, revision, gTextEncoding, bytes);
     if(bytes) (*env)->DeleteLocalRef(env, bytes);
     if((*env)->ExceptionCheck(env))
     {
@@ -45,6 +45,7 @@ void OS_EditShow(int show) {
     OsAndroid_EditCommand(ANDROID_EDIT_SHOW, show, 0, 0, 0, NULL);
 }
 void OS_EditMove(int x, int y, int w, int h) { OsAndroid_EditCommand(ANDROID_EDIT_MOVE, x, y, w, h, NULL); }
+void OS_EditSetAlignment(int mode) { OsAndroid_EditCommand(ANDROID_EDIT_ALIGNMENT, mode, 0, 0, 0, NULL); }
 void OS_EditSetFont(const char* face, int h, int w) { BGI_UNUSED(face); OsAndroid_EditCommand(ANDROID_EDIT_FONT, h, w, 0, 0, NULL); }
 void OS_EditSelectAll(void) { OsAndroid_EditCommand(ANDROID_EDIT_SELECT, 0, 0, 0, 0, NULL); }
 void OS_EditFocus(int focus) {
@@ -73,8 +74,8 @@ static size_t CopyText(char* out, size_t cap, const char* text)
 	{
 		const char* p = text + pos;
 		int len = 1;
-		if(gTextGbk)
-			len = OS_GbkCharLen(p);
+		if(gTextGbk || gTextBig5)
+			len = OsCommon_ChineseCharLen(p);
 		else if(gTextUtf8)
 		{
 			int utf8 = OsCommon_Utf8SeqLen((const uint8_t*)p);
@@ -201,7 +202,7 @@ static int InputDialog(const char* title, int count, const char* const labels[4]
     for(i = 0; i < count; ++i) host->formLimits[i] = maxima[i];
     pthread_mutex_unlock(&host->lock);
     (*env)->CallVoidMethod(env, host->activity, host->inputDialog, serial,
-        gTextGbk ? OS_TEXT_GBK : gTextUtf8 ? OS_TEXT_UTF8 : OS_TEXT_SJIS,
+        gTextEncoding,
         jtitle, jlabels, jinitial, jlimits, jdigits, month ? *month : 0, day ? *day : 0, compact != 0);
     if((*env)->ExceptionCheck(env)) goto done;
     pthread_mutex_lock(&host->lock);
@@ -278,6 +279,7 @@ int OS_MessageBox(const char* text, const char* caption, uint32_t flags)
         OsAndroid_ScriptToUtf8(text ? text : "", body, sizeof body);
     else OS_SjisToUtf8(text ? text : "", body, sizeof body);
     OsAndroid_Log(title); OsAndroid_Log(body);
+    if(!strcmp(title,"Error!!")) OsAndroid_ReportError(body);
     if(!env) return result;
     jbody = (*env)->NewByteArray(env, (jsize)strlen(body));
     if(jbody) jtitle = (*env)->NewByteArray(env, (jsize)strlen(title));
@@ -333,4 +335,4 @@ int OS_ClipboardSetText(const char* text) { BGI_UNUSED(text); return 0; }
 OsPipeProc_t* OS_PipeProcStart(const char* const* argv) { BGI_UNUSED(argv); return NULL; }
 int OS_PipeProcRead(OsPipeProc_t* p, void* buf, int n) { BGI_UNUSED(p); BGI_UNUSED(buf); BGI_UNUSED(n); return -1; }
 void OS_PipeProcStop(OsPipeProc_t* p) { BGI_UNUSED(p); }
-void OS_PathNative(const char* path, char* out, size_t n) { OsPosix_Path(path, out, n); }
+void OS_PathNative(const char* path, char* out, size_t n) { OsPosix_ReadPath(path, out, n); }

@@ -336,6 +336,18 @@ int Gfx_SnapshotPrio(Gfx_t* g, int bmpNo, int prio)
 	return r;
 }
 
+int Gfx_SnapshotOffset(Gfx_t* g, int bmpNo, int x, int y, int prio)
+{
+	Bmp_t dst;
+	if(!BmpMgr_GetInfo(gGfxBmpMgr, &dst, bmpNo))
+		return 2;
+	if(dst.mode != PM_RGB32)
+		return 1;
+	Bmp_Fill(&dst, NULL, 0);
+	Compositor_SnapshotOffset(g->comp, &dst, x, y, prio);
+	return 0;
+}
+
 // "90 08": the global effect value (stored only; nothing reads it); the whole screen is repainted
 void Gfx_SetGlobalEffect(Gfx_t* g, int v)
 {

@@ -10,6 +10,7 @@ Requires Android 9 or later on an ARM64 device. The app provides the engine; you
 
 - Run directly from complete game folders without copying, or use copy import; manage multiple games and custom covers.
 - Separate settings and saves for each game.
+- Choose Simplified Chinese, Traditional Chinese, English, Japanese, Korean, Spanish, French, or German in About → App language. The interface follows the system language by default.
 - Import and export save ZIPs, including global progress.
 - Check script instructions after import and save the results.
 - Detect text encoding automatically, with manual SJIS, GBK, and UTF-8 selection.
@@ -21,11 +22,11 @@ Requires Android 9 or later on an ARM64 device. The app provides the engine; you
 ## Getting started
 
 1. Download an APK from [Releases](https://github.com/liukeyu91/openbgi-android/releases) and prepare a complete, extracted game directory.
-2. Select **Add game** (`添加游戏`) → **Use directory directly** (`直接使用目录`), grant storage access, and choose the game root containing `system.arc` or `ipl._bp`.
+2. Select **Add game** and choose the game root containing `system.arc` or `ipl._bp`. The full APK can play from the original directory. The SAF APK copies the selected folder into app storage using the system picker.
 3. Launch the game. If encoding detection is uncertain, preview the text and choose an encoding in **Game settings** (`游戏设置`).
 
-Direct directory mode stores only library metadata and settings in the app. Resources are read in place; saves and extracted translation resources stay in the original folder. Removing a library entry leaves that folder and its saves intact. Copy import remains available for a separate copy in app storage.
-Updating with the same package name and signing certificate preserves app data. Uninstalling removes internal app data; files and saves in directly linked folders remain at their original location.
+Direct directory mode reads game resources in place and stores saves and extracted translations in the app. Recognized saves are copied on first use. Copy import remains available for a separate copy of the entire game.
+Updating with the same package name and signing certificate preserves app data. Export app saves before removing a library entry or uninstalling.
 
 Import automatically extracts supported Chinese translation packages and applies recognized engine and encoding settings. Existing games can use **Process translation patch** (`处理汉化补丁`) from the game-card menu after exiting the game. Resource extraction runs locally on the device and supports external EVB, EVB embedded in an EXE, and CPK v2 with its matching key. Windows EXE and DLL code is not executed.
 
@@ -33,7 +34,7 @@ For MakingHD imports affected by the equal-size compression bug, update to **0.1
 
 The Android port is still under development. Compatibility needs to be verified per title. Static instruction checks and successful resource extraction do not establish full-game compatibility. Streamed BF_Movie formats remain unsupported; see the [movie implementation notes](docs/android-movie.md) (Chinese) for details.
 
-For 1.0, the new direct-folder flow and fixes passed host tests and Android builds; a fresh on-device/full-route regression pass is still pending. See [supported scope and known limitations](docs/known-issues.md).
+See the [1.0.1-android release notes](docs/android-1.0.1.md) and [known limitations](docs/known-issues.md) for changes and test coverage.
 
 ## AI collaboration
 

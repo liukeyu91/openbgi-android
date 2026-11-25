@@ -416,8 +416,7 @@ static void AlphaLz(uint8_t* buf, uint32_t bufLen, int pitch, const uint8_t* s, 
 		{
 			uint32_t tok, n;
 			int dx, dy;
-			uint8_t* d;
-			const uint8_t* src;
+			int64_t source;
 			if(pos + 1 >= len)
 				break;
 			tok = s[pos] | ((uint32_t)s[pos + 1] << 8);
@@ -429,15 +428,13 @@ static void AlphaLz(uint8_t* buf, uint32_t bufLen, int pitch, const uint8_t* s, 
 			if(dy > 0)
 				dy -= 8;
 			n = (tok >> 9) + 3;
-			d = buf + out;
-			src = d + dy * pitch + dx * 4;
-			if(src < buf || src >= buf + bufLen)
+			source = (int64_t)out + dy * pitch + dx * 4;
+			if(source < 0 || source >= bufLen)
 				break;
-			while(n-- && out < bufLen)
+			while(n-- && out < bufLen && source < bufLen)
 			{
-				*d = *src;
-				d += 4;
-				src += 4;
+				buf[out] = buf[source];
+				source += 4;
 				out += 4;
 			}
 		}
@@ -454,6 +451,174 @@ static void AlphaLz(uint8_t* buf, uint32_t bufLen, int pitch, const uint8_t* s, 
 			bitIdx = 0;
 		}
 	}
+}
+
+static void Quantization(float q[2][64], const uint8_t* table)
+{
+	uint32_t i;
+	for(i = 0; i < 64; i++)
+	{
+		double aan = gAan[i / 8] * gAan[i % 8];
+		q[0][i] = (float)(table[i] * aan);
+		q[1][i] = (float)(table[64 + i] * aan);
+	}
+}
+
+static void DecodeBand(int16_t* coef, uint32_t maxCount, uint32_t count, Bits_t* bits, const Huffman_t* dc, const Huffman_t* ac)
+{
+	memset(coef, 0, maxCount * sizeof *coef);
+	if(dc)
+		DecodeDc(coef, count, bits, dc);
+	if(ac)
+	{
+		uint32_t consumed = bits->pos < bits->len ? bits->pos : bits->len;
+		bits->p += consumed;
+		bits->len -= consumed;
+		bits->pos = 0;
+		DecodeAc(coef, count, bits, ac);
+	}
+}
+
+/* Read one of the frame's bounded Huffman tables. An all-zero table is
+ * valid and has no decoder, unlike a table that ends midway. */
+static int FrameTree(const uint8_t** stream, const uint8_t* end, CbgNode_t* nodes, uint32_t leaves, Huffman_t* decoder)
+{
+	uint32_t weights[256], i;
+	int root;
+	decoder->nodes = NULL;
+	for(i = 0; i < leaves; i++)
+	{
+		uint32_t used;
+		weights[i] = ReadVarint(*stream, end, &used);
+		if(!used || used > 5 || ((*stream)[used - 1] & 0x80))
+			return 0;
+		*stream += used;
+	}
+	root = BuildTree(nodes, weights, leaves);
+	if(root >= 0)
+		PrepareHuffman(decoder, nodes, (uint32_t)root, leaves);
+	return 1;
+}
+
+/* Mode 2 stores a block bitmap followed by 64 alpha samples per selected
+ * block. Decode each block before applying it, leaving other blocks intact. */
+static int AlphaBlocks(uint8_t* buf, uint32_t padW, uint32_t cols, uint32_t rows, const uint8_t* stream, uint32_t len)
+{
+	const uint8_t* end = stream + len;
+	uint32_t blocks = cols * rows, mapSize = (blocks + 7) / 8, total, i, k;
+	CbgNode_t nodes[2 * 256 - 1];
+	Huffman_t decoder;
+	uint8_t* map;
+	Bits_t bits;
+	if(len < 4)
+		return 0;
+	total = U32(stream);
+	stream += 4;
+	if(total < mapSize || total > mapSize + blocks * 64 ||
+		!FrameTree(&stream, end, nodes, 256, &decoder) || !decoder.nodes)
+		return 0;
+	bits = (Bits_t){stream, (uint32_t)(end - stream), 0, 0};
+	map = (uint8_t*)BGI_Alloc(mapSize);
+	for(i = 0; i < mapSize && bits.pos < bits.len; i++)
+		map[i] = (uint8_t)ReadSymbol(&bits, &decoder);
+	if(i != mapSize)
+	{
+		BGI_Free(map);
+		return 0;
+	}
+	for(k = 0; k < blocks && total - i >= 64; k++)
+		if(map[k >> 3] & (1u << (k & 7)))
+		{
+			uint8_t* dst = buf + ((size_t)(k / cols) * 8 * padW + (size_t)(k % cols) * 8) * 4 + 3;
+			uint8_t block[64];
+			uint32_t x, y, n;
+			for(n = 0; n < 64 && bits.pos < bits.len; n++)
+				block[n] = (uint8_t)ReadSymbol(&bits, &decoder);
+			if(n != 64)
+				break;
+			for(y = 0; y < 8; y++, dst += (size_t)padW * 4)
+				for(x = 0; x < 8; x++)
+					dst[x * 4] = block[y * 8 + x];
+			i += 64;
+		}
+	BGI_Free(map);
+	return 1;
+}
+
+/* A movie band has coefficients only for the blocks selected by its bitmap. */
+int Cbg2_Frame(const uint8_t* stream, uint32_t len, const uint8_t* quant, uint32_t w, uint32_t hgt, int alpha, uint8_t* buf)
+{
+	const uint8_t* end = stream + len;
+	const uint8_t* offsets = stream;
+	uint32_t padW = (w + 7) & ~7u, padH = (hgt + 7) & ~7u, cols = padW / 8, rows = padH / 8;
+	uint32_t mapSize = (cols + 7) / 8, bandCoefs = cols * 3 * 64;
+	uint32_t bufLen = padW * padH * 4, alphaOffset = 0, alphaMode = 1, dataStart, r;
+	CbgNode_t dcNodes[2 * DC_SYMBOLS - 1], acNodes[2 * AC_SYMBOLS - 1];
+	Huffman_t dc, ac;
+	float q[2][64];
+	int16_t* coef;
+
+	if(!FrameTree(&offsets, end, dcNodes, DC_SYMBOLS, &dc) ||
+		!FrameTree(&offsets, end, acNodes, AC_SYMBOLS, &ac) || (size_t)(end - offsets) / 4 < rows + 1)
+		return 0;
+	dataStart = (uint32_t)(offsets - stream) + (rows + 1) * 4;
+	if(alpha != CBG2_ALPHA_NONE)
+	{
+		alphaOffset = U32(offsets + rows * 4);
+		if(alphaOffset < dataStart || alphaOffset >= len)
+			return 0;
+		if(alpha == CBG2_ALPHA_MODE)
+		{
+			if(len - alphaOffset < 4)
+				return 0;
+			alphaMode = U32(stream + alphaOffset);
+			alphaOffset += 4;
+		}
+		if(alphaOffset >= len || (alphaMode != 1 && alphaMode != 2))
+			return 0;
+		if(alphaMode == 2 && !AlphaBlocks(buf, padW, cols, rows, stream + alphaOffset, len - alphaOffset))
+			return 0;
+	}
+	Quantization(q, quant);
+	coef = (int16_t*)BGI_Alloc(bandCoefs * sizeof *coef);
+	for(r = 0; r < rows; r++)
+	{
+		uint32_t off = U32(offsets + r * 4), next = U32(offsets + (r + 1) * 4);
+		uint32_t count, used, planeCoefs, block = 0, c;
+		const uint8_t* bitmap;
+		Bits_t bits;
+		if(next > len)
+			next = len;
+		if(off < dataStart || next <= off || next - off <= mapSize)
+			continue;
+		bitmap = stream + off;
+		count = ReadVarint(bitmap + mapSize, stream + next, &used);
+		if(!used || used > 5 || (bitmap[mapSize + used - 1] & 0x80))
+			continue;
+		if(count > bandCoefs)
+			count = bandCoefs;
+		planeCoefs = count / 8 / 3 * 8;
+		bits = (Bits_t){bitmap + mapSize + used, next - off - mapSize - used, 0, 0};
+		DecodeBand(coef, bandCoefs, count, &bits, dc.nodes ? &dc : NULL, ac.nodes ? &ac : NULL);
+		for(c = 0; c < cols && (block + 1) * 64 <= planeCoefs; c++)
+			if(bitmap[c >> 3] & (1u << (c & 7)))
+			{
+				uint8_t plane[3][64];
+				for(int p = 0; p < 3; p++)
+					Idct(plane[p], coef + (uint32_t)p * planeCoefs + block * 64, q[p ? 1 : 0]);
+				ToBgr(buf + ((size_t)r * 8 * padW + (size_t)c * 8) * 4, (int)padW * 4, plane[0], plane[1], plane[2]);
+				block++;
+			}
+	}
+	BGI_Free(coef);
+	if(alpha == CBG2_ALPHA_NONE)
+	{
+		for(uint32_t i = 3; i < bufLen; i += 4)
+			buf[i] = 0;
+	}
+	else if(alphaMode == 1)
+		AlphaLz(buf, bufLen, (int)padW * 4, stream + alphaOffset, len - alphaOffset);
+	return 1;
 }
 
 // ---- the decoder ------------------------------------------------------------------------------
@@ -512,12 +677,7 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 		BGI_Free(table);
 		return 0x80000004u;
 	}
-	for(i = 0; i < 64; i++)
-	{
-		double aan = gAan[i / 8] * gAan[i % 8];
-		q[0][i] = (float)(table[i] * aan);
-		q[1][i] = (float)(table[64 + i] * aan);
-	}
+	Quantization(q, table);
 	BGI_Free(table);
 
 	// the stream: the file size is not in the header, so the readers stop at a generous bound
@@ -564,20 +724,11 @@ uint32_t Cbg2_Decode(const void* src, void* dst)
 		count = ReadVarint(band + bmBytes, end, &len);
 		if(count > bandCoefs)
 			count = bandCoefs;
-		memset(coef, 0, bandCoefs * sizeof(int16_t));
 		b.p = band + bmBytes + len;
 		b.len = next > off + bmBytes + len ? next - off - bmBytes - len : streamLen;
 		b.pos = 0;
 		b.bit = 0;
-		if(dcRoot >= 0)
-			DecodeDc(coef, count, &b, &dcDecoder);
-		if(acRoot >= 0)
-		{
-			b.p += b.pos;
-			b.len = b.len > b.pos ? b.len - b.pos : 0;
-			b.pos = 0;
-			DecodeAc(coef, count, &b, &acDecoder);
-		}
+		DecodeBand(coef, bandCoefs, count, &b, dcRoot >= 0 ? &dcDecoder : NULL, acRoot >= 0 ? &acDecoder : NULL);
 		for(c = 0; c < cols; c++)
 		{
 			int p;

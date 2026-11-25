@@ -833,6 +833,11 @@ void OS_EditSetFont(const char* face, int height, int width)
 	BGI_UNUSED(width);
 }
 
+void OS_EditSetAlignment(int mode)
+{
+	(void)mode;
+}
+
 void OS_EditLimitText(int maxChars)
 {
 	BGI_UNUSED(maxChars);

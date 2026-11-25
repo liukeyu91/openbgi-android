@@ -153,11 +153,11 @@ int Text_MakeStyle(int32_t out[5], int on, int dxPct, int dyPct, uint32_t shadow
 		memset(out, 0, 5 * sizeof(int32_t));
 		return 1;
 	}
-	if(gEngine->gen >= GEN_1_494 && (uint32_t)on > 2)
+	if(gEngine->gen >= GEN_1_492 && (uint32_t)on > 2)
 		return 0;
 	if(dxPct < 0 || dxPct > 100 || dyPct < 0 || dyPct > 100 || (uint32_t)level > 0x100)
 		return 0;
-	out[0] = gEngine->gen >= GEN_1_494 ? on : 1;
+	out[0] = gEngine->gen >= GEN_1_492 ? on : 1;
 	out[1] = dxPct;
 	out[2] = dyPct;
 	out[3] = (int32_t)shadowColour;

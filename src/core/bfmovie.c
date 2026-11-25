@@ -23,20 +23,46 @@
  * rather than an out-of-bounds read.
  */
 #include "bgi/bfmovie.h"
+#include "bgi/codec.h"
+
+#define STREAMED_QUANT 0x40u
+#define STREAMED_OFFSETS 0xC0u
+
+static int IsStreamed(const BfMovieHeader_t* h)
+{
+	return h->type == 0x10000u || h->type == 0x10001u;
+}
+
+static uint32_t TableOffset(const BfMovieHeader_t* h)
+{
+	return IsStreamed(h) ? STREAMED_OFFSETS : 0x40u;
+}
 
 // 1 when the magic matches and the header with its offset table fits in `size`
 int BfMovie_Check(const void* data, uint32_t size)
 {
 	const BfMovieHeader_t* h = (const BfMovieHeader_t*)data;
-	if(size < 0x40 || memcmp(h->magic, BFMOVIE_MAGIC, 16) != 0)
+	uint32_t head;
+	if(!data || size < 0x40 || memcmp(h->magic, BFMOVIE_MAGIC, 16) != 0)
 		return 0;
-	return size >= 0x40 + (uint32_t)h->frames * 4;
+	head = TableOffset(h);
+	return size >= head && h->frames <= (size - head) / 4;
 }
 
-// 1 for type 0, the only type decodable here
 int BfMovie_IsSimple(const void* data)
 {
 	return ((const BfMovieHeader_t*)data)->type == 0;
+}
+
+int BfMovie_CanDecode(const void* data)
+{
+	return BfMovie_IsSimple(data) || IsStreamed((const BfMovieHeader_t*)data);
+}
+
+uint32_t BfMovie_StreamIndexSize(const void* header, uint32_t size)
+{
+	const BfMovieHeader_t* h = (const BfMovieHeader_t*)header;
+	return BfMovie_Check(header, size) && IsStreamed(h) ? STREAMED_OFFSETS + h->frames * 4 : 0;
 }
 
 // ---- stage 0: varints ----------------------------------------------------------------
@@ -367,6 +393,54 @@ done:
 	BGI_Free(ref);
 }
 
+/* Streamed frames modify a padded picture in place. Copy around the
+ * decoder for cropped dimensions or a destination with extra row bytes. */
+int BfMovie_DecodeStreamed(const void* index, const uint8_t* frame, uint32_t len, uint8_t* dst, int pitch)
+{
+	const BfMovieHeader_t* h = (const BfMovieHeader_t*)index;
+	uint32_t w = h->width, height = h->height, padW = (w + 7) & ~7u, padH = (height + 7) & ~7u;
+	const uint8_t* quant = (const uint8_t*)h + STREAMED_QUANT;
+	int alpha = h->bpp == 24 ? CBG2_ALPHA_NONE : h->type == 0x10000u ? CBG2_ALPHA_PLAIN : CBG2_ALPHA_MODE;
+	uint8_t* buf;
+	int ok;
+	if((h->bpp != 24 && h->bpp != 32) || !w || !height || w > 0x4000 || height > 0x4000 ||
+		pitch < 0 || (uint32_t)pitch < w * 4)
+		return 0;
+	if(padW == w && padH == height && (uint32_t)pitch == w * 4)
+		return Cbg2_Frame(frame, len, quant, w, height, alpha, dst);
+	buf = (uint8_t*)BGI_Calloc((size_t)padW * padH * 4);
+	for(uint32_t y = 0; y < height; y++)
+		memcpy(buf + (size_t)y * padW * 4, dst + (size_t)y * pitch, (size_t)w * 4);
+	ok = Cbg2_Frame(frame, len, quant, w, height, alpha, buf);
+	if(ok)
+		for(uint32_t y = 0; y < height; y++)
+			memcpy(dst + (size_t)y * pitch, buf + (size_t)y * padW * 4, (size_t)w * 4);
+	BGI_Free(buf);
+	return ok;
+}
+
+static uint32_t ReadFrameOffset(const uint8_t* table, uint32_t frame)
+{
+	const uint8_t* p = table + frame * 4;
+	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+uint32_t BfMovie_FrameRange(const void* index, uint32_t size, uint32_t frame, uint32_t* start)
+{
+	const BfMovieHeader_t* h = (const BfMovieHeader_t*)index;
+	const uint8_t* table;
+	uint32_t head, end;
+	if(!BfMovie_Check(index, size) || frame >= h->frames || !BfMovie_CanDecode(index))
+		return 0;
+	head = TableOffset(h);
+	table = (const uint8_t*)index + head;
+	*start = ReadFrameOffset(table, frame);
+	end = frame + 1 < h->frames ? ReadFrameOffset(table, frame + 1) : size;
+	if(*start < head + h->frames * 4 || end > size || end <= *start)
+		return 0;
+	return end - *start;
+}
+
 /* decode frame `frame` into dst (see bfmovie.h); a frame runs from its
  * offset to the next frame's offset or the end of the file.  1 on success,
  * 0 when the header, the frame index or the frame's bounds are bad or the
@@ -377,15 +451,10 @@ int BfMovie_DecodeFrame(const void* data, uint32_t size, uint32_t frame, uint8_t
 	const uint8_t* file = (const uint8_t*)data;
 	uint32_t start, len, unpacked;
 	uint8_t* pixels;
-	if(!BfMovie_Check(data, size) || frame >= h->frames)
+	if(!dst || !(len = BfMovie_FrameRange(data, size, frame, &start)))
 		return 0;
-	start = h->offset[frame];
-	if(start >= size)
-		return 0;
-	len = (frame + 1 < h->frames ? h->offset[frame + 1] : size);
-	if(len > size || len <= start)
-		return 0;
-	len -= start;
+	if(IsStreamed(h))
+		return BfMovie_DecodeStreamed(h, file + start, len, dst, pitch);
 	// a delta frame's pixel stream may read two bytes past its end
 	pixels = Unpack(file + start, len, frame ? 2 : 0, &unpacked);
 	if(!pixels)

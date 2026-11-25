@@ -584,11 +584,20 @@ int Compositor_Render(Compositor_t* c, Rect_t* outRects)
  * stands in for the screen; the dirty list is not touched. */
 void Compositor_Snapshot(Compositor_t* c, const Bmp_t* dst, int prio)
 {
+	Compositor_SnapshotOffset(c, dst, 0, 0, prio);
+}
+
+void Compositor_SnapshotOffset(Compositor_t* c, const Bmp_t* dst, int x, int y, int prio)
+{
 	ScreenBmp_t s;
 	ObjNode_t* n;
 	uint32_t limit = ((uint32_t)prio << 20) | 0xfffffu;
+	int64_t left = -(int64_t)x, top = -(int64_t)y;
+	int64_t right = left + dst->w - 1, bottom = top + dst->h - 1;
+	if(left < INT32_MIN || top < INT32_MIN || right > INT32_MAX || bottom > INT32_MAX)
+		return;
 	s.bmp = *dst;
-	Rect_FromBmp(&s.screen, dst);
+	s.screen = (Rect_t){(int32_t)left, (int32_t)top, (int32_t)right, (int32_t)bottom};
 	for(n = c->objects; n; n = n->next)
 	{
 		DispObj_t* o = n->obj;

@@ -82,7 +82,10 @@ static void TestDefaults(void)
 	CHECK(Engine_DetectGame((const uint8_t*)"x\0SenNoHatouTsukisomeNoKouki\0", 29) != NULL && gEngine->gen == GEN_1_636);
 	{
 		const uint8_t making[] = "MakingLoversFullHD";
-		CHECK(Engine_DetectGame(making, sizeof making) != NULL && gEngine->gen == GEN_1_659 && gEngine->screenModes == 16);
+		CHECK(Engine_DetectGame(making, sizeof making) != NULL && strcmp(gEngine->name, "1.659.8") == 0);
+		CHECK(gEngine->gen == GEN_1_659 && gEngine->compat == 172);
+		CHECK(gEngine->bootCode == 0x800000 && gEngine->bootData == 0x400000);
+		CHECK(gEngine->seSlots == 128 && gEngine->screenModes == 16);
 		CHECK(!strcmp(Engine_ProductName(), "MakingLoversFullHD"));
 	}
 	CHECK(Engine_GameAt(0, &g) && strcmp(g.match, "NurseryRhymeTrial") == 0 && strcmp(g.product, "NurseryRhyme") == 0);

@@ -23,6 +23,7 @@ static struct
 	X11Field_t field;    // the text and its editing state
 	struct OsFont* font; // the font of OS_EditSetFont, NULL before one was set
 	int fontSize;        // its size as requested
+	int alignment;
 	char face[0x80];     // its face name (Shift-JIS)
 	uint32_t rgb;        // the text colour, 0x00RRGGBB
 } gEdit;
@@ -42,6 +43,7 @@ void X11Edit_Create(void)
 {
 	memset(&gEdit, 0, sizeof gEdit);
 	gEdit.w = gEdit.h = 1;
+	gEdit.alignment = 1;
 	gEdit.rgb = 0;
 	X11Field_SetText(&gEdit.field, "");
 }
@@ -68,13 +70,18 @@ void X11Edit_Present(void)
 	if(gX11Handlers.edit_paint)
 		gX11Handlers.edit_paint();
 	gX11Capture.active = 0;
-	X11Field_Draw(&gEdit.field, gX11Capture.pix, w, w, h, 0, 0, w, h, gEdit.font, gEdit.rgb, 1, gEdit.focus, 0);
+	X11Field_Draw(&gEdit.field, gX11Capture.pix, w, w, h, 0, 0, w, h, gEdit.font, gEdit.rgb, gEdit.alignment, gEdit.focus, 0);
 	s.pixels = gX11Capture.pix;
 	s.pitch = w * 4;
 	s.width = w;
 	s.height = h;
 	s.bpp = 32;
 	X11_BlitSurface(&gX11MainDc, gEdit.x, gEdit.y, w, h, &s, 0, 0, w, h, 0, NULL);
+}
+
+void OS_EditSetAlignment(int mode)
+{
+	gEdit.alignment = mode;
 }
 
 // show: paint the entry; hide: drop the focus and have the engine repaint the picture it covered

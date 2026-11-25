@@ -36,11 +36,14 @@ void SplitPath(const char* path, char* drive, char* dir, char* fname, char* ext)
 #define TEXT_SJIS 0 // code page 932
 #define TEXT_UTF8 1 // code page 65001
 #define TEXT_GBK  2 // code page 936
+#define TEXT_BIG5 3 // code page 950
 
 extern int gTextUtf8; // the mode: 1 in UTF-8 mode
 extern int gTextGbk;  // the mode: 1 in GBK mode
+extern int gTextEncoding;
+#define gTextBig5 (gTextEncoding == TEXT_BIG5)
 
-void Text_SetEncoding(int mode); // TEXT_SJIS / TEXT_UTF8 / TEXT_GBK (also told to the OS layer)
+void Text_SetEncoding(int mode); // TEXT_SJIS / TEXT_UTF8 / TEXT_GBK / TEXT_BIG5
 
 /* the character at `s`: its byte length (1 or 2 in Shift-JIS, 1 .. 4 in
  * UTF-8; a surrogate pair written as two 3-byte sequences counts as one

@@ -85,13 +85,14 @@ static int64_t CodePointer(const Dis_t* d, uint32_t v)
 	return -1;
 }
 
-/* 1 when the instruction ends its flow: "14" jmp, "17" ret, "12" jmp_rel,
+/* 1 when the instruction ends its flow: "14" jmp, "17" ret, relative jmp,
  * or a system call the thread never returns from.  A conditional jump
  * falls through, so it does not. */
 static int EndsFlow(const AsmInsn_t* in)
 {
 	if(in->fam == 0)
-		return in->op == 0x14 || in->op == 0x17 || in->op == 0x12;
+		return in->op == 0x14 || in->op == 0x17 || in->op == 0x13 ||
+			(in->op == 0x12 && in->kinds[0] == ASM_OPD_SLEBREL);
 	if(in->fam == 0x80)
 		return in->op == 0x45 || in->op == 0x6a || in->op == 0x6b; // exit_thread, quit, reboot
 	return 0;
@@ -156,7 +157,7 @@ static void Follow(Dis_t* d, uint32_t off)
 		}
 		else if(in.targetKind == 2)
 			d->label[in.target] |= L_DATA;
-		if(in.fam == 0 && (in.op == 0x02 || in.op == 0x18))
+		if(in.fam == 0 && (in.op == 0x02 || (in.op == 0x18 && d->gen != GEN_1_680)))
 		{ // push_i32 / load_abs: a tagged pointer into the code area refers to data
 			int64_t p = CodePointer(d, (uint32_t)in.v[0]);
 			if(p >= 0)
@@ -391,21 +392,43 @@ static const char* Mnemonic(const Dis_t* d, const AsmInsn_t* in, char* buf, size
  * (`code(label)` for the pointer), and a comment previewing the string
  * when the instruction refers to one - through its data operand or, for
  * "0B" store_inline, in its inline bytes */
+static void WriteByteLines(Dis_t* d, uint32_t off, uint32_t end)
+{
+	while(off < end)
+	{
+		uint32_t take = end - off > 16 ? 16 : end - off;
+		LinePrefix(d, off, take);
+		fputs("\t.db ", d->out);
+		for(uint32_t i = 0; i < take; ++i)
+			fprintf(d->out, "%s0x%02x", i ? ", " : "", d->area[off + i]);
+		fputc('\n', d->out);
+		off += take;
+	}
+}
+
 static void WriteCode(Dis_t* d, uint32_t off, const AsmInsn_t* in)
 {
 	char text[0x400], lbl[32], mn[128];
 	const char* comment = NULL;
+	if(!in->fam && (in->op == 0x03 || in->op == 0xe3) && in->bytes)
+	{
+		WriteByteLines(d, off, off + in->len);
+		return;
+	}
 	LinePrefix(d, off, in->len);
 	if(in->targetKind && in->target <= d->size)
 	{ // the operand that is a target is printed as its label
 		Label(d, in->target, lbl, sizeof lbl);
 		Mnemonic(d, in, mn, sizeof mn);
-		if(in->fam == 0 && (in->op == 0x15 || in->op == 0x3b) && in->count == 2)
+		if(in->fam == 0 && in->op == 0x37 && in->count == 3)
+			snprintf(text, sizeof text, "%s %d, %s, %lld", mn, (int)in->v[0], lbl, (long long)in->v[2]);
+		else if(in->fam == 0 && (in->op == 0x15 || in->op == 0x3b) && in->count == 2)
 			snprintf(text, sizeof text, "%s %d, %s", mn, (int)in->v[0], lbl); // jcc / jcmp: the condition first
 		else
 			snprintf(text, sizeof text, "%s %s", mn, lbl);
 	}
-	else if(in->fam == 0 && (in->op == 0x02 || in->op == 0x18) && CodePointer(d, (uint32_t)in->v[0]) >= 0 &&
+	else if(in->fam == 0 && (in->op == 0x02 || (in->op == 0x18 && d->gen != GEN_1_680)) &&
+		CodePointer(d, (uint32_t)in->v[0]) >= 0 &&
 		d->kind[CodePointer(d, (uint32_t)in->v[0])] != K_INSIDE)
 	{ // (a tagged value pointing into the middle of an instruction is a constant, printed as it is)
 		Label(d, (uint32_t)CodePointer(d, (uint32_t)in->v[0]), lbl, sizeof lbl);
@@ -457,19 +480,11 @@ static void WriteData(Dis_t* d, uint32_t off, uint32_t end)
 			continue;
 		}
 		{ // bytes up to the next string start or the end, 16 per line
-			uint32_t stop = off + 1, i;
+			uint32_t stop = off + 1;
 			while(stop < end && !(StringLen(d, stop, end) >= 3))
 				stop++;
-			while(off < stop)
-			{
-				uint32_t take = stop - off > 16 ? 16 : stop - off;
-				LinePrefix(d, off, take);
-				fputs("\t.db ", d->out);
-				for(i = 0; i < take; i++)
-					fprintf(d->out, "%s0x%02x", i ? ", " : "", d->area[off + i]);
-				fputc('\n', d->out);
-				off += take;
-			}
+			WriteByteLines(d, off, stop);
+			off = stop;
 		}
 	}
 }

@@ -247,7 +247,7 @@ final class SaveRestore {
     }
 
     /** Small bounded JSON reader: duplicate keys, trailing data and noninteger numbers are rejected. */
-    private static final class Json {
+    static final class Json {
         final String input;int at;
         Json(String input){this.input=input;}
         static Object parse(String input)throws IOException {

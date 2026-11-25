@@ -51,7 +51,7 @@ int IsKinsokuChar(uint32_t ch)
 	static uint32_t codes[64];
 	static int count = 0, mode = -1;
 	int i;
-	int textMode = gTextGbk ? TEXT_GBK : gTextUtf8;
+	int textMode = gTextEncoding;
 	if(mode != textMode)
 	{
 		const char* p = kKinsoku;
@@ -222,13 +222,15 @@ void SplitPath(const char* path, char* drive, char* dir, char* fname, char* ext)
 
 int gTextUtf8;
 int gTextGbk;
+int gTextEncoding;
 
 // "81 00": select TEXT_SJIS or TEXT_UTF8 for the script text; the OS layer follows (window titles, message boxes, font rendering)
 void Text_SetEncoding(int mode)
 {
 	gTextUtf8 = mode == TEXT_UTF8;
 	gTextGbk = mode == TEXT_GBK;
-	OS_SetTextEncoding(gTextGbk ? OS_TEXT_GBK : gTextUtf8 ? OS_TEXT_UTF8 : OS_TEXT_SJIS);
+	gTextEncoding = mode;
+	OS_SetTextEncoding(mode);
 }
 
 // one UTF-8 sequence, trusting its continuation bytes; the byte count
@@ -255,7 +257,7 @@ static int Utf8Decode(uint32_t* out, const char* s)
 
 /* The character at s decoded as `mode` says: TEXT_RAW takes one byte as
  * it is, TEXT_UTF8 one sequence (a surrogate pair written as two
- * sequences is joined), TEXT_SJIS and TEXT_GBK one or two bytes. *out receives the
+ * sequences is joined), legacy encodings one or two bytes. *out receives the
  * code, *wide (when given) whether it occupies a full-width cell (as
  * TextIsWide); the byte length is returned. */
 int TextGetCharMode(uint32_t* out, int* wide, const char* s, uint32_t mode)
@@ -289,11 +291,11 @@ int TextGetCharMode(uint32_t* out, int* wide, const char* s, uint32_t mode)
 			*wide = c >= 0x80 && !(c >= 0xff61 && c < 0xffa0);
 		return len;
 	}
-	if(mode == TEXT_GBK)
+	if(mode == TEXT_GBK || mode == TEXT_BIG5)
 	{
 		c = (uint8_t)s[0];
 		// 0xFFxx is reserved for the engine's custom glyphs.
-		len = c == 0xff && s[1] ? 2 : OS_GbkCharLen(s);
+		len = c == 0xff && s[1] ? 2 : mode == TEXT_BIG5 ? OS_Big5CharLen(s) : OS_GbkCharLen(s);
 		if(len == 2)
 			c = (c << 8) | (uint8_t)s[1];
 	}
@@ -308,7 +310,7 @@ int TextGetCharMode(uint32_t* out, int* wide, const char* s, uint32_t mode)
 // the character at s in the current encoding: its code and byte length
 int TextGetChar(uint32_t* out, const char* s)
 {
-	return TextGetCharMode(out, NULL, s, gTextGbk ? TEXT_GBK : gTextUtf8 ? TEXT_UTF8 : TEXT_SJIS);
+	return TextGetCharMode(out, NULL, s, gTextEncoding);
 }
 
 // the byte length of the character at s in the current encoding
@@ -375,7 +377,7 @@ uint32_t TextTableChar(const char** p)
 	uint32_t c;
 	int dbcs = SjisGetChar(&c, *p);
 	*p += dbcs ? 2 : 1;
-	if(gTextUtf8 || gTextGbk)
+	if(gTextUtf8 || gTextGbk || gTextBig5)
 	{
 		if(dbcs)
 			c = OS_SjisToCodePoint((uint16_t)c);
@@ -386,6 +388,11 @@ uint32_t TextTableChar(const char** p)
 			// CP936 uses the middle dot where CP932 uses the katakana middle dot.
 			uint16_t gbk = OS_CodePointToGbk(c == 0x30fb ? 0xb7 : c);
 			return gbk ? gbk : UINT32_MAX;
+		}
+		if(gTextBig5)
+		{
+			uint16_t big5 = OS_CodePointToBig5(c == 0x30fb ? 0xb7 : c);
+			return big5 ? big5 : UINT32_MAX;
 		}
 	}
 	return c;

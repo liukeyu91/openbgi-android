@@ -302,7 +302,8 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 #ifdef BGI_ANDROID
 	// Match the actual family instead of assuming a vendor's TTC face order.
 	if((strstr(out,"NotoSansCJK-")||strstr(out,"NotoSerifCJK-"))&&strstr(out,".ttc")){
-		const char* language=ContainsNoCase(utf8," CJK SC")?" CJK SC":ContainsNoCase(utf8," CJK JP")?" CJK JP":gOsTextGbk?" CJK SC":NULL;
+		const char* language=ContainsNoCase(utf8," CJK SC")?" CJK SC":ContainsNoCase(utf8," CJK JP")?" CJK JP":
+			ContainsNoCase(utf8," CJK TC")||gOsTextBig5?" CJK TC":gOsTextGbk?" CJK SC":NULL;
 		if(language&&FtInit()){
 			FT_Face candidate;
 			if(!FT_New_Face(gFt,out,0,&candidate)){
@@ -317,6 +318,31 @@ static int ResolveFace(const char* sjisFace, int bold, int italic, char* out, si
 #endif
 	return 1;
 }
+
+#ifdef BGI_ANDROID
+int OsPosix_MissingGlyphs(const char* family, uint32_t* codePoints, int count)
+{
+	char prior[sizeof gFontFamily], path[1024];
+	int index, missing = 0;
+	FT_Face face;
+	memcpy(prior, gFontFamily, sizeof prior);
+	OsPosix_SetFontFamily(family);
+	int found = ResolveFace("", 0, 0, path, sizeof path, &index);
+	memcpy(gFontFamily, prior, sizeof prior);
+	if(!found || !FtInit() || FT_New_Face(gFt, path, index, &face))
+		return -1;
+	if(FT_Select_Charmap(face, FT_ENCODING_UNICODE))
+	{
+		FT_Done_Face(face);
+		return -1;
+	}
+	for(int i = 0; i < count; ++i)
+		if(!FT_Get_Char_Index(face, codePoints[i]))
+			codePoints[missing++] = codePoints[i];
+	FT_Done_Face(face);
+	return missing;
+}
+#endif
 
 // the shared face of a file and index: another reference to an open one, or a newly loaded one; NULL when FreeType cannot load it
 static FaceRec_t* FaceAcquire(const char* path, int index)
@@ -371,19 +397,18 @@ static void FaceRelease(FaceRec_t* r)
 
 // ---- opening -------------------------------------------------------------------
 
-/* GDI's cell is usWinAscent + usWinDescent of the OS/2 table (the hhea
- * values when there is none); the font is scaled so that this sum is
- * `height` pixels and the baseline sits at the scaled ascent */
+/* Scale the selected font's cell to the requested height. Noto CJK and
+ * Source Han need the typographic cell to keep the script's character shape. */
 static void CellMetrics(FT_Face face, FT_Pos* ascUnits, FT_Pos* descUnits)
 {
 	const TT_OS2* os2 = (const TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-#ifdef BGI_ANDROID
-	/* Noto CJK's Win metrics reserve space beyond the CJK em for marks.
-	 * Use its typographic cell in every text encoding: changing how bytes
-	 * are decoded must not change the aspect ratio of the same glyph. */
-	if(os2 && face->family_name &&
-		(strncmp(face->family_name, "Noto Sans CJK", 13) == 0 ||
-		 strncmp(face->family_name, "Noto Serif CJK", 14) == 0) &&
+	const char* family = face->family_name;
+	if(os2 && family &&
+		(strncmp(family, "Noto Sans CJK", 13) == 0 ||
+		 strncmp(family, "Noto Serif CJK", 14) == 0 ||
+		 strncmp(family, "Source Han Sans", 15) == 0 ||
+		 strncmp(family, "Source Han Serif", 16) == 0 ||
+		 strcmp(family, "Noto Sans SC") == 0 || strcmp(family, "Noto Serif SC") == 0) &&
 		os2->sTypoAscender > 0 && os2->sTypoDescender <= 0 &&
 		os2->sTypoAscender - os2->sTypoDescender == face->units_per_EM)
 	{
@@ -391,7 +416,6 @@ static void CellMetrics(FT_Face face, FT_Pos* ascUnits, FT_Pos* descUnits)
 		*descUnits = -os2->sTypoDescender;
 		return;
 	}
-#endif
 	if(os2 && (os2->usWinAscent || os2->usWinDescent))
 	{
 		*ascUnits = os2->usWinAscent;
@@ -439,7 +463,7 @@ static int RegisterFont(const char* path,const void* data,uint32_t bytes)
 int OS_FontAddFile(const char* path)
 {
 	char native[0x400];
-	OsPosix_Path(path,native,sizeof native);
+	OsPosix_ReadPath(path,native,sizeof native);
 	int result=RegisterFont(native,NULL,0);
 #ifdef BGI_HAVE_FONTCONFIG
 	if(result&&FcInit())FcConfigAppFontAddFile(NULL,(const FcChar8*)native);
@@ -487,7 +511,7 @@ static int FamilyToText(const char* family,char* out,size_t size)
 	size_t at=0;const uint8_t* p=(const uint8_t*)family;
 	while(*p&&at+3<size){
 		int len=1;uint32_t cp=OsCommon_Utf8SeqLen(p)?OsCommon_Utf8Decode(p,&len):*p;
-		if(gOsTextGbk){uint16_t code=OS_CodePointToGbk(cp);if(!code&&cp)return -1;if(code>255)out[at++]=(char)(code>>8);out[at++]=(char)code;}
+		if(gOsTextGbk || gOsTextBig5){uint16_t code=OsCommon_CodePointToChinese(cp);if(!code&&cp)return -1;if(code>255)out[at++]=(char)(code>>8);out[at++]=(char)code;}
 		else {int n=OsPosix_UnicodeToSjis(cp,out+at);if(!n)return -1;at+=(size_t)n;}
 		p+=len;
 	}
@@ -571,9 +595,11 @@ int OS_FontEnumFaces(char* buf, int charset, int* outBytes)
 #elif defined(BGI_ANDROID)
     /* Games may use a do/while over this list and assume at least one
      * installed face. These ASCII family names are valid in all text modes. */
-    static const char faces[] = "Noto Sans CJK SC\0Noto Serif CJK SC\0";
+    static const char simplified[] = "Noto Sans CJK SC\0Noto Serif CJK SC\0";
+    static const char traditional[] = "Noto Sans CJK TC\0Noto Serif CJK TC\0";
+    const char* faces = gOsTextBig5 ? traditional : simplified;
     BGI_UNUSED(charset);
-    bytes = (int)sizeof faces - 1;
+    bytes = (int)(gOsTextBig5 ? sizeof traditional : sizeof simplified) - 1;
     count = 2;
     if(buf)
         memcpy(buf, faces, (size_t)bytes);
@@ -587,7 +613,7 @@ int OS_FontEnumFaces(char* buf, int charset, int* outBytes)
 #ifdef BGI_HAVE_FONTCONFIG
 		for(int i=0;i<nseen;i++)if(!strncmp(seen[i],name,sizeof seen[i]))duplicate=1;
 #elif defined(BGI_ANDROID)
-		if(!strcmp(name,"Noto Sans CJK SC")||!strcmp(name,"Noto Serif CJK SC"))duplicate=1;
+		if(!strcmp(name,faces)||!strcmp(name,faces+strlen(faces)+1))duplicate=1;
 #endif
 		if(duplicate)continue;
 		if(buf)memcpy(buf+bytes,name,(size_t)n+1);
@@ -926,13 +952,13 @@ int OS_FontCharAdvance(OsFont_t* f, const char* sjis, int len)
 static int NextChar(const char* s, uint32_t* cp, int gbk)
 {
 	int len = 1;
-	if(gOsTextGbk)
+	if(gOsTextGbk || gOsTextBig5)
 	{
 		const uint8_t* bytes = (const uint8_t*)s;
 		if(gbk)
 		{
-			len = OS_GbkCharLen(s);
-			*cp = OS_GbkToCodePoint(len == 2 ? (uint16_t)((bytes[0] << 8) | bytes[1]) : bytes[0]);
+			len = OsCommon_ChineseCharLen(s);
+			*cp = OsCommon_CodePoint(s, len, OsPosix_SjisChar);
 			return len;
 		}
 		// The back end's own UI still uses its CP932 literals.

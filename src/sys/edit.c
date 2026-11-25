@@ -17,11 +17,13 @@
 #include "bgi/display.h"
 #include "bgi/gfx/bmpops.h"
 #include "bgi/os.h"
+#include "bgi/version.h"
 
 static char gEditText[EDIT_TEXT_MAX]; // empty until "B0 26" (the control itself is created with MSG_EDIT_DEFAULT_TEXT)
 static Rect_t gEditRect;              // the client rectangle of the last Edit_Setup, inclusive
 static uint32_t gEditColour;          // COLORREF (0x00BBGGRR)
 static int gEditWidthPct = 100;       // "B0 22": the glyph width of the font in percent of the normal
+static int gEditAlignment;            // "B0 2A": the horizontal alignment at the next setup
 
 // "B0 24": show or hide the control
 void Edit_Show(int show)
@@ -48,6 +50,8 @@ int Edit_Setup(int x, int y, int w, int h, int fontNo, int size, int maxLen, int
 	if(maxLen < 1 || maxLen > 0x100)
 		return 4;
 
+	if(gEngine->gen >= GEN_1_636)
+		OS_EditSetAlignment(gEditAlignment);
 	Edit_Show(1);
 	OS_EditMove(x, y, w, h);
 	OS_EditSetFont(face, size, size * gEditWidthPct / 100 / 2);
@@ -70,6 +74,14 @@ int Edit_SetFontWidthPct(int pct)
 	if(pct < 25 || pct > 200)
 		return 0;
 	gEditWidthPct = pct;
+	return 1;
+}
+
+int Edit_SetAlignment(uint32_t mode)
+{
+	if(mode > 2)
+		return 0;
+	gEditAlignment = (int)mode;
 	return 1;
 }
 

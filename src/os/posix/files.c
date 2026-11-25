@@ -7,12 +7,11 @@
  *           attributes and times, directory enumeration, and the one
  *           fixed pseudo drive "C:" that stands for the game directory
  *
- * Every path goes through OsPosix_Path first (paths.c), so the engine's
- * Shift-JIS Windows paths land under the game directory with their case
- * corrected.  The Windows attributes are approximated: a directory, the
+ * The path resolver (paths.c) maps the engine's Shift-JIS Windows paths
+ * to case-corrected POSIX paths. The Windows attributes are approximated: a directory, the
  * owner's write bit as read-only, a leading '.' as hidden.
  */
-#include "posix_internal.h"
+#include "disc_internal.h"
 
 // ---- files -------------------------------------------------------------------------------------
 
@@ -20,15 +19,32 @@ struct OsFile
 {
 	FILE* f;             // the stream
 	char path[PATH_MAX]; // the POSIX path it was opened with
+	int writable;
+	int isDisc;
+	DiscHandle_t disc;
+	uint64_t discTime;
 };
+
+static int OpenDiscEntry(OsFile_t* f)
+{
+	const VolEntry_t* entry = OsPosix_DiscPath(f->path, 1);
+	if(!entry || !Disc_Open(entry, &f->disc))
+		return 0;
+	f->isDisc = 1;
+	f->discTime = entry->mtime;
+	return 1;
+}
 
 // fopen "rb" of the converted path; NULL when it cannot be opened or is a directory (as CreateFile)
 OsFile_t* OS_FileOpenRead(const char* path)
 {
 	OsFile_t* f = (OsFile_t*)calloc(1, sizeof *f);
 	struct stat st;
-	OsPosix_Path(path, f->path, sizeof f->path);
+	if(!f) return NULL;
+	OsPosix_ReadPath(path, f->path, sizeof f->path);
 	f->f = fopen(f->path, "rb");
+	if(!f->f && (errno == ENOENT || errno == ENOTDIR) && OpenDiscEntry(f))
+		return f;
 	if(f->f && fstat(fileno(f->f), &st) == 0 && S_ISDIR(st.st_mode))
 	{
 		fclose(f->f);
@@ -46,13 +62,15 @@ OsFile_t* OS_FileOpenRead(const char* path)
 OsFile_t* OS_FileCreate(const char* path)
 {
 	OsFile_t* f = (OsFile_t*)calloc(1, sizeof *f);
-	OsPosix_Path(path, f->path, sizeof f->path);
+	if(!f) return NULL;
+	if(!OsPosix_WritePath(path, f->path, sizeof f->path, 1)) { free(f); return NULL; }
 	f->f = fopen(f->path, "w+b");
 	if(!f->f)
 	{
 		free(f);
 		return NULL;
 	}
+	f->writable = 1;
 	return f;
 }
 
@@ -60,15 +78,23 @@ OsFile_t* OS_FileCreate(const char* path)
 OsFile_t* OS_FileOpenWrite(const char* path)
 {
 	OsFile_t* f = (OsFile_t*)calloc(1, sizeof *f);
-	OsPosix_Path(path, f->path, sizeof f->path);
+	if(!f) return NULL;
+	if(!OsPosix_WritePath(path, f->path, sizeof f->path, 1)) { free(f); return NULL; }
 	f->f = fopen(f->path, "r+b");
 	if(!f->f && errno == ENOENT)
-		f->f = fopen(f->path, "w+b");
+	{
+		if(OsPosix_HasDataDirectory() && OS_FileAttrs(path) != OS_INVALID_ATTRS)
+		{
+			if(OS_FileCopy(path, path, 0)) f->f = fopen(f->path, "r+b");
+		}
+		else f->f = fopen(f->path, "w+b");
+	}
 	if(!f->f)
 	{
 		free(f);
 		return NULL;
 	}
+	f->writable = 1;
 	return f;
 }
 
@@ -78,21 +104,32 @@ void OS_FileClose(OsFile_t* f)
 		return;
 	if(f->f)
 		fclose(f->f);
+	else
+		Disc_Close(&f->disc);
 	free(f);
 }
 
 uint32_t OS_FileRead(OsFile_t* f, void* buf, uint32_t n)
 {
+	if(!f->f)
+		return Disc_Read(&f->disc, buf, n);
 	return (uint32_t)fread(buf, 1, n, f->f);
 }
 
 uint32_t OS_FileWrite(OsFile_t* f, const void* buf, uint32_t n)
 {
-	return (uint32_t)fwrite(buf, 1, n, f->f);
+	return f->f ? (uint32_t)fwrite(buf, 1, n, f->f) : 0;
 }
 
 int OS_FileSeek(OsFile_t* f, uint32_t pos)
 {
+	if(!f->f)
+	{
+		if(pos > f->disc.size)
+			return 0;
+		f->disc.position = pos;
+		return 1;
+	}
 	return fseek(f->f, (long)pos, SEEK_SET) == 0;
 }
 
@@ -100,6 +137,8 @@ int OS_FileSeek(OsFile_t* f, uint32_t pos)
 uint32_t OS_FileSize(OsFile_t* f)
 {
 	struct stat st;
+	if(!f->f)
+		return f->disc.size;
 	fflush(f->f);
 	if(fstat(fileno(f->f), &st) != 0)
 		return 0;
@@ -114,9 +153,14 @@ int OS_FileGetTime(OsFile_t* f, uint32_t* lo, uint32_t* hi)
 {
 	struct stat st;
 	uint64_t ft;
-	if(fstat(fileno(f->f), &st) != 0)
-		return 0;
-	ft = ((uint64_t)st.st_mtime + FILETIME_EPOCH_DIFF) * 10000000ull;
+	if(f->f)
+	{
+		if(fstat(fileno(f->f), &st) != 0)
+			return 0;
+		ft = ((uint64_t)st.st_mtime + FILETIME_EPOCH_DIFF) * 10000000ull;
+	}
+	else
+		ft = f->discTime;
 	*lo = (uint32_t)ft;
 	*hi = (uint32_t)(ft >> 32);
 	return 1;
@@ -127,6 +171,7 @@ int OS_FileSetTime(OsFile_t* f, uint32_t lo, uint32_t hi)
 {
 	uint64_t ft = ((uint64_t)hi << 32) | lo;
 	struct timespec ts[2];
+	if(!f->f || (OsPosix_HasDataDirectory() && !f->writable)) return 0;
 	fflush(f->f);
 	ts[0].tv_sec = ts[1].tv_sec = (time_t)(ft / 10000000ull - FILETIME_EPOCH_DIFF);
 	ts[0].tv_nsec = ts[1].tv_nsec = (long)(ft % 10000000ull) * 100;
@@ -163,8 +208,18 @@ int OS_FileGetTimes(const char* path, OsLocalTime_t* created, OsLocalTime_t* acc
 	char native[PATH_MAX];
 	struct stat st;
 	OsLocalTime_t c, a, w;
-	OsPosix_Path(path, native, sizeof native);
-	if(stat(native, &st) || !S_ISREG(st.st_mode) || !ToSystemTime(&st.st_mtim, &c) ||
+	OsPosix_ReadPath(path, native, sizeof native);
+	if(stat(native, &st))
+	{
+		const VolEntry_t* entry = OsPosix_DiscPath(native, 1);
+		if(!entry || entry->isDir || !entry->mtime)
+			return 0;
+		st.st_mode = S_IFREG;
+		st.st_mtim.tv_sec = (time_t)((int64_t)(entry->mtime / 10000000ull) - (int64_t)FILETIME_EPOCH_DIFF);
+		st.st_mtim.tv_nsec = 0;
+		st.st_atim = st.st_mtim;
+	}
+	if(!S_ISREG(st.st_mode) || !ToSystemTime(&st.st_mtim, &c) ||
 		!ToSystemTime(&st.st_atim, &a) || !ToSystemTime(&st.st_mtim, &w)) return 0;
 	/* POSIX ctime is a metadata-change time, not a creation time. */
 	if(created) memcpy(created, &c, sizeof c);
@@ -178,7 +233,7 @@ int OS_FileSetTimes(const char* path, const OsLocalTime_t* created, const OsLoca
 	char native[PATH_MAX];
 	struct stat st;
 	struct timespec ts[2], unused;
-	OsPosix_Path(path, native, sizeof native);
+	if(!OsPosix_WritePath(path, native, sizeof native, 0)) return 0;
 	if(stat(native, &st) || !S_ISREG(st.st_mode)) return 0;
 	ts[0] = st.st_atim; ts[1] = st.st_mtim;
 	if((created && !FromSystemTime(created, &unused)) || (accessed && !FromSystemTime(accessed, &ts[0])) ||
@@ -192,9 +247,14 @@ uint32_t OS_FileAttrs(const char* path)
 	char p[PATH_MAX];
 	struct stat st;
 	uint32_t a = 0;
-	OsPosix_Path(path, p, sizeof p);
+	OsPosix_ReadPath(path, p, sizeof p);
 	if(stat(p, &st) != 0)
-		return OS_INVALID_ATTRS;
+	{
+		const VolEntry_t* entry = OsPosix_DiscPath(p, 1);
+		if(!entry || (!entry->isDir && (!entry->readable || entry->size > UINT32_MAX)))
+			return OS_INVALID_ATTRS;
+		return OS_ATTR_READONLY | (entry->isDir ? OS_ATTR_DIRECTORY : 0);
+	}
 	if(S_ISDIR(st.st_mode))
 		a |= OS_ATTR_DIRECTORY;
 	if(!(st.st_mode & S_IWUSR))
@@ -209,7 +269,7 @@ int OS_FileSetAttrs(const char* path, uint32_t attrs)
 {
 	char p[PATH_MAX];
 	struct stat st;
-	OsPosix_Path(path, p, sizeof p);
+	if(!OsPosix_WritePath(path, p, sizeof p, 0)) return 0;
 	if(stat(p, &st) != 0)
 		return 0;
 	if(attrs & OS_ATTR_READONLY)
@@ -222,7 +282,7 @@ int OS_FileSetAttrs(const char* path, uint32_t attrs)
 int OS_FileDelete(const char* path)
 {
 	char p[PATH_MAX];
-	OsPosix_Path(path, p, sizeof p);
+	if(!OsPosix_WritePath(path, p, sizeof p, 0)) return 0;
 	return unlink(p) == 0;
 }
 
@@ -231,8 +291,10 @@ int OS_FileMove(const char* from, const char* to)
 {
 	char a[PATH_MAX], b[PATH_MAX];
 	struct stat sa, sb;
-	OsPosix_Path(from, a, sizeof a);
-	OsPosix_Path(to, b, sizeof b);
+	if(!OsPosix_WritePath(from, a, sizeof a, 0) ||
+		!OsPosix_WritePath(to, b, sizeof b, 1)) return 0;
+	if(OsPosix_HasDataDirectory() && lstat(b, &sb) != 0 && OS_FileAttrs(to) != OS_INVALID_ATTRS)
+		return 0;
 	if(lstat(b, &sb) == 0 && !(lstat(a, &sa) == 0 && sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino))
 		return 0;
 	return rename(a, b) == 0;
@@ -241,40 +303,53 @@ int OS_FileMove(const char* from, const char* to)
 // CopyFile: a plain copy through a 64 KB buffer; 0 when `to` exists and failIfExists is set, or either file fails to open
 int OS_FileCopy(const char* from, const char* to, int failIfExists)
 {
-	char a[PATH_MAX], b[PATH_MAX], buf[0x10000];
-	FILE *in, *out;
+	char b[PATH_MAX], buf[0x10000];
+	OsFile_t* in;
+	FILE* out;
 	size_t n;
-	OsPosix_Path(from, a, sizeof a);
-	OsPosix_Path(to, b, sizeof b);
-	if(failIfExists && access(b, F_OK) == 0)
+	int privateCopy = OsPosix_HasDataDirectory();
+	if(!OsPosix_WritePath(to, b, sizeof b, 1))
 		return 0;
-	in = fopen(a, "rb");
+	if(failIfExists && OS_FileAttrs(to) != OS_INVALID_ATTRS)
+		return 0;
+	in = OS_FileOpenRead(from);
 	if(!in)
 		return 0;
+	struct stat st;
+	if(!strcmp(in->path, b) || (in->f && (fstat(fileno(in->f), &st) || !S_ISREG(st.st_mode))))
+	{
+		OS_FileClose(in);
+		return 0;
+	}
+	int newFile = privateCopy && access(b, F_OK) != 0;
 	out = fopen(b, "wb");
 	if(!out)
 	{
-		fclose(in);
+		OS_FileClose(in);
 		return 0;
 	}
-	while((n = fread(buf, 1, sizeof buf, in)) > 0)
-		fwrite(buf, 1, n, out);
-	fclose(in);
-	fclose(out);
-	return 1;
+	int ok = 1;
+	while((n = OS_FileRead(in, buf, sizeof buf)) > 0)
+		if(fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+	ok &= in->f ? !ferror(in->f) : in->disc.position == in->disc.size;
+	OS_FileClose(in);
+	ok &= fclose(out) == 0;
+	if(!ok && newFile) unlink(b);
+	return ok;
 }
 
 int OS_DirCreate(const char* path)
 {
 	char p[PATH_MAX];
-	OsPosix_Path(path, p, sizeof p);
+	if(OsPosix_HasDataDirectory() && OS_FileAttrs(path) != OS_INVALID_ATTRS) return 0;
+	if(!OsPosix_WritePath(path, p, sizeof p, 1)) return 0;
 	return mkdir(p, 0755) == 0;
 }
 
 int OS_DirRemove(const char* path)
 {
 	char p[PATH_MAX];
-	OsPosix_Path(path, p, sizeof p);
+	if(!OsPosix_WritePath(path, p, sizeof p, 0)) return 0;
 	return rmdir(p) == 0;
 }
 
@@ -282,22 +357,50 @@ int OS_DirRemove(const char* path)
 
 struct OsFind
 {
-	DIR* dir;               // the directory being read
-	char dirPath[PATH_MAX]; // its POSIX path, for the stat of each entry
+	DIR* dirs[3];           // patch, private data, original directory
+	char paths[3][PATH_MAX];
 	char pattern[260];      // UTF-8 file part with wildcards
+	int archivePattern;    // enumerate the selected logical archive once per name
+	uint32_t discIndex;
 };
 
 // the next entry that matches the pattern into `out` (attributes from stat, OS_ATTR_NORMAL when stat fails); 0 at the end
-static int FindFill(OsFind_t* h, OsFindData_t* out)
+static int FindFillDir(OsFind_t* h, int layer, OsFindData_t* out)
 {
+	DIR* dir = h->dirs[layer];
+	const char* dirPath = h->paths[layer];
 	struct dirent* e;
-	while((e = readdir(h->dir)) != NULL)
+	while(dir && (e = readdir(dir)) != NULL)
 	{
-		char full[PATH_MAX];
+		char full[PATH_MAX], logical[260];
 		struct stat st;
-		if(!OsCommon_WildcardMatch(h->pattern, e->d_name))
+		const char* name = e->d_name;
+		if(layer != 2 && (!strcmp(name, ".") || !strcmp(name, "..") || !strcasecmp(name, ".openbgi")))
 			continue;
-		snprintf(full, sizeof full, "%s/%s", h->dirPath, e->d_name);
+		if(h->archivePattern)
+		{
+			OsPosix_ArchiveLogicalName(name, logical, sizeof logical);
+			name = logical;
+		}
+		if(!OsCommon_WildcardMatch(h->pattern, name))
+			continue;
+		snprintf(full, sizeof full, "%s/%s", dirPath, e->d_name);
+		if(h->archivePattern)
+		{
+			char requested[PATH_MAX], selected[PATH_MAX];
+			snprintf(requested, sizeof requested, "%s/%s", dirPath, name);
+			if(strcasecmp(OsPosix_LocalizedArchive(requested, selected, sizeof selected), full))
+				continue;
+		}
+		if(layer != 0)
+		{
+			char requested[PATH_MAX], selected[PATH_MAX];
+			snprintf(requested, sizeof requested, "%s/%s", h->paths[2], name);
+			if((h->dirs[0] && OsPosix_PatchPath(requested, selected, sizeof selected, h->archivePattern)) ||
+				(layer == 2 && ((h->dirs[1] && OsPosix_DataPath(requested, selected, sizeof selected, h->archivePattern)) ||
+					OsPosix_BaseHidden(requested))))
+				continue;
+		}
 		out->attrs = OS_ATTR_NORMAL;
 		if(stat(full, &st) == 0)
 		{
@@ -310,7 +413,40 @@ static int FindFill(OsFind_t* h, OsFindData_t* out)
 				out->attrs = OS_ATTR_NORMAL;
 		}
 		// the name goes back to the engine as it is stored (UTF-8 names that are plain ASCII survive unchanged; others are not converted)
-		snprintf(out->name, sizeof out->name, "%s", e->d_name);
+		snprintf(out->name, sizeof out->name, "%s", name);
+		return 1;
+	}
+	return 0;
+}
+
+static int FindFill(OsFind_t* h, OsFindData_t* out)
+{
+	if(FindFillDir(h, 0, out) || FindFillDir(h, 1, out) || FindFillDir(h, 2, out))
+		return 1;
+	const char* directory = OsPosix_DiscDirectory(h->paths[2]);
+	const char* leaf;
+	const VolEntry_t* entry;
+	while((entry = Disc_Next(directory, &h->discIndex, &leaf)))
+	{
+		char name[sizeof out->name], native[PATH_MAX], layer[PATH_MAX];
+		struct stat st;
+		// A deflated ZIP entry is readable here too: Disc_Open inflates it.
+		if(!entry->isDir && (!entry->readable || entry->size > UINT32_MAX))
+			continue;
+		if(h->archivePattern)
+			OsPosix_ArchiveLogicalName(leaf, name, sizeof name);
+		else
+			snprintf(name, sizeof name, "%s", leaf);
+		if(!OsCommon_WildcardMatch(h->pattern, name) ||
+			snprintf(native, sizeof native, "%s/%s", h->paths[2], name) >= (int)sizeof native ||
+			OsPosix_DiscPath(native, h->archivePattern) != entry)
+			continue;
+		const char* base = h->archivePattern ? OsPosix_LocalizedArchive(native, layer, sizeof layer) : native;
+		if(!stat(base, &st) || OsPosix_PatchPath(native, layer, sizeof layer, h->archivePattern) ||
+			OsPosix_DataPath(native, layer, sizeof layer, h->archivePattern))
+			continue;
+		snprintf(out->name, sizeof out->name, "%s", name);
+		out->attrs = OS_ATTR_READONLY | (entry->isDir ? OS_ATTR_DIRECTORY : 0);
 		return 1;
 	}
 	return 0;
@@ -325,6 +461,7 @@ OsFind_t* OS_FindFirst(const char* pattern, OsFindData_t* out)
 	char win[PATH_MAX], utfPat[260];
 	const char* file;
 	size_t dirLen;
+	if(!h) return NULL;
 
 	// split the Windows pattern into directory and file part before converting
 	file = OsCommon_FilePart(pattern);
@@ -333,18 +470,22 @@ OsFind_t* OS_FindFirst(const char* pattern, OsFindData_t* out)
 		dirLen = sizeof win - 1;
 	memcpy(win, pattern, dirLen);
 	win[dirLen] = 0;
-	if(dirLen == 0)
-		strcpy(h->dirPath, ".");
-	else
-		OsPosix_Path(win, h->dirPath, sizeof h->dirPath);
+	OsPosix_Path(dirLen == 0 ? "." : win, h->paths[2], sizeof h->paths[2]);
 	OsPosix_SjisToUtf8(file, utfPat, sizeof utfPat);
 	snprintf(h->pattern, sizeof h->pattern, "%s", utfPat);
-	h->dir = opendir(h->dirPath);
-	if(!h->dir || !FindFill(h, out))
+	size_t patternLen = strlen(h->pattern);
+	char logical[sizeof h->pattern];
+	OsPosix_ArchiveLogicalName(h->pattern, logical, sizeof logical);
+	h->archivePattern = patternLen >= 4 && !strcasecmp(h->pattern + patternLen - 4, ".arc") &&
+		!strcmp(h->pattern, logical);
+	h->dirs[2] = OsPosix_BaseHidden(h->paths[2]) ? NULL : opendir(h->paths[2]);
+	if(OsPosix_PatchPath(h->paths[2], h->paths[0], sizeof h->paths[0], 0))
+		h->dirs[0] = opendir(h->paths[0]);
+	if(OsPosix_DataPath(h->paths[2], h->paths[1], sizeof h->paths[1], 0))
+		h->dirs[1] = opendir(h->paths[1]);
+	if(!FindFill(h, out))
 	{
-		if(h->dir)
-			closedir(h->dir);
-		free(h);
+		OS_FindClose(h);
 		return NULL;
 	}
 	return h;
@@ -359,7 +500,8 @@ void OS_FindClose(OsFind_t* h)
 {
 	if(!h)
 		return;
-	closedir(h->dir);
+	for(int i = 0; i < 3; ++i)
+		if(h->dirs[i]) closedir(h->dirs[i]);
 	free(h);
 }
 

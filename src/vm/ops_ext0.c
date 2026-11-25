@@ -332,6 +332,12 @@ static int Opcode_Ext0_EditRejectAscii(Thread_t* t) // B0 29 (1.69/472 on): on �
 	return 0;
 }
 
+static int Opcode_Ext0_EditAlignment(Thread_t* t) // B0 2A: mode → ok
+{
+	Thread_Push(t, (uint32_t)Edit_SetAlignment(Thread_Pop(t)));
+	return 0;
+}
+
 // the glyph width of the entry control's font from the next "B0 20" on, in percent (25 .. 200; 100 the normal); ok 0 out of range
 static int Opcode_Ext0_EditFontWidth(Thread_t* t) // B0 22 (1.529 on): pct → ok
 {
@@ -663,7 +669,7 @@ void Vm_OptableB0Init(void)
 		{0xC0, Opcode_Ext0_FontRegister, GEN_1_69_451, GEN_LAST},
 		{0xC1, Opcode_Ext0_FontRegisterEx, GEN_1_529, GEN_LAST},
 		{0xC2, Opcode_Ext0_FontAddFile, GEN_1_69_472, GEN_LAST},
-		{0xC3, Opcode_Ext0_FontAddFileArc, GEN_1_494, GEN_LAST},
+		{0xC3, Opcode_Ext0_FontAddFileArc, GEN_1_492, GEN_LAST},
 		{0xC4, Opcode_Ext0_FontExists, GEN_1_529, GEN_1_573},
 		{0xC4, Opcode_Ext0_FontEnum, GEN_1_588, GEN_LAST},
 		{0xC5, Opcode_Ext0_FontEnumCharset, GEN_1_653, GEN_LAST},
@@ -679,6 +685,7 @@ void Vm_OptableB0Init(void)
 		{0x27, Opcode_Ext0_EditGetText, GEN_FIRST, GEN_LAST},
 		{0x28, Opcode_Ext0_EditImeCloseOnEnter, GEN_1_69_472, GEN_LAST},
 		{0x29, Opcode_Ext0_EditRejectAscii, GEN_1_69_472, GEN_LAST},
+		{0x2a, Opcode_Ext0_EditAlignment, GEN_1_636, GEN_LAST},
 		{0x80, Opcode_Ext0_MsgBoxNotice, GEN_FIRST, GEN_LAST},
 		{0x81, Opcode_Ext0_MsgBoxYesNo, GEN_FIRST, GEN_LAST},
 		{0x82, Opcode_Ext0_MsgBoxConfirm, GEN_FIRST, GEN_LAST},

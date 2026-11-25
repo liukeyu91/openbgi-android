@@ -63,7 +63,7 @@ BitmapJob_t* Loader_StartBitmap(uint8_t** dst, const char* arc, const char* name
     if(!header.width || !header.height || decoded<1024*1024 || decoded>UINT32_MAX-0x30u)goto fallback;
     capacity=decoded>view.size?decoded:view.size;
     storedLimit=gEngine->gen<=GEN_1_69_472?40u*1024*1024:
-        gEngine->gen==GEN_1_494?48u*1024*1024:64u*1024*1024;
+        gEngine->gen<=GEN_1_494?48u*1024*1024:64u*1024*1024;
     if(!legacy && view.size>storedLimit)goto fallback;
     if(!File_Seek(&view.file,view.offset))goto fallback;
     job=BGI_Calloc(sizeof *job);job->view=view;job->legacy=legacy;

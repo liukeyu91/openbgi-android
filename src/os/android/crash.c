@@ -117,6 +117,26 @@ void OsAndroid_CrashInstruction(uint32_t thread, uint32_t ip, uint32_t relative,
     __atomic_store_n(&entry->sequence,sequence,__ATOMIC_RELEASE);
     __atomic_store_n(&gPublished,sequence,__ATOMIC_RELEASE);
 }
+
+int OsAndroid_LastInstruction(char* program, size_t size, uint32_t* relative, uint32_t* opcode)
+{
+    unsigned sequence=__atomic_load_n(&gPublished,__ATOMIC_ACQUIRE);
+    if(!sequence || !size) return 0;
+    Breadcrumb* entry=&gRing[(sequence-1)%RING_COUNT];
+    if(__atomic_load_n(&entry->sequence,__ATOMIC_ACQUIRE)!=sequence) return 0;
+    size_t count=size-1;
+    if(count>NAME_WORDS*4) count=NAME_WORDS*4;
+    for(size_t i=0;i<count;i+=4) {
+        unsigned word=__atomic_load_n(&entry->name[i/4],__ATOMIC_RELAXED);
+        for(size_t k=0;k<4 && i+k<count;k++) program[i+k]=(char)(word>>(k*8));
+    }
+    program[count]=0;
+    *relative=__atomic_load_n(&entry->relative,__ATOMIC_RELAXED);
+    *opcode=__atomic_load_n(&entry->opcode,__ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&entry->sequence,__ATOMIC_ACQUIRE)==sequence && program[0];
+}
+
 static void DumpVm(void)
 {
     unsigned end=__atomic_load_n(&gPublished,__ATOMIC_ACQUIRE), count=end<RING_COUNT?end:RING_COUNT, i;

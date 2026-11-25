@@ -181,6 +181,40 @@ static void TestCache(void)
  * every registered word of a message as "word\reading" lines, and
  * SjisCodes counts characters and returns their codes.  A failure means
  * ruby readings would attach to the wrong words. */
+static void TestFaceExtension(void)
+{
+	const char* face = "\x82\x6c\x82\x72 \x83\x53\x83\x56\x83\x62\x83\x4e";
+	FontCache_t* cache = FontCache_New();
+	FontFaceExtension_t extension = {0x18000, 0x14000, 0x1000, 0x1000, 0x8000};
+	FontInfo_t info;
+	int handle;
+	int32_t before[3], after[3];
+	Glyph_t glyph;
+	printf("1.680 face extension\n");
+	CHECK(FontCache_SetFaceSpacing(cache, face, 0x8000) == 8);
+	CHECK(FontCache_SetFaceSpacing(cache, face, 0x10001) == 7);
+	if(FontCache_Open(cache, &handle, face, 24, 100, 0) == 0 && FontCache_GetInfo(cache, &info, handle))
+	{
+		FontRaster_t* original = info.font;
+		FontRaster_Glyph(original, &glyph, 'W');
+		CHECK(original->used == 1);
+		CHECK(FontCache_SetFaceExtension(cache, face, &extension) == 0);
+		CHECK(FontCache_GetInfo(cache, &info, handle) && info.font == original);
+		CHECK(original->source && original->used == 0 && original->tracking == 18);
+		FontRaster_Glyph(original, &glyph, 'W');
+		CHECK(original->used == 1);
+		Text_MeasureInfo(before, "AB", &info, 1);
+		CHECK(FontCache_SetFaceSpacing(cache, face, 0) == 0 && original->used == 3);
+		Text_MeasureInfo(after, "AB", &info, 1);
+		CHECK(before[0] - after[0] == 18);
+		CHECK(FontCache_SetFaceExtension(cache, face, &(FontFaceExtension_t){0}) == 0);
+		CHECK(!original->source && original->tracking == 0 && original->used == 0);
+	}
+	else
+		printf("  (no font available: glyph correction checks skipped)\n");
+	FontCache_Delete(cache);
+}
+
 static void TestRuby(void)
 {
 	RubyDict_t d;
@@ -583,6 +617,25 @@ static void TestGbkText(void)
 	CHECK(IsKinsokuChar(0x8142));
 }
 
+static void TestBig5Text(void)
+{
+	const char* period = "\x81\x42";
+	uint32_t code;
+	Text_SetEncoding(TEXT_BIG5);
+	CHECK(TextGetChar(&code, "\xa4\xa4") == 2 && code == 0xa4a4);
+	CHECK(TextGetChar(&code, "\xa4\x5c") == 2 && code == 0xa45c);
+	CHECK(TextGetChar(&code, "\xa4\x80") == 1 && code == 0xa4);
+	CHECK(TextGetChar(&code, "\xa4") == 1 && code == 0xa4);
+	CHECK(TextIsWide(0xa4a4, 2));
+	CHECK(OS_Big5ToCodePoint(0xa4a4) == 0x4e2d);
+	CHECK(OS_Big5ToCodePoint(0xa4e5) == 0x6587);
+	CHECK(OS_CodePointToBig5(0x4e2d) == 0xa4a4);
+	CHECK(OS_CodePointToBig5(0x1f600) == 0);
+	CHECK(TextTableChar(&period) == 0xa143 && !*period);
+	CHECK(IsKinsokuChar(0xa143));
+	Text_SetEncoding(TEXT_SJIS);
+}
+
 static int TestMixedLatinLayoutCase(int encoding, const char* mixed)
 {
 	BmpMgr_t* mgr = BmpMgr_New(8);
@@ -661,12 +714,13 @@ static int TestMixedLatinLayoutCase(int encoding, const char* mixed)
 
 static void TestMixedLatinLayout(void)
 {
-	/* The same Japanese/Latin text in CP932, GBK and UTF-8. */
+	/* The same CJK/Latin line in all four encodings. */
 	int sjis = TestMixedLatinLayoutCase(TEXT_SJIS, "\x93\xfa\x96\x7b" "OK?WiW STAR GENERATION");
 	int gbk = TestMixedLatinLayoutCase(TEXT_GBK, "\xc8\xd5\xb1\xbe" "OK?WiW STAR GENERATION");
 	int utf8 = TestMixedLatinLayoutCase(TEXT_UTF8, "\xe6\x97\xa5\xe6\x9c\xac" "OK?WiW STAR GENERATION");
-	if(sjis >= 0 && gbk >= 0 && utf8 >= 0)
-		CHECK(sjis == gbk && gbk == utf8);
+	int big5 = TestMixedLatinLayoutCase(TEXT_BIG5, "\xa4\xe9\xa5\xbb" "OK?WiW STAR GENERATION");
+	if(sjis >= 0 && gbk >= 0 && utf8 >= 0 && big5 >= 0)
+		CHECK(sjis == gbk && gbk == utf8 && utf8 == big5);
 }
 
 // run every group; exit status 1 when any check failed
@@ -675,10 +729,12 @@ int main(void)
 	OS_Init();
 	TestRaster();
 	TestCache();
+	TestFaceExtension();
 	TestRuby();
 	TestMarkup();
 	TestLayoutExtensions();
 	TestGbkText();
+	TestBig5Text();
 	TestMixedLatinLayout();
 	OS_Shutdown();
 	if(gFails)

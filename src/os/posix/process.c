@@ -71,6 +71,7 @@ int OS_Init(void)
 // release the font libraries and the character converters
 void OS_Shutdown(void)
 {
+	OsPosix_MountDisc(NULL);
 	OsPosix_FontShutdown();
 #ifndef BGI_ANDROID
 	OsPosix_SjisShutdown();
@@ -198,7 +199,11 @@ int OS_SetCurrentDir(const char* dir)
 {
 	char p[PATH_MAX];
 	OsPosix_Path(dir, p, sizeof p);
-	return chdir(p) == 0;
+	if(!OsPosix_BaseHidden(p) && chdir(p) == 0)
+		return 1;
+	return OsPosix_HasDataDirectory() &&
+		(OsPosix_PatchPath(p, p, sizeof p, 0) || OsPosix_DataPath(p, p, sizeof p, 0)) &&
+		chdir(p) == 0;
 }
 
 // the instance mutex: a lock file held with flock

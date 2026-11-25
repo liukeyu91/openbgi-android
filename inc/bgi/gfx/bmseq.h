@@ -23,6 +23,8 @@
 
 // "90 F4": register a copy of the file; *outNo receives its number, `info` width, height, pixel mode, frame rate, frame count
 uint32_t BmSeq_Register(const void* data, uint32_t size, int32_t* outNo, int32_t info[5]);
+// "92 F1": 1 registered from a file view, 0 to use the normal loader
+int BmSeq_TryStream(const char* arc, const char* name, int32_t* outNo, int32_t info[5]);
 uint32_t BmSeq_Free(int32_t no);                              // "90 F5": drop the record; the data goes when its clone (if any) is gone too
 uint32_t BmSeq_Clone(int32_t no, int32_t* outNo);             // "90 F7": a second number for the same data (one clone per record)
 uint32_t BmSeq_Decode(int bmpNo, int32_t no, uint32_t frame); // "90 F6": frame `frame` into bitmap slot bmpNo (same size and mode)

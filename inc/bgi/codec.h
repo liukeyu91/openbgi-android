@@ -120,6 +120,9 @@ void CbgDecrypt(uint8_t* buf, uint32_t len, uint32_t key);                    //
 int CbgCheck(const uint8_t* buf, uint32_t len, uint8_t sum, uint8_t xr);      // 1 when the sum / xor checks hold
 int CbgBuildTree(CbgNode_t* nodes, const uint32_t* weights, uint32_t leaves); // 2 * leaves - 1 nodes; the root, -1 when all weights are 0
 uint32_t Cbg2_Decode(const void* src, void* dst);                             // cbg2.c: the version 2 decoder (BGI_CbgDecode's codes)
+// Alpha layout in a streamed CBG2 frame and its 8-pixel-padded BGRA target.
+enum { CBG2_ALPHA_NONE, CBG2_ALPHA_PLAIN, CBG2_ALPHA_MODE };
+int Cbg2_Frame(const uint8_t* stream, uint32_t len, const uint8_t* quant, uint32_t w, uint32_t hgt, int alpha, uint8_t* buf);
 /* decode into dst (RawImageHeader + pixels); dst must hold
  * BGI_CbgOutSize(src) bytes.  Returns 0 on success, 0x80000003 if the magic
  * is wrong, 0x80000004 when the checksum of the weight table fails. */

@@ -812,7 +812,7 @@ void Vm_Optable81Init(void)
 		{0x31, Opcode_Sys81_HttpGet, GEN_1_529, GEN_LAST},
 		{0x3B, Opcode_Sys81_ArcEntryDialog, GEN_1_529, GEN_LAST},
 		{0x38, Opcode_Sys81_FileDialogMulti, GEN_1_553, GEN_LAST},
-		{0x60, Opcode_Sys81_SetSizeEntry, GEN_1_494, GEN_LAST},
+		{0x60, Opcode_Sys81_SetSizeEntry, GEN_1_492, GEN_LAST},
 		{0x63, Opcode_Sys81_SetFullscreenFit, GEN_1_529, GEN_LAST},
 		{0x64, Opcode_Sys81_SetWindowSize, GEN_1_529, GEN_LAST},
 		{0x6C, Opcode_Sys81_SetRenderSize, GEN_1_669, GEN_LAST},

@@ -32,6 +32,7 @@
 #define LAYOUT_B 25, 0x08, 0x09, 0x0a, 0x10, 48, 0x2000000
 #define LAYOUT_C 26, 0x01, 0x02, 0x03, 0x10, 48, 0x4000000
 #define LAYOUT_D 26, 0x01, 0x02, 0x03, 0x10, 0, 0x4000000 // 1.535 on: layout C with the dynamic blocks from size-class pools (dynCount 0, see dynmem.c)
+#define LAYOUT_E 28, 0x01, 0x02, 0x03, 0x04, 0, 0x4000000 // 1.680: revised pool tags, same current local heap cap
 
 /* the boot thread's code and data areas (the SpawnThread of the boot
  * program): 256 KB each up to build 444, 512 KB of code
@@ -49,6 +50,7 @@ static const EngineProfile_t kDefaultProfiles[GEN_COUNT + 1] = {
 	{"1.69/444", GEN_1_69_444, 169, LAYOUT_B, BOOT_A},
 	{"1.69/451", GEN_1_69_451, 169, LAYOUT_B, BOOT_A},
 	{"1.69/472", GEN_1_69_472, 169, LAYOUT_C, BOOT_B},
+	{"1.492", GEN_1_492, 169, LAYOUT_C, BOOT_B},
 	{"1.494", GEN_1_494, 169, LAYOUT_C, BOOT_B},
 	{"1.529", GEN_1_529, 169, LAYOUT_C, BOOT_B},
 	{"1.535", GEN_1_535, 169, LAYOUT_D, BOOT_B},
@@ -66,6 +68,7 @@ static const EngineProfile_t kDefaultProfiles[GEN_COUNT + 1] = {
 	{"1.662", GEN_1_662, 172, LAYOUT_D, BOOT_C},
 	{"1.667", GEN_1_667, 172, LAYOUT_D, BOOT_C},
 	{"1.669", GEN_1_669, 172, LAYOUT_D, BOOT_C},
+	{"1.680", GEN_1_680, 172, LAYOUT_E, 0x800000, 0x400000, 128, 16},
 	{"1.659.8", GEN_1_659, 172, LAYOUT_D, 0x800000, 0x400000, 128, 16},
 };
 
@@ -195,6 +198,7 @@ static const struct
 	{"MakingLoversFullHD", "1.659.8", NULL},
 	{"Yumahorome", "1.662", NULL},
 	{"ArcanaAlchemia", "1.667", NULL},
+	{"LovepicalPoppy", "1.680", NULL},
 	{"HarukaAonoHanayomeni", "1.669", NULL},
 };
 

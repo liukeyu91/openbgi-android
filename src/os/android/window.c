@@ -197,6 +197,7 @@ int OS_PumpMessages(void)
     unsigned redraw;
     uint64_t frame;
     int input,active,destroyed,reset;
+    OsAndroid_ReportVm(0);
     pthread_mutex_lock(&host->lock);
     if(!host->resumed && !host->destroyed){
         pthread_mutex_unlock(&host->lock);

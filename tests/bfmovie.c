@@ -46,6 +46,7 @@
 #include "bgi/waitobj.h"
 #include "bgi/file.h"
 #include "bgi/os.h"
+#include "bgi/version.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -368,7 +369,7 @@ static void TestWaits(const uint8_t* file, size_t size, const uint32_t* pix1, in
 	t = Thread_New(0x100, 0x100, 0x100);
 	// the load: polled as the scheduler would until it reports done (1); the result is
 	// pushed
-	w = WaitSeqLoad_New(t, "0", "clip.bm", &no, info);
+	w = WaitSeqLoad_New(t, "0", "clip.bm", &no, info, bpp == 24);
 	for(polls = 0, r = 0; r == 0 && polls < 2000; polls++)
 	{
 		r = w->vt->poll(w);
@@ -384,7 +385,7 @@ static void TestWaits(const uint8_t* file, size_t size, const uint32_t* pix1, in
 	fputs("not a movie at all, just some bytes", f);
 	fclose(f);
 	t->sp = 0;
-	w = WaitSeqLoad_New(t, "0", "text.bm", &no, info);
+	w = WaitSeqLoad_New(t, "0", "text.bm", &no, info, 0);
 	for(polls = 0, r = 0; r == 0 && polls < 2000; polls++)
 	{
 		r = w->vt->poll(w);
@@ -505,6 +506,247 @@ static void TestMovie(int bpp)
 	TestWaits(file, o, pix1, bpp);
 }
 
+// ---- a streamed movie, by hand ---------------------------------------------------------------
+
+/* A frame of a streamed movie of two blocks in one band at `p`: the 16
+ * weights of the DC tree (no AC values: those weights are all zero), the
+ * band - the bitmap of its blocks, the number of coefficients, the DC bit
+ * stream - and the alpha plane (none when alphaLen is 0); the bytes */
+static void PutLe32(uint8_t* p, uint32_t value)
+{
+	for(unsigned i = 0; i < 4; i++)
+		p[i] = (uint8_t)(value >> (i * 8));
+}
+
+static size_t StreamedFrame(uint8_t* p, const uint8_t* dcWeights, unsigned bitmap, unsigned blocks, const uint8_t* dc, size_t dcLen,
+	const uint8_t* alpha, size_t alphaLen)
+{
+	size_t n = 16 + 176 + 8, count = (size_t)blocks * 3 * 64;
+	memset(p, 0, n);
+	memcpy(p, dcWeights, 16);
+	PutLe32(p + 192, 200);
+	p[n++] = (uint8_t)bitmap;
+	if(count >= 0x80)
+		p[n++] = (uint8_t)(0x80 | (count & 0x7f)), p[n++] = (uint8_t)(count >> 7);
+	else
+		p[n++] = (uint8_t)count;
+	memcpy(p + n, dc, dcLen);
+	n += dcLen;
+	PutLe32(p + 196, alphaLen ? (uint32_t)n : 0xffffffffu);
+	memcpy(p + n, alpha, alphaLen);
+	return n + alphaLen;
+}
+
+/* The movie at `file`: `w` x `h` pixels (16 x 8 at most), `bpp` bits, of
+ * the given type; the bytes.
+ *
+ *   frame 0  both blocks.  The DC values, one predictor through them: Y
+ *            80, 160, Cb 80, 0, Cr 0, 0 - four differences of seven bits
+ *            (+80, +80, -80, -80; the heavier symbol, bit 1) and two of
+ *            none (bit 0).  Block 0 comes out as blue 156, green 135, red
+ *            138, block 1 as gray 148.  The alpha plane, the first way: a
+ *            literal 0xC0 and a copy of the pixel before, 127 times.
+ *   frame 1  block 1 alone: Y 40, Cb and Cr 0 (two differences of six
+ *            bits, one of none): gray 133.  The alpha plane, the second
+ *            way: 65 bytes - a bitmap that names block 0, its 64 alpha
+ *            bytes 0x40 -, the byte 1 as bit 0 and the byte 0x40 as bit 1.
+ *   frame 2  no block, and an alpha plane of the bitmap alone.
+ *
+ * A movie of type 0x10000 has the alpha plane of frame 0 without its
+ * leading word, and in frame 1 the same plane with 0x40; a 24-bit movie
+ * has none. */
+static size_t StreamedMovie(uint8_t* file, uint32_t type, uint32_t w, uint32_t h, uint32_t bpp)
+{
+	static const uint8_t kDc0[16] = {2, 0, 0, 0, 0, 0, 0, 4}, kDc1[16] = {1, 0, 0, 0, 0, 0, 2}, kDc2[16] = {0};
+	static const uint8_t kBits0[] = {0xD0, 0xD0, 0xAF, 0xAF, 0x00}, kBits1[] = {0xD1, 0x5C};
+	static const uint8_t kLzC0[] = {1, 0, 0, 0, 0x02, 0xC0, 0x3F, 0xF8}, kLz40[] = {1, 0, 0, 0, 0x02, 0x40, 0x3F, 0xF8};
+	uint8_t blocks[4 + 4 + 256 + 9], none[4 + 4 + 256 + 1];
+	BfMovieHeader_t* hd = (BfMovieHeader_t*)file;
+	size_t n = 0xC0 + 3 * 4;
+	int plain = type == 0x10000u; // no leading word
+	memset(file, 0, n);
+	memcpy(hd->magic, BFMOVIE_MAGIC, 16);
+	hd->type = type;
+	hd->width = w;
+	hd->height = h;
+	hd->bpp = bpp;
+	hd->mode = bpp == 32 ? 2 : 1;
+	hd->fps = 30;
+	hd->frames = 3;
+	hd->zero[0] = 3;
+	memset(file + 0x40, 1, 128); // the quantisation tables: every step 1
+	// the two alpha planes of the second way
+	memset(blocks, 0, sizeof blocks);
+	blocks[0] = 2;
+	blocks[4] = 65;
+	blocks[8 + 1] = 1;
+	blocks[8 + 0x40] = 64;
+	blocks[8 + 256] = 0x7f;
+	memset(blocks + 8 + 257, 0xff, 7);
+	blocks[8 + 264] = 0x80;
+	memset(none, 0, sizeof none);
+	none[0] = 2;
+	none[4] = 1;
+	none[8] = 1;
+	PutLe32(file + 0xC0, (uint32_t)n);
+	n += StreamedFrame(file + n, kDc0, 3, 2, kBits0, sizeof kBits0, kLzC0 + (plain ? 4 : 0), bpp == 32 ? sizeof kLzC0 - (plain ? 4 : 0) : 0);
+	PutLe32(file + 0xC4, (uint32_t)n);
+	if(plain)
+		n += StreamedFrame(file + n, kDc1, 2, 1, kBits1, sizeof kBits1, kLz40 + 4, sizeof kLz40 - 4);
+	else
+		n += StreamedFrame(file + n, kDc1, 2, 1, kBits1, sizeof kBits1, blocks, bpp == 32 ? sizeof blocks : 0);
+	PutLe32(file + 0xC8, (uint32_t)n);
+	n += StreamedFrame(file + n, kDc2, 0, 0, kBits0, 0, plain ? kLz40 + 4 : none, bpp != 32 ? 0 : plain ? sizeof kLz40 - 4
+																										: sizeof none);
+	return n;
+}
+
+// whether the 8 x 8 block `bx` of the picture at `pix` (w x h visible pixels, rows `pitch` apart) is of one colour
+static int BlockIs(const uint8_t* pix, int pitch, int w, int h, int bx, unsigned b, unsigned g, unsigned r, unsigned a)
+{
+	int x, y;
+	for(y = 0; y < h; y++)
+		for(x = bx * 8; x < bx * 8 + 8 && x < w; x++)
+		{
+			const uint8_t* p = pix + (size_t)y * (size_t)pitch + (size_t)x * 4;
+			if(p[0] != b || p[1] != g || p[2] != r || p[3] != a)
+				return 0;
+		}
+	return 1;
+}
+
+static int LoadArchiveStream(Thread_t* t, int32_t* no, int32_t* info)
+{
+	uint32_t off = Thread_HeapAlloc(t, 40);
+	uint32_t ptr = ((uint32_t)gEngine->tagHeap << VM_TAG_SHIFT) | off;
+	uint8_t* mem = Thread_HeapPtr(t, off);
+	memcpy(mem + 24, "seq.arc", 8);
+	memcpy(mem + 32, "clip.bm", 8);
+	Thread_Push(t, ptr);
+	Thread_Push(t, ptr + 4);
+	Thread_Push(t, ptr + 24);
+	Thread_Push(t, ptr + 32);
+	Thread_Push(t, 1);
+	if(vm_optable_92[0xF1](t) != 2 || Thread_PollWait(t) != 1 || Thread_Pop(t) != 0)
+		return 0;
+	memcpy(no, mem, 4);
+	memcpy(info, mem + 4, 20);
+	return 1;
+}
+
+static void TestArchiveStream(uint8_t* movie, uint32_t size)
+{
+	const BfMovieHeader_t* h = (const BfMovieHeader_t*)movie;
+	uint32_t entries = 1, gap = 0x8000, frameStart;
+	uint32_t headSize = BfMovie_StreamIndexSize(movie, size);
+	uint8_t* index = malloc(headSize);
+	PackEntry_t entry = {.name = "clip.bm", .size = size + gap};
+	FILE* f = fopen("seq.arc", "wb");
+	memcpy(index, movie, headSize);
+	for(uint32_t i = 0; i < h->frames; i++)
+	{
+		BfMovie_FrameRange(movie, size, i, &frameStart);
+		PutLe32(index + 0xC0 + i * 4, frameStart + gap);
+	}
+	CHECK(fwrite(PACKFILE_MAGIC, 1, 12, f) == 12);
+	CHECK(fwrite(&entries, sizeof entries, 1, f) == 1 && fwrite(&entry, sizeof entry, 1, f) == 1);
+	CHECK(fwrite(index, 1, headSize, f) == headSize && fseek(f, gap, SEEK_CUR) == 0);
+	CHECK(fwrite(movie + headSize, 1, size - headSize, f) == size - headSize && fclose(f) == 0);
+	free(index);
+
+	SetBaseDir(NULL);
+	gArcMgr = FileSet_New();
+	gBmpMgr = BmpMgr_New(4);
+	BmpMgr_Create(gBmpMgr, 0, (int)h->width, (int)h->height, (int)h->mode);
+	Bmp_t b;
+	BmpMgr_GetInfo(gBmpMgr, &b, 0);
+	size_t bytes = (size_t)b.pitch * b.h;
+	uint8_t* expected = calloc(1, bytes);
+	memset(b.pixels, 0, bytes);
+	Thread_t* t = Thread_New(0x100, 0x100, 0x100);
+	int32_t no = 0, clone = 0, info[5] = {0};
+	CHECK(LoadArchiveStream(t, &no, info) && no > 0 && info[4] == (int32_t)h->frames);
+	CHECK(BmSeq_Clone(no, &clone) == 0 && BmSeq_Free(no) == 0);
+	uint32_t matches = 0;
+	for(uint32_t i = 0; i < h->frames; i++)
+	{
+		if(!BfMovie_DecodeFrame(movie, size, i, expected, b.pitch) || BmSeq_Decode(0, clone, i) ||
+			memcmp(expected, b.pixels, bytes))
+			break;
+		matches++;
+	}
+	CHECK(matches == h->frames);
+	CHECK(BmSeq_Free(clone) == 0);
+
+	CHECK(LoadArchiveStream(t, &no, info));
+	// Cut the file beyond the cached index, before the first frame.
+	CHECK(truncate("seq.arc", 16 + sizeof entry + headSize) == 0);
+	CHECK(BmSeq_Decode(0, no, 0) == 0x80000008u);
+	printf("archive streaming: %u matching frames\n", matches);
+	BmSeq_FreeAll();
+	Thread_Delete(t);
+	free(expected);
+	BmpMgr_Delete(gBmpMgr);
+	gBmpMgr = NULL;
+	FileSet_Delete(gArcMgr);
+	gArcMgr = NULL;
+	remove("seq.arc");
+}
+
+static void TestStreamed(void)
+{
+	static uint8_t file[0x1000], pix[8 * 80];
+	size_t n;
+	printf("streamed\n");
+	n = StreamedMovie(file, 0x10001, 16, 8, 32);
+	CHECK(BfMovie_Check(file, (uint32_t)n) && !BfMovie_IsSimple(file) && BfMovie_CanDecode(file));
+	CHECK(!BfMovie_Check(file, 0xC0 + 8)); // the offsets do not fit
+	memset(pix, 0x11, sizeof pix);
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 0, pix, 64));
+	CHECK(BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0xC0) && BlockIs(pix, 64, 16, 8, 1, 148, 148, 148, 0xC0));
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 1, pix, 64)); // block 1's colour, block 0's alpha: the rest stays
+	CHECK(BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0x40) && BlockIs(pix, 64, 16, 8, 1, 133, 133, 133, 0xC0));
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 2, pix, 64)); // nothing changes
+	CHECK(BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0x40) && BlockIs(pix, 64, 16, 8, 1, 133, 133, 133, 0xC0));
+	TestArchiveStream(file, (uint32_t)n);
+	CHECK(!BfMovie_DecodeFrame(file, (uint32_t)n, 3, pix, 64));
+	// a frame cut short inside its tables is refused; cut inside its band it leaves the blocks alone
+	CHECK(!BfMovie_DecodeFrame(file, 0xCC + 100, 0, pix, 64));
+	{
+		int32_t no = 0, info[5];
+		Bmp_t b;
+		gBmpMgr = BmpMgr_New(4);
+		CHECK(BmSeq_Register(file, (uint32_t)n, &no, info) == 0 && info[0] == 16 && info[1] == 8 && info[2] == 2 && info[4] == 3);
+		BmpMgr_Create(gBmpMgr, 0, 16, 8, PM_ARGB32);
+		CHECK(BmSeq_Decode(0, no, 0) == 0 && BmSeq_Decode(0, no, 1) == 0);
+		BmpMgr_GetInfo(gBmpMgr, &b, 0);
+		CHECK(BlockIs(b.pixels, b.pitch, 16, 8, 0, 156, 135, 138, 0x40) && BlockIs(b.pixels, b.pitch, 16, 8, 1, 133, 133, 133, 0xC0));
+		CHECK(BmSeq_Free(no) == 0);
+		file[0x10] = 2; // a type nobody knows
+		CHECK(BmSeq_Register(file, (uint32_t)n, &no, info) == 0 && BmSeq_Decode(0, no, 0) == 0x8000000au);
+		file[0x10] = 1;
+		CHECK(BmSeq_Free(no) == 0);
+		BmpMgr_Delete(gBmpMgr);
+		gBmpMgr = NULL;
+	}
+	// 12 x 6 pixels in rows 80 bytes apart: no whole blocks; what is beside the picture is not touched
+	n = StreamedMovie(file, 0x10001, 12, 6, 32);
+	memset(pix, 0x11, sizeof pix);
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 0, pix, 80) && BfMovie_DecodeFrame(file, (uint32_t)n, 1, pix, 80));
+	CHECK(BlockIs(pix, 80, 12, 6, 0, 156, 135, 138, 0x40) && BlockIs(pix, 80, 12, 6, 1, 133, 133, 133, 0xC0));
+	CHECK(pix[12 * 4] == 0x11 && pix[80 * 6] == 0x11 && pix[80 * 5 + 79] == 0x11);
+	// the form without the word before the alpha plane: every frame has a whole plane
+	n = StreamedMovie(file, 0x10000, 16, 8, 32);
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 0, pix, 64) && BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0xC0));
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 1, pix, 64));
+	CHECK(BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0x40) && BlockIs(pix, 64, 16, 8, 1, 133, 133, 133, 0x40));
+	// 24 bits: no alpha plane, the alpha bytes are 0
+	n = StreamedMovie(file, 0x10001, 16, 8, 24);
+	memset(pix, 0x11, sizeof pix);
+	CHECK(BfMovie_DecodeFrame(file, (uint32_t)n, 0, pix, 64) && BfMovie_DecodeFrame(file, (uint32_t)n, 1, pix, 64));
+	CHECK(BlockIs(pix, 64, 16, 8, 0, 156, 135, 138, 0) && BlockIs(pix, 64, 16, 8, 1, 133, 133, 133, 0));
+}
+
 /* The smoke test on a real movie: when BGI_BM_FILE names a .bm file, read
  * it, check its header and decode every frame in sequence into one
  * buffer; all of them have to succeed.  With BGI_BM_OUT set the last
@@ -537,6 +779,8 @@ static void TestRealFile(void)
 		ok += BfMovie_DecodeFrame(d, (uint32_t)n, i, pix, (int)h->width * 4) != 0;
 	CHECK(ok == h->frames);
 	printf("  %ux%u, %u bpp, %u frames decoded\n", h->width, h->height, h->bpp, ok);
+	if(BfMovie_StreamIndexSize(d, (uint32_t)n))
+		TestArchiveStream(d, (uint32_t)n);
 	if(getenv("BGI_BM_OUT") && (f = fopen(getenv("BGI_BM_OUT"), "wb")) != NULL)
 	{
 		uint32_t k;
@@ -569,6 +813,9 @@ int main(void)
 	OS_Init();
 	TestMovie(32);
 	TestMovie(24);
+	Engine_SelectProfile("1.659");
+	Vm_Optable92Init();
+	TestStreamed();
 	TestRealFile();
 	if(chdir("/") == 0)
 		remove(dir);

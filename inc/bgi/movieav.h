@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 typedef struct MovieAv MovieAv_t;
+struct FileView;
 typedef struct MovieAvInfo
 {
     int width, height, audio;
@@ -15,6 +16,8 @@ typedef struct MovieAvInfo
 /* Local files only. Open probes synchronously with an interrupt deadline.
  * Start launches demux/video/audio workers with bounded queues. */
 MovieAv_t* MovieAv_Open(const char* path,int audio,MovieAvInfo_t* info,char* error,size_t size);
+/* Opens only the bytes within view. The caller may close view after the call. */
+MovieAv_t* MovieAv_OpenView(struct FileView* view,int audio,MovieAvInfo_t* info,char* error,size_t size);
 int MovieAv_Start(MovieAv_t* movie,int width,int height);
 int MovieAv_Ready(MovieAv_t* movie);
 void MovieAv_Begin(MovieAv_t* movie);

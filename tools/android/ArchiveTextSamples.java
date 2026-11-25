@@ -19,8 +19,8 @@ final class ArchiveTextSamples {
         int archives,scenes,skipped;boolean limited;
     }
     private static final class Entry {
-        File file;String name,source;long offset,size;
-        Entry(File f,String n,long o,long s,String source){file=f;name=n;offset=o;size=s;this.source=source;}
+        Blob blob;String name,source;long offset,size;
+        Entry(Blob blob,String n,long o,long s,String source){this.blob=blob;name=n;offset=o;size=s;this.source=source;}
     }
     private static void cancelled() throws InterruptedIOException {
         if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("已取消");
@@ -29,7 +29,7 @@ final class ArchiveTextSamples {
         if(p<0 || p>b.length-4)throw new IOException("数据截断");
         return (b[p]&255L)|((b[p+1]&255L)<<8)|((b[p+2]&255L)<<16)|((b[p+3]&255L)<<24);
     }
-    private static boolean magic(byte[] b,String s){
+    static boolean magic(byte[] b,String s){
         byte[] m=s.getBytes(StandardCharsets.US_ASCII);if(b.length<m.length)return false;
         for(int i=0;i<m.length;i++)if(b[i]!=m[i])return false;return true;
     }
@@ -58,56 +58,121 @@ final class ArchiveTextSamples {
         }
     }
     static Result scan(File game)throws IOException {
-        Result r=new Result();List<File> all=new ArrayList<>();files(game,0,all,r);
-        List<Entry> entries=new ArrayList<>();Map<String,File> loose=new HashMap<>();long indexBudget=16*1024*1024;
-        for(File f:all)if(f.getParentFile().equals(game) && possible(f.getName())){
-            loose.put(f.getName().toLowerCase(Locale.ROOT),f);
-            if(f.length()>0 && f.length()<=MAX_FILE)entries.add(new Entry(f,f.getName(),0,f.length(),f.getName()));
+        return scan(game,null);
+    }
+    static Result scan(File game,ArchiveLanguage language)throws IOException {
+        return scan(game,null,language);
+    }
+    static Result scan(File game,File patch,ArchiveLanguage language)throws IOException {
+        return scan(Arrays.asList(game,patch),language);
+    }
+    static Result scan(List<File> layers,ArchiveLanguage language)throws IOException {
+        return scan(layers,language,false);
+    }
+    static Result scanPatch(File patch)throws IOException {
+        return scan(Collections.singletonList(patch),null,true);
+    }
+    /** Directories or a disc image: a disc game's base layer is the mounted index. */
+    static Result scan(ResourceLayers layers,ArchiveLanguage language)throws IOException {
+        return layers.disc==null?scan(layers.directories(),language,false):scanImage(layers.disc,language);
+    }
+    private static Result scan(List<File> layers,ArchiveLanguage language,boolean patchCheck)throws IOException {
+        Result r=new Result();Map<String,File> all=new LinkedHashMap<>();
+        for(File layer:layers)if(layer!=null){
+            List<File> found=new ArrayList<>();files(layer,0,found,r);
+            ArchiveLanguage.addLayer(all,layer,found,language);
         }
-        for(File f:all){
-            cancelled();if(!f.getName().toLowerCase(Locale.ROOT).endsWith(".arc"))continue;
-            if(r.archives>=128 || indexBudget<=0){r.limited=true;break;}r.archives++;
-            try(RandomAccessFile in=new RandomAccessFile(f,"r")){
-                byte[] h=new byte[16];in.readFully(h);boolean arc20=magic(h,"BURIKO ARC20");
-                if(!arc20 && !magic(h,"PackFile    "))continue;
-                int record=arc20?128:32,names=arc20?96:16;long count=u32(h,12),base=16+count*record;
-                if(count>20000 || base>in.length() || base-16>indexBudget){r.skipped++;r.limited=true;continue;}
-                indexBudget-=base-16;byte[] e=new byte[(int)(base-16)];in.readFully(e);
-                for(int i=0;i<count;i++){
-                    if((i&255)==0)cancelled();int start=i*record,end=0;while(end<names && e[start+end]!=0)end++;
-                    String name=new String(e,start,end,StandardCharsets.ISO_8859_1);
-                    if(!possible(name) || loose.containsKey(name.toLowerCase(Locale.ROOT)))continue;
-                    long off=base+u32(e,start+names),size=u32(e,start+names+4);
-                    if(size<=0 || size>MAX_FILE || off>in.length() || size>in.length()-off)continue;
-                    if(entries.size()<8192)entries.add(new Entry(f,name,off,size,game.toPath().relativize(f.toPath())+" / "+name));
-                    else r.limited=true;
-                }
-            }catch(EOFException bad){r.skipped++;}
+        List<Entry> entries=new ArrayList<>();Set<String> loose=new HashSet<>();long[] indexBudget={16*1024*1024};
+        for(Map.Entry<String,File> item:all.entrySet())if(possible(patchCheck?item.getValue().getName():item.getKey())){
+            String name=item.getKey();File file=item.getValue();
+            loose.add(name);
+            if(file.length()>0 && file.length()<=MAX_FILE)
+                entries.add(new Entry(Blob.file(file),name,0,file.length(),ArchiveLanguage.displayPath(layers,file)));
         }
+        for(Map.Entry<String,File> item:all.entrySet()){
+            cancelled();String path=item.getKey();
+            if(!path.endsWith(".arc"))continue;
+            if(r.archives>=128 || indexBudget[0]<=0){r.limited=true;break;}r.archives++;
+            archive(Blob.file(item.getValue()),ArchiveLanguage.displayPath(layers,item.getValue()),loose,entries,r,indexBudget);
+        }
+        sample(entries,r,patchCheck);
+        return r;
+    }
+    /** The same two passes over an image index: no directory is walked. */
+    private static Result scanImage(DiscImage.Source disc,ArchiveLanguage language)throws IOException {
+        Result r=new Result();
+        Map<String,Long> sizes=new LinkedHashMap<>();Map<String,DiscImage.Entry> named=new HashMap<>();
+        for(DiscImage.Entry entry:disc.entries){
+            if(!entry.file())continue;
+            String key=entry.path.toLowerCase(Locale.ROOT);
+            sizes.put(key,entry.size);named.put(key,entry);
+        }
+        Set<String> loose=new HashSet<>();long[] indexBudget={16*1024*1024};
+        for(String name:sizes.keySet())if(possible(name))loose.add(name);
+        Map<String,String> all=new LinkedHashMap<>();
+        ArchiveLanguage.addEntries(all,sizes,language);
+        List<Entry> entries=new ArrayList<>();
+        for(Map.Entry<String,String> item:all.entrySet()){
+            DiscImage.Entry entry=named.get(item.getValue());
+            if(entry==null || !possible(item.getKey()))continue;
+            if(entry.size>0 && entry.size<=MAX_FILE)
+                entries.add(new Entry(Blob.image(disc,entry),item.getKey(),0,entry.size,item.getValue()));
+        }
+        for(Map.Entry<String,String> item:all.entrySet()){
+            cancelled();String path=item.getKey();
+            if(!path.endsWith(".arc"))continue;
+            DiscImage.Entry entry=named.get(item.getValue());
+            if(entry==null)continue;
+            if(r.archives>=128 || indexBudget[0]<=0){r.limited=true;break;}r.archives++;
+            archive(Blob.image(disc,entry),item.getValue(),loose,entries,r,indexBudget);
+        }
+        sample(entries,r,false);
+        return r;
+    }
+    /** Append one archive's scene members; they read through the archive's own blob. */
+    private static void archive(Blob blob,String display,Set<String> loose,List<Entry> entries,Result r,long[] indexBudget)throws IOException {
+        byte[] h;
+        try{h=blob.read(0,16);}catch(EOFException shortFile){r.skipped++;r.limited=true;return;}
+        boolean arc20=magic(h,"BURIKO ARC20");
+        if(!arc20 && !magic(h,"PackFile    "))return;
+        int record=arc20?128:32,names=arc20?96:16;long count=u32(h,12),base=16+count*record,length=blob.size();
+        if(count>20000 || base>length || base-16>indexBudget[0]){r.skipped++;r.limited=true;return;}
+        indexBudget[0]-=base-16;
+        byte[] e=blob.read(16,(int)(base-16));
+        for(int i=0;i<count;i++){
+            if((i&255)==0)cancelled();int start=i*record,end=0;while(end<names && e[start+end]!=0)end++;
+            String name=new String(e,start,end,StandardCharsets.ISO_8859_1);
+            if(!possible(name) || loose.contains(name.toLowerCase(Locale.ROOT)))continue;
+            long off=base+u32(e,start+names),size=u32(e,start+names+4);
+            if(size<=0 || size>MAX_FILE || off>length || size>length-off)continue;
+            if(entries.size()<8192)entries.add(new Entry(blob,name,off,size,display+" / "+name));
+            else r.limited=true;
+        }
+    }
+    private static void sample(List<Entry> entries,Result r,boolean patchCheck)throws IOException {
         entries.sort(Comparator.comparingInt((Entry e)->priority(e.name)).thenComparing(e->e.name).thenComparing(e->e.source));
         Set<String> seen=new HashSet<>();long budget=32*1024*1024;int tried=0;
         for(Entry e:entries){
             cancelled();if(r.samples.size()>=MAX_SAMPLES || r.scenes>=8 || tried++>=128 || budget<=0){r.limited=true;break;}
             if(!seen.add(e.name.toLowerCase(Locale.ROOT)))continue;
-            try(RandomAccessFile in=new RandomAccessFile(e.file,"r")){
-                in.seek(e.offset);byte[] prefix=new byte[(int)Math.min(e.size,32)];in.readFully(prefix);
+            try{
+                byte[] prefix=e.blob.read(e.offset,(int)Math.min(e.size,32));
                 if(!magic(prefix,"DSC FORMAT 1.00\0") && !magic(prefix,"BurikoCompiledScriptVer1.00\0") &&
                     !(prefix.length>=20 && u32(prefix,0)==0x10 && u32(prefix,4)==0 && u32(prefix,12)==0x20 && u32(prefix,16)==0x11))continue;
                 long expanded=magic(prefix,"DSC FORMAT 1.00\0")?u32(prefix,20):e.size;
                 if(expanded>MAX_FILE || e.size+expanded>budget){r.skipped++;r.limited=true;continue;}
                 budget-=e.size+expanded;
-                byte[] stored=new byte[(int)e.size];in.seek(e.offset);in.readFully(stored);
+                byte[] stored=e.blob.read(e.offset,(int)e.size);
                 byte[] data=decode(stored);List<byte[]> strings=strings(data);
                 int added=0;
                 for(byte[] s:strings){
                     if(r.samples.size()>=MAX_SAMPLES || added>=24)break;
                     int high=0;for(byte v:s)if((v&128)!=0)high++;
-                    if(high>=4 && s.length>=6 && s.length<=512){r.samples.add(new Sample(e.source,s));added++;}
+                    if((patchCheck||high>=4) && s.length>=6 && s.length<=512){r.samples.add(new Sample(e.source,s));added++;}
                 }
                 if(added>0)r.scenes++;
             }catch(InterruptedIOException stop){throw stop;}catch(IOException bad){r.skipped++;}
         }
-        return r;
     }
     static List<byte[]> strings(byte[] data)throws IOException {
         int base;

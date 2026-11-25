@@ -3,6 +3,7 @@
  * movieav.c - local-file FFmpeg decoding with bounded queues. */
 #ifdef BGI_HAVE_FFMPEG
 #include "bgi/movieav.h"
+#include "bgi/file.h"
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
@@ -27,6 +28,9 @@
 struct MovieAv
 {
     AVFormatContext* format;
+    AVIOContext* io;
+    FileView_t input;
+    uint32_t inputPos;
     AVCodecContext *video,*audio;
     AVRational timeBase[2];
     struct SwsContext* scaler;
@@ -82,10 +86,41 @@ static int OpenCodec(MovieAv_t* m,int type,int* index,AVCodecContext** out)
     *index=i;return 0;
 }
 
-MovieAv_t* MovieAv_Open(const char* path,int audio,MovieAvInfo_t* info,char* error,size_t size)
+static int ReadInput(void* user, uint8_t* buffer, int requested)
+{
+    MovieAv_t* m = user;
+    uint32_t count = BGI_MIN((uint32_t)requested, m->input.size - m->inputPos);
+    if(!count) return AVERROR_EOF;
+    count = File_Read(&m->input.file, buffer, count);
+    if(!count) return AVERROR(EIO);
+    m->inputPos += count;
+    return (int)count;
+}
+
+static int64_t SeekInput(void* user, int64_t offset, int whence)
+{
+    MovieAv_t* m = user;
+    int64_t base;
+    switch(whence & ~AVSEEK_FORCE)
+    {
+        case AVSEEK_SIZE: return m->input.size;
+        case SEEK_SET: base = 0; break;
+        case SEEK_CUR: base = m->inputPos; break;
+        case SEEK_END: base = m->input.size; break;
+        default: return AVERROR(EINVAL);
+    }
+    if(offset < -base || offset > (int64_t)m->input.size - base)
+        return AVERROR(EINVAL);
+    if(!File_Seek(&m->input.file, m->input.offset + (uint32_t)(base + offset)))
+        return AVERROR(EIO);
+    m->inputPos = (uint32_t)(base + offset);
+    return m->inputPos;
+}
+
+static MovieAv_t* MovieAv_OpenInput(const char* path, FileView_t* view, int audio, MovieAvInfo_t* info,char* error,size_t size)
 {
     MovieAv_t* m;AVDictionary* options=NULL;int r;
-    if(!path||!info){ErrorText(error,size,"open movie",AVERROR(EINVAL));return NULL;}
+    if((!path&&!view)||!info){ErrorText(error,size,"open movie",AVERROR(EINVAL));return NULL;}
     m=calloc(1,sizeof *m);
     if(!m){ErrorText(error,size,"allocate movie",AVERROR(ENOMEM));return NULL;}
     m->videoIndex=m->audioIndex=-1;m->frameUs=1000000.0/30;
@@ -98,6 +133,23 @@ MovieAv_t* MovieAv_Open(const char* path,int audio,MovieAvInfo_t* info,char* err
     m->deadline=av_gettime_relative()+10000000;
     m->format->interrupt_callback=(AVIOInterruptCB){Interrupt,m};
     m->format->probesize=8*1024*1024;m->format->max_analyze_duration=5000000;
+    if(view)
+    {
+        uint8_t* buffer;
+        if(view->size > UINT32_MAX - view->offset || !File_Seek(&view->file, view->offset))
+        {
+            r = AVERROR(EIO);
+            goto fail;
+        }
+        buffer = av_malloc(32768);
+        if(!buffer){r=AVERROR(ENOMEM);goto fail;}
+        m->io = avio_alloc_context(buffer, 32768, 0, m, ReadInput, NULL, SeekInput);
+        if(!m->io){av_free(buffer);r=AVERROR(ENOMEM);goto fail;}
+        m->input = *view;
+        File_Ctor(&view->file);
+        m->format->pb = m->io;
+        m->format->flags |= AVFMT_FLAG_CUSTOM_IO;
+    }
     av_dict_set(&options,"protocol_whitelist","file",0);
     r=avformat_open_input(&m->format,path,NULL,&options);av_dict_free(&options);
     if(r<0)goto fail;
@@ -131,6 +183,16 @@ MovieAv_t* MovieAv_Open(const char* path,int audio,MovieAvInfo_t* info,char* err
     m->deadline=0;return m;
 fail:
     av_dict_free(&options);ErrorText(error,size,"open movie",r);MovieAv_Close(m);return NULL;
+}
+
+MovieAv_t* MovieAv_Open(const char* path,int audio,MovieAvInfo_t* info,char* error,size_t size)
+{
+    return MovieAv_OpenInput(path, NULL, audio, info, error, size);
+}
+
+MovieAv_t* MovieAv_OpenView(FileView_t* view,int audio,MovieAvInfo_t* info,char* error,size_t size)
+{
+    return MovieAv_OpenInput(NULL, view, audio, info, error, size);
 }
 
 static int64_t Timestamp(MovieAv_t* m,AVFrame* frame,int stream,int64_t fallback)
@@ -389,6 +451,12 @@ void MovieAv_Close(MovieAv_t* m)
     for(int i=0;i<VIDEO_SLOTS;i++)av_free(m->pictures[i]);
     free(m->ring);av_free(m->pcm);sws_freeContext(m->scaler);swr_free(&m->resampler);av_channel_layout_uninit(&m->inputLayout);
     avcodec_free_context(&m->video);avcodec_free_context(&m->audio);avformat_close_input(&m->format);
+    if(m->io)
+    {
+        av_freep(&m->io->buffer);
+        avio_context_free(&m->io);
+        File_Close(&m->input.file);
+    }
     pthread_cond_destroy(&m->changed);pthread_mutex_destroy(&m->lock);free(m);
 }
 #endif

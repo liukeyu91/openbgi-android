@@ -148,6 +148,7 @@ int Blit_Displace(Bmp_t* dst, const Bmp_t* src, const Bmp_t* vec1, const Bmp_t* 
  * width 2 * level + 1; type 0 pads with black, 1 repeats the edge.  0 ok,
  * 3 level above 0x100, 0xe unknown type, 0xf mode or size mismatch. */
 int Blit_Gradient(Bmp_t* dst, const Bmp_t* src, int type, int level);
+void Blit_Gradient680(Bmp_t* dst, Bmp_t* snap, int type, int level); // snap can be reused for the first pass
 /* ripple effects (effector mode 2, background type 8, sprite mode 4):
  * srcCrop read through the PM_VECDIST map and the ring table of
  * BmpMgr_RippleFill; srcFull is the whole picture the samples may stray

@@ -24,6 +24,32 @@ public final class GameEncodingTest {
     private static File noScan(){return new File("unused"){
         @Override public File[] listFiles(){throw new AssertionError("Unexpected repeated scan");}
     };}
+    private static void localized(Path root)throws Exception {
+        Path assets=Files.createDirectory(root.resolve("localized-assets"));
+        Path entry=Files.createDirectory(root.resolve("localized-entry"));
+        for(String name:new String[]{"system.cn.arc","sysprg.cn.arc","SYSTEM.TC.ARC","sysprg.t2.arc",
+                                    "system.en.arc","sysprg.en.arc","sysgrp.arc","sysgrp.cn.arc","sysgrp.e2.arc"}) {
+            Files.write(assets.resolve(name),new byte[]{1});
+        }
+        check(ArchiveLanguage.available(assets.toFile()).equals(Arrays.asList(ArchiveLanguage.values())),"All language pairs found");
+        GameSettings settings=GameEncoding.prepare(entry.toFile(),assets.toFile());
+        check(settings.archiveLanguage.equals("cn") && settings.encoding.equals("gbk") && settings.encodingReady(),"Default CN without merged archives");
+        for(ArchiveLanguage language:ArchiveLanguage.values()){
+            settings.archiveLanguage=language.id;
+            settings.save(entry.toFile());
+            settings=GameEncoding.prepare(entry.toFile(),assets.toFile());
+            check(settings.encodingReady() && settings.encoding.equals(language.encoding),"Code page for "+language.id);
+        }
+        List<File> files=Arrays.asList(assets.toFile().listFiles());
+        check(ArchiveLanguage.TC.select(files).contains(assets.resolve("sysgrp.cn.arc").toFile()),"Traditional graphics fallback");
+        check(ArchiveLanguage.EN.select(files).contains(assets.resolve("sysgrp.e2.arc").toFile()),"English alternate priority");
+        check(!ArchiveLanguage.EN.select(files).contains(assets.resolve("sysgrp.cn.arc").toFile()),"English avoids CN fallback");
+        check(!Files.exists(assets.resolve("system.arc")) && !Files.exists(assets.resolve(".openbgi")),"Direct assets remain untouched");
+        Files.delete(assets.resolve("sysprg.t2.arc"));
+        check(!ArchiveLanguage.available(assets.toFile()).contains(ArchiveLanguage.TC),"A partial language pair is not selectable");
+        Files.write(assets.resolve("system.arc"),new byte[]{1});
+        check(ArchiveLanguage.resolve(assets.toFile(),"")==null,"Neutral boot remains the default");
+    }
     private static void tests(Path root)throws Exception {
         for(String encoding:new String[]{"sjis","gbk","utf8"}){
             Path dir=game(root,"new-"+encoding,encoding);byte[] archive=Files.readAllBytes(dir.resolve("system.arc"));
@@ -71,6 +97,7 @@ public final class GameEncodingTest {
         finally{Thread.interrupted();}
         s=GameSettings.load(old.toFile());s.encodingDetectorVersion=0;s.save(old.toFile());
         s=GameEncoding.prepare(old.toFile(),old.toFile());check(s.encodingReady() && s.encodingDetectorVersion==GameSettings.ENCODING_DETECTOR_VERSION,"Stale detector re-evaluated");
+        localized(root);
         System.out.println("Automatic game encoding: "+checks+" checks passed");
     }
     public static void main(String[] args)throws Exception {

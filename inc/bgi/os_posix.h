@@ -16,6 +16,18 @@
 
 // Shift-JIS Windows path -> UTF-8 POSIX path (drive letter = game directory, case-insensitive match of each component)
 void OsPosix_Path(const char* win, char* out, size_t n);
+void OsPosix_ReadPath(const char* win, char* out, size_t n);
+int OsPosix_SetPatchDirectory(const char* native);
+int OsPosix_PatchPath(const char* native, char* out, size_t n, int localize);
+int OsPosix_SetDataDirectory(const char* native);
+int OsPosix_DataPath(const char* native, char* out, size_t n, int localize);
+int OsPosix_BaseHidden(const char* native);
+int OsPosix_WritePath(const char* win, char* out, size_t n, int createParents);
+int OsPosix_HasDataDirectory(void);
+int OsPosix_MountDisc(const char* native); // NULL unmounts
+int OsPosix_SetArchiveLanguage(const char* language);
+const char* OsPosix_LocalizedArchive(const char* path, char* out, size_t n);
+void OsPosix_ArchiveLogicalName(const char* name, char* out, size_t n);
 // Shift-JIS text -> UTF-8 (window titles, dialog labels, font lookups); NUL-terminated into out (n bytes)
 void OsPosix_SjisToUtf8(const char* sjis, char* out, size_t n);
 // one two-byte Shift-JIS code -> Unicode (0xfffd when unmapped)
@@ -26,6 +38,9 @@ int OsPosix_UnicodeToSjis(uint32_t cp, char out[2]);
 const char* OsPosix_ConfigDir(void);
 // UTF-8 family override for translation font hooks; empty restores script choice.
 void OsPosix_SetFontFamily(const char* family);
+#ifdef BGI_ANDROID
+int OsPosix_MissingGlyphs(const char* family, uint32_t* codePoints, int count);
+#endif
 // SIGTERM / SIGINT (process.c) -> the window's close request (window.c)
 void OsPosix_RequestClose(void);
 

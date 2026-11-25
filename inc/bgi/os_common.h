@@ -35,6 +35,9 @@ size_t OsCommon_SjisToUtf8(const char* sjis, char* out, size_t n, OsCommon_SjisL
 // the text encoding of OS_SetTextEncoding (1 = UTF-8), and the character decoding the font back ends share
 extern int gOsTextUtf8;
 extern int gOsTextGbk;
+extern int gOsTextBig5;
+int OsCommon_ChineseCharLen(const char* s); // active CP936 or CP950
+uint16_t OsCommon_CodePointToChinese(uint32_t cp);
 int OsCommon_Utf8SeqLen(const uint8_t* s);                                         // the length of a well-formed UTF-8 sequence at s, else 0
 uint32_t OsCommon_Utf8Decode(const uint8_t* u, int* outLen);                       // one sequence to its code point; *outLen = bytes taken
 uint32_t OsCommon_CodePoint(const char* s, int len, OsCommon_SjisLookup_t lookup); // the code point of a `len`-byte character in the text encoding

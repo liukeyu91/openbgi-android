@@ -83,7 +83,7 @@ void Layout_GlyphBitmap(Bmp_t* dst, int w, int h, const Bmp_t* view, const Glyph
 {
 	Bmp_AllocScreen(dst, w, h, 1);
 	Bmp_Fill(dst, NULL, 0);
-	if(style[0] == 2 && gEngine->gen >= GEN_1_494)
+	if(style[0] == 2 && gEngine->gen >= GEN_1_492)
 	{
 		Bmp_t cell, tmp, tmp2;
 		Bmp_AllocScreen(&cell, view->w + 2 * sdx, view->h, 1);
@@ -123,20 +123,21 @@ void Layout_GlyphBitmap(Bmp_t* dst, int w, int h, const Bmp_t* view, const Glyph
  * offset itself, style 2 (1.494 on) twice, the outline going both ways */
 int Layout_ShadowReserve(const int32_t style[5], int sd)
 {
-	if(style[0] == 2 && gEngine->gen >= GEN_1_494)
+	if(style[0] == 2 && gEngine->gen >= GEN_1_492)
 		return 2 * sd;
 	return style[0] ? sd : 0;
 }
 
 /* the pixels added after a fixed-pitch glyph: gCharPitch, plus the font's
  * own extra width ("91 0F") for its posture from 1.529 on; nothing for
- * proportional text */
+ * proportional text except for the per-face tracking of 1.680. */
 int Layout_Pitch(int proportional, const FontInfo_t* fi)
 {
+	int tracking = fi && fi->font ? fi->font->tracking : 0;
 	int extra = 0;
 	if(proportional)
-		return 0;
+		return tracking;
 	if(gEngine->gen >= GEN_1_529 && fi && fi->font)
 		extra = fi->font->extraW[fi->italic ? 1 : 0];
-	return gCharPitch + extra;
+	return gCharPitch + extra + tracking;
 }

@@ -525,8 +525,10 @@ static void ParseLine(As_t* a, const char* text, size_t len)
 	if(l.p + 2 < l.end && l.p[0] == '0' && (l.p[1] == 'x' || l.p[1] == 'X'))
 	{ // a bare number is a base opcode written numerically (the disassembler does that for a renumbered one)
 		char* end;
-		long v = strtol(l.p, &end, 16);
-		if(v < 0 || v >= 0x80 || (end < l.end && IsIdent(*end)))
+		int fam, op;
+		strtol(l.p, &end, 16);
+		if((end < l.end && IsIdent(*end)) ||
+			!Asm_LookupName(l.p, (size_t)(end - l.p), a->gen, &fam, &op))
 		{
 			Error(a, a->line, "bad numeric opcode");
 			return;
@@ -535,7 +537,7 @@ static void ParseLine(As_t* a, const char* text, size_t len)
 		st = NewStmt(a);
 		st->kind = ST_INSN;
 		st->fam = 0;
-		st->op = (int)v;
+		st->op = op;
 		if(!ParseOperands(a, &l, st))
 			a->count--;
 		return;
@@ -727,15 +729,22 @@ static const char* Formats(int op, EngineGen_t gen)
 		case 0x0a: return "z";
 		case 0x0b: return "i";
 		case 0x0c: return "zq";
+		case 0x0d: return "s";
+		case 0x0e: return "ns";
 		case 0x15: return (gen == GEN_COUNT || gen >= GEN_1_667) ? "k?" : "k";
 		case 0x0f:
 		case 0x19:
 		case 0x1d:
 		case 0x1e: return "L";
-		case 0x12: return "S";
+		case 0x12: return gen == GEN_1_680 || gen == GEN_COUNT ? "s" : "S";
+		case 0x13: return "r";
 		case 0x18: return "w";
 		case 0x1a:
-		case 0x1b: return "Ls";
+		case 0x1b:
+		case 0xe4:
+		case 0xe5:
+		case 0xe6:
+		case 0xe7: return "Ls";
 		case 0x1c: return "Lb";
 		case 0x1f:
 		case 0x2c:
@@ -743,6 +752,8 @@ static const char* Formats(int op, EngineGen_t gen)
 		case 0x2e:
 		case 0x2f: return "s";
 		case 0x3b: return "kr";
+		case 0x36: return "ks";
+		case 0x37: return "krs";
 		case 0x3c: return "b";
 		default: return "";
 	}
@@ -922,6 +933,8 @@ static void EncodeInsn(As_t* a, Stmt_t* s, int fam, int op, Operand_t* opd, int 
 				p += 2;
 				break;
 			case 's':
+				if(final && op == 0x12 && !Fits(v, INT32_MIN, INT32_MAX))
+					Error(a, s->line, "frame adjustment out of range");
 				EmitSleb(a, v);
 				p += SlebLen(v);
 				break;

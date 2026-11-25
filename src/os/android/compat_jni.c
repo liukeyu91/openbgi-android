@@ -1,6 +1,61 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include <jni.h>
 #include "bgi/compat.h"
+#include "bgi/version.h"
+#include "bgi/os_posix.h"
+
+JNIEXPORT jobjectArray JNICALL Java_org_openbgi_port_NativeProgramInspector_identify(
+	JNIEnv* env,jclass type,jstring path,jbyteArray boot)
+{
+	const char* config=path?(*env)->GetStringUTFChars(env,path,NULL):NULL;
+	jobjectArray result=NULL;
+	(void)type;
+	if(path && !config)return NULL;
+	if(boot){
+		jsize size=(*env)->GetArrayLength(env,boot);
+		jbyte* data=size<=COMPAT_MAX_PROGRAM?(*env)->GetByteArrayElements(env,boot,NULL):NULL;
+		if(data){
+			const char* selected=Compat_Configure(config,"auto",(const uint8_t*)data,(uint32_t)size);
+			(*env)->ReleaseByteArrayElements(env,boot,data,JNI_ABORT);
+			if(selected){
+				jclass stringClass=(*env)->FindClass(env,"java/lang/String");
+				if(stringClass)result=(*env)->NewObjectArray(env,2,stringClass,NULL);
+				if(result){
+					jstring profile=(*env)->NewStringUTF(env,selected);
+					jstring product=profile?(*env)->NewStringUTF(env,Engine_ProductName()):NULL;
+					if(product){
+						(*env)->SetObjectArrayElement(env,result,0,product);
+						(*env)->SetObjectArrayElement(env,result,1,profile);
+					}
+				}
+			}
+		}
+	}
+	if(config)(*env)->ReleaseStringUTFChars(env,path,config);
+	return result;
+}
+
+JNIEXPORT jintArray JNICALL Java_org_openbgi_port_NativeProgramInspector_missingGlyphs(
+	JNIEnv* env,jclass type,jstring family,jintArray codePoints)
+{
+	jint values[2048];
+	uint32_t points[2048];
+	(void)type;
+	jsize count=(*env)->GetArrayLength(env,codePoints);
+	if(count>2048)return NULL;
+	(*env)->GetIntArrayRegion(env,codePoints,0,count,values);
+	if((*env)->ExceptionCheck(env))return NULL;
+	const char* name=(*env)->GetStringUTFChars(env,family,NULL);
+	if(!name)return NULL;
+	for(int i=0;i<count;i++)points[i]=(uint32_t)values[i];
+	int missing=OsPosix_MissingGlyphs(name,points,count);
+	(*env)->ReleaseStringUTFChars(env,family,name);
+	if(missing<0)return NULL;
+	for(int i=0;i<missing;i++)values[i]=(jint)points[i];
+	jintArray output=(*env)->NewIntArray(env,missing);
+	if(output)(*env)->SetIntArrayRegion(env,output,0,missing,values);
+	return output;
+}
 
 JNIEXPORT jstring JNICALL Java_org_openbgi_port_NativeProgramInspector_configure(
 	JNIEnv* env,jclass type,jstring path,jstring profile,jbyteArray boot)

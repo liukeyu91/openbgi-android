@@ -10,6 +10,8 @@
 #include "renderer.h"
 #include "bgi/crash.h"
 #include "bgi/os_posix.h"
+#include "bgi/strutil.h"
+#include "bgi/version.h"
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <fcntl.h>
@@ -55,6 +57,7 @@ uint64_t OsAndroid_ClockNs(void)
 static int gLogFd = -1;
 static pthread_mutex_t gLogLock = PTHREAD_MUTEX_INITIALIZER;
 static size_t gLogBytes;
+static long long gSessionEpoch;
 
 void OsAndroid_Log(const char* text)
 {
@@ -69,6 +72,44 @@ void OsAndroid_Log(const char* text)
         gLogBytes += length + 1;
     }
     pthread_mutex_unlock(&gLogLock);
+}
+
+static void RunReport(const char* field,const char* value)
+{
+    char line[352];
+    snprintf(line,sizeof line,"Run %lld %s: %s",gSessionEpoch,field,value);
+    OsAndroid_Log(line);
+}
+
+void OsAndroid_ReportVm(int final)
+{
+    static uint64_t next;
+    char program[65], where[144];
+    uint32_t ip,opcode;
+    if(!final){
+        uint64_t now=RawClockNs();
+        if(now<next)return;
+        next=now+UINT64_C(4000000000);
+    }
+    if(OsAndroid_LastInstruction(program,sizeof program,&ip,&opcode)){
+        const char* encoding=gTextEncoding==TEXT_BIG5?"big5":gTextEncoding==TEXT_GBK?"gbk":
+            gTextEncoding==TEXT_UTF8?"utf8":"sjis";
+        RunReport("profile",gEngine->name);
+        RunReport("encoding",encoding);
+        snprintf(where,sizeof where,"%s +0x%x (opcode $%X)",program,(unsigned)ip,(unsigned)opcode);
+        RunReport("program",where);
+    }
+}
+
+void OsAndroid_ReportError(const char* body)
+{
+    const char* opcode=strstr(body,"Instruction No. [ $");
+    unsigned number;
+    char value[20];
+    if(opcode && sscanf(opcode,"Instruction No. [ $%x ]",&number)==1){
+        snprintf(value,sizeof value,"$%X",number);
+        RunReport("script-error",value);
+    }else RunReport("script-error","no opcode");
 }
 
 
@@ -89,19 +130,20 @@ static void* RunEngine(void* context)
     {
         if(OS_Init())
         {
-            if(OS_FileAttrs("system.arc") != OS_INVALID_ATTRS || OS_FileAttrs("ipl._bp") != OS_INVALID_ATTRS)
-            {
-                char options[128];
-                OsAndroid_EngineOptions(options, sizeof options);
-                Engine_Main(options);
-            }
-            else
-                OsAndroid_Log("Game missing: import a directory containing system.arc or ipl._bp.");
+            char options[128];
+            OsAndroid_EngineOptions(options, sizeof options);
+            int code=Engine_Main(options);
+            char status[20];
+            OsAndroid_ReportVm(1);
+            snprintf(status,sizeof status,"%d",code);
+            RunReport("exit",status);
             OS_Shutdown();
             OsAndroid_RenderClose();
         }
-        else
+        else {
+            RunReport("exit","storage initialization failed");
             OsAndroid_Log("Could not open the app's game or configuration directory.");
+        }
     }
     gAndroidHost = NULL;
     pthread_mutex_lock(&host->lock);
@@ -135,7 +177,7 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeFontFamily(JNIEn
 }
 
 JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
-    JNIEnv* env, jobject activity, jstring internalPath, jstring externalPath, jint scaleMode)
+    JNIEnv* env, jobject activity, jstring internalPath, jstring externalPath, jint scaleMode, jlong sessionEpoch)
 {
     AndroidHost_t* host;
     pthread_t worker;
@@ -143,6 +185,7 @@ JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
     const char* external;
     jclass cls;
     if(gHost) return JNI_FALSE;
+    gSessionEpoch=(long long)sessionEpoch;
     internal = (*env)->GetStringUTFChars(env, internalPath, NULL);
     if(!internal) return JNI_FALSE;
     external = (*env)->GetStringUTFChars(env, externalPath, NULL);
@@ -200,6 +243,7 @@ failed:
     (*env)->ReleaseStringUTFChars(env, internalPath, internal);
     (*env)->ReleaseStringUTFChars(env, externalPath, external);
     OsAndroid_Log("Could not start the engine thread.");
+    RunReport("exit","engine thread initialization failed");
     return JNI_FALSE;
 }
 

@@ -14,6 +14,8 @@ public final class GameTextCodecTest {
         check("TestAB", "TestABCD", "", 0, 0, 2, 6, false);
         check("测试AB", "测试ABCD", "", 0, 0, 2, 6, false);
         check("日本AB", "日本ABCD", "", 0, 0, 0, 6, false);
+        check("繁體AB", "繁體ABCD", "", 0, 0, 3, 6, false);
+        check("繁", "繁體", "", 0, 0, 3, 3, false);
         check("中文😀AB", "中文😀ABCD", "", 0, 0, 1, 12, false);
         check("", "😀", "", 0, 0, 1, 3, false); // never split a surrogate pair / UTF-8 scalar
         check("", "😀", "", 0, 0, 2, 20, false); // no lossy GBK replacement

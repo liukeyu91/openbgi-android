@@ -44,6 +44,7 @@ typedef enum EngineGen
 	GEN_1_69_444, // Tayutama (trial) - the reference build
 	GEN_1_69_451, // Tayutama (the retail game)
 	GEN_1_69_472, // TayutamaHD
+	GEN_1_492,    // Kira Kira Curtain Call (English)
 	GEN_1_494,    // PrismRhythm
 	GEN_1_529,    // DiamicDays
 	GEN_1_535,    // Gackoh
@@ -61,6 +62,7 @@ typedef enum EngineGen
 	GEN_1_662,    // yumahorome
 	GEN_1_667,    // arcana
 	GEN_1_669,    // haruyome
+	GEN_1_680,    // LovepicalPoppy
 	GEN_COUNT
 } EngineGen_t;
 #define GEN_FIRST GEN_1_58
@@ -90,7 +92,7 @@ typedef struct EngineProfile
 	const char* name;   // "1.69/444" etc. (the key for Engine_SelectProfile)
 	EngineGen_t gen;    // the generation: selects the opcode set
 	int compat;         // the script compatibility level x 100: 169, 171, 172
-	int tagShift;       // bits of the offset: 24, 25 or 26
+	int tagShift;       // bits of the offset: 24, 25, 26 or 28
 	uint32_t tagCode;   // tag of the thread's code area
 	uint32_t tagData;   // tag of the thread's data area (locals)
 	uint32_t tagHeap;   // tag of the thread's local heap

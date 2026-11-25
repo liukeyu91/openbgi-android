@@ -58,6 +58,41 @@ static int Opcode_Gfx1_SetPresentAlways(Thread_t* t)
 	return 0;
 }
 
+static int Opcode_Gfx1_SnapshotOffset(Thread_t* t) // 91 05: bmp, x, y, prio → code
+{
+	int prio = (int)Thread_Pop(t), y = (int)Thread_Pop(t), x = (int)Thread_Pop(t);
+	int bmp = (int)Thread_Pop(t);
+	Thread_Push(t, (uint32_t)Gfx_SnapshotOffset(gGfx, bmp, x, y, prio));
+	return 0;
+}
+
+static int Opcode_Gfx1_MoviePlayArchiveEntry(Thread_t* t) // 91 F8: arc, name, volume → code
+{
+	int volume = (int32_t)Thread_Pop(t);
+	const char* name = (const char*)PopPtr(t);
+	const char* arc = (const char*)PopPtr(t);
+	return Movie_PlayArchiveEntry(t, arc, name, volume);
+}
+
+static int Opcode_Gfx1_MovieStopArchive(Thread_t* t) // 91 F9: → code
+{
+	Thread_Push(t, (uint32_t)Movie_StopArchive());
+	return 0;
+}
+
+static int Opcode_Gfx1_MovieArchivePlaying(Thread_t* t) // 91 FA: → playing
+{
+	Thread_Push(t, (uint32_t)Movie_ArchiveIsPlaying());
+	return 0;
+}
+
+static int Opcode_Gfx1_MovieArchiveVolume(Thread_t* t) // 91 FB: volume → code
+{
+	int32_t volume = (int32_t)Thread_Pop(t);
+	Thread_Push(t, (uint32_t)Movie_SetArchiveVolume(volume));
+	return 0;
+}
+
 /* 91 06 (1.616 on): x, y →
  * An offset added to the draw position of every object whose followOffset
  * parameter is set (setParam 0xC4, the default); the display is redrawn in
@@ -1386,6 +1421,11 @@ static int Opcode_Gfx1_SetKeyMap(Thread_t* t) // 91 BF: no, actions →
 void Vm_Optable91Init(void)
 {
 	static const OpEntry_t ops[] = {
+		{0x05, Opcode_Gfx1_SnapshotOffset, GEN_1_680, GEN_1_680},
+		{0xf8, Opcode_Gfx1_MoviePlayArchiveEntry, GEN_1_680, GEN_1_680},
+		{0xf9, Opcode_Gfx1_MovieStopArchive, GEN_1_680, GEN_1_680},
+		{0xfa, Opcode_Gfx1_MovieArchivePlaying, GEN_1_680, GEN_1_680},
+		{0xfb, Opcode_Gfx1_MovieArchiveVolume, GEN_1_680, GEN_1_680},
 		{0x0A, Opcode_Gfx1_SetRasterCompatibility, GEN_FIRST, GEN_LAST},
 		{0x00, Opcode_Gfx1_SetPresentAlways, GEN_1_653, GEN_LAST},
 		{0x06, Opcode_Gfx1_SetGlobalOffset, GEN_1_616, GEN_LAST},
@@ -1400,10 +1440,10 @@ void Vm_Optable91Init(void)
 		{0x13, Opcode_Gfx1_VecPolar, GEN_FIRST, GEN_LAST},
 		{0x14, Opcode_Gfx1_VecBendAngle, GEN_FIRST, GEN_LAST},
 		{0x15, Opcode_Gfx1_VecBend, GEN_FIRST, GEN_LAST},
-		{0x16, Opcode_Gfx1_VecSine, GEN_1_494, GEN_LAST},
+		{0x16, Opcode_Gfx1_VecSine, GEN_1_492, GEN_LAST},
 		{0x18, Opcode_Gfx1_Xform, GEN_FIRST, GEN_LAST},
 		{0x19, Opcode_Gfx1_XformCopy, GEN_FIRST, GEN_LAST},
-		{0x1B, Opcode_Gfx1_GatherAdd, GEN_1_494, GEN_LAST},
+		{0x1B, Opcode_Gfx1_GatherAdd, GEN_1_492, GEN_LAST},
 		{0x1C, Opcode_Gfx1_Resample, GEN_FIRST, GEN_LAST},
 		{0x1D, Opcode_Gfx1_ColourMode, GEN_1_529, GEN_LAST},
 		{0x1E, Opcode_Gfx1_ApplyGray, GEN_FIRST, GEN_LAST},
@@ -1411,14 +1451,14 @@ void Vm_Optable91Init(void)
 		{0x1A, Opcode_Gfx1_BmpColourWithAlpha, GEN_1_69_472, GEN_LAST},
 		{0x31, Opcode_Gfx1_ObjSetHidden, GEN_1_573, GEN_LAST},
 		{0x33, Opcode_Gfx1_ObjSetFixedPos, GEN_FIRST, GEN_LAST},
-		{0x36, Opcode_Gfx1_ObjSetFixedOffset2, GEN_1_494, GEN_LAST},
+		{0x36, Opcode_Gfx1_ObjSetFixedOffset2, GEN_1_492, GEN_LAST},
 		{0x37, Opcode_Gfx1_ObjSetFixedOffset, GEN_1_69_472, GEN_LAST},
 		{0x38, Opcode_Gfx1_ObjGetParam, GEN_1_69_472, GEN_LAST},
-		{0x3E, Opcode_Gfx1_ObjAttach, GEN_1_494, GEN_LAST},
-		{0x3F, Opcode_Gfx1_ObjDetach, GEN_1_494, GEN_LAST},
+		{0x3E, Opcode_Gfx1_ObjAttach, GEN_1_492, GEN_LAST},
+		{0x3F, Opcode_Gfx1_ObjDetach, GEN_1_492, GEN_LAST},
 		{0x97, Opcode_Gfx1_SetRubyFont, GEN_1_529, GEN_LAST},
 		{0x99, Opcode_Gfx1_SetTextScaleDivisor, GEN_1_529, GEN_LAST},
-		{0x9B, Opcode_Gfx1_MeasureText, GEN_1_494, GEN_LAST},
+		{0x9B, Opcode_Gfx1_MeasureText, GEN_1_492, GEN_LAST},
 		{0x9A, Opcode_Gfx1_SetTextFunction, GEN_1_529, GEN_LAST},
 		{0x9E, Opcode_Gfx1_TextCountLinks, GEN_1_529, GEN_LAST},
 		{0x9F, Opcode_Gfx1_TextStripTags, GEN_1_529, GEN_LAST},
@@ -1429,7 +1469,7 @@ void Vm_Optable91Init(void)
 		{0xF4, Opcode_Gfx1_VideoTextureControl4, GEN_1_69_472, GEN_LAST},
 		{0xF5, Opcode_Gfx1_VideoTextureSlotOp, GEN_1_69_472, GEN_LAST},
 		{0xF6, Opcode_Gfx1_VideoTextureSlotOp, GEN_1_69_472, GEN_LAST},
-		{0xF7, Opcode_Gfx1_VideoTextureFrame, GEN_1_494, GEN_LAST},
+		{0xF7, Opcode_Gfx1_VideoTextureFrame, GEN_1_492, GEN_LAST},
 		{0x40, Opcode_Gfx1_BgSetLayers, GEN_FIRST, GEN_LAST},
 		{0x41, Opcode_Gfx1_BglSelect, GEN_FIRST, GEN_LAST},
 		{0x42, Opcode_Gfx1_BglShow, GEN_FIRST, GEN_LAST},

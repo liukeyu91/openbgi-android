@@ -12,6 +12,7 @@ import subprocess
 from translation_compat.pipeline import (
     aplib_subprocess, convert, inspect_game, plan_report, read_profile,
 )
+from translation_compat.installer import convert_installer
 
 
 def main():
@@ -31,8 +32,22 @@ def main():
                                  help='Explicit optional decoder Python with aplib installed')
         else:
             command.add_argument('--report', type=Path)
+    installer = sub.add_parser('installer', help='Extract an NSIS/Inno installer to an OpenBGI patch ZIP')
+    installer.add_argument('source', type=Path)
+    installer.add_argument('--out', type=Path, required=True)
+    installer.add_argument('--format', choices=('auto', 'nsis', 'inno'), default='auto')
+    installer.add_argument('--extractor', help='Path to 7-Zip or innoextract')
+    installer.add_argument('--root', help='Game directory relative to the extracted files')
+    installer.add_argument('--select', action='append', default=[], metavar='GLOB')
+    installer.add_argument('--exclude', action='append', default=[], metavar='GLOB')
+    installer.add_argument('--manifest', type=Path, help='Optional OpenBGI patch.json')
     args = parser.parse_args()
     try:
+        if args.command == 'installer':
+            kind, count = convert_installer(args.source, args.out, args.format, args.extractor,
+                                            args.root, args.select, args.exclude, args.manifest)
+            print(f'{kind.upper()} → {args.out} ({count} files)')
+            return 0
         if args.command == 'inspect':
             result = inspect_game(args.game, args.depth)
         elif args.command == 'plan':

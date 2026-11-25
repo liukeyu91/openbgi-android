@@ -44,10 +44,10 @@ final class GameAudioFocus {
     boolean foreground() { return controller.foreground(); }
     String message() {
         switch(controller.reason()) {
-            case HEADPHONES: return "耳机已断开，游戏已暂停";
-            case DENIED: return "暂时无法取得音频焦点，游戏已暂停";
-            case WAITING: return "正在等待音频焦点，游戏已暂停";
-            default: return "音频中断，游戏已暂停";
+            case HEADPHONES: return context.getString(R.string.audio_headphones);
+            case DENIED: return context.getString(R.string.audio_denied);
+            case WAITING: return context.getString(R.string.audio_waiting);
+            default: return context.getString(R.string.audio_interrupted);
         }
     }
     void resume() {

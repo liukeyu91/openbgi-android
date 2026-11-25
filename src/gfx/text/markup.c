@@ -152,7 +152,7 @@ static void Markup_UseBase(Markup_t* m) // back to the window's font
 static int Markup_OpenFont(Markup_t* m, const char* face, int size, int widthPct, int bold, int italic)
 {
 	FontRaster_t* f = FontRaster_New();
-	if(FontRaster_Init(f, FontNames_Resolve(face), size, widthPct, bold, italic, 0x40) != 0)
+	if(FontCache_InitRaster(gBmpMgr ? gBmpMgr->fonts : NULL, f, face, size, widthPct, bold, italic, 0x40) != 0)
 	{
 		FontRaster_Delete(f);
 		return 0;

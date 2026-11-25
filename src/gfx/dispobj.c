@@ -685,9 +685,9 @@ int DispObj_SetParam(DispObj_t* o, int no, int a, int b)
 				break;
 			o->paramC5 = a;
 			return 0;
-		case 0x8000: DispObj_SetSnap(o, a, gEngine->gen >= GEN_1_494 ? b : 0); return 0;
+		case 0x8000: DispObj_SetSnap(o, a, gEngine->gen >= GEN_1_492 ? b : 0); return 0;
 		case 0x8001:
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			o->noPerspective = a;
 			return 0;
@@ -712,12 +712,12 @@ int DispObj_SetParam(DispObj_t* o, int no, int a, int b)
 			return 0;
 		}
 		case 0x7fff0000: // 1.494 on
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			o->redrawEveryFrame = a;
 			return 0;
 		case 0x7fffffff:
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			if((uint32_t)a >= 16)
 				return (int)0xffff0002;
@@ -771,7 +771,7 @@ int DispObj_GetParam(DispObj_t* o, int no, int32_t* out)
 		case 1: out[0] = o->effect; return 0;
 		case 2: out[0] = o->vt->getLevel(o); return 0;
 		case 3: // 1.494 on: the priority
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			out[0] = o->priority;
 			return 0;
@@ -792,7 +792,7 @@ int DispObj_GetParam(DispObj_t* o, int no, int32_t* out)
 			out[2] = v[2];
 			return 0;
 		case 0x7fffffff: // 1.494 on: out[0] names the slot and receives the value
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			if((uint32_t)out[0] >= 16)
 				return (int)0xffff0002;
@@ -963,8 +963,9 @@ int DispObj_DrawClipped(DispObj_t* o, const ScreenBmp_t* g, const Rect_t* dirty,
 	inside = Rect_Inside(&r, dirty);
 	if(Rect_Clip(&r, dirty))
 	{
+		Rect_t clip = {r.l - g->screen.l, r.t - g->screen.t, r.r - g->screen.l, r.b - g->screen.t};
 		dst = g->bmp;
-		Bmp_Crop(&dst, &r);
+		Bmp_Crop(&dst, &clip);
 		DispObj_ToLocal(o, &r);
 		o->vt->draw(o, &dst, &r, minKey);
 	}

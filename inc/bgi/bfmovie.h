@@ -9,9 +9,8 @@
  * animation (an animated bust-shot, a CG sequence, an eye-catch) stored as
  * one key frame and delta frames, decoded straight into a bitmap slot.  The
  * frames of the games examined (PrismRhythm's data02007.arc) are of the
- * in-memory type 0.  Types 0x10000 / 0x10001 are the streamed variant
- * (frames read from the archive on demand), which has not been met in the
- * data and is not decoded here.
+ * in-memory type 0. Types 0x10000 / 0x10001 use CBG2 delta frames,
+ * with 128 bytes of quantisation tables at 0x40 and offsets at 0xC0.
  *
  * File layout (little-endian, byte offsets):
  *   0x00 "BF_Movie_______\0"       0x10 type (0 here)
@@ -45,7 +44,7 @@
 typedef struct BfMovieHeader // file layout, 0x40 bytes plus the offset table
 {
 	char magic[16];
-	uint32_t type;      // 0: frames in the file; 0x10000 / 0x10001: streamed (not decoded)
+	uint32_t type;      // 0: original frames; 0x10000 / 0x10001: streamed CBG2
 	uint32_t width;     // pixels
 	uint32_t height;    // pixels
 	uint32_t bpp;       // bits per pixel, 24 or 32
@@ -58,7 +57,16 @@ typedef struct BfMovieHeader // file layout, 0x40 bytes plus the offset table
 
 // 1 when the magic matches and the header with its offset table fits in `size`
 int BfMovie_Check(const void* data, uint32_t size);
-int BfMovie_IsSimple(const void* data); // 1 for type 0, the only type decodable here
+int BfMovie_IsSimple(const void* data);  // 1 for type 0, the encoder's format
+int BfMovie_CanDecode(const void* data); // 1 for a supported type, after BfMovie_Check
+/* Size of the header, quantization tables and index of a streamed movie.
+ * `header` contains the first 0x40 bytes, `size` is the full file size.
+ * Returns 0 for an invalid header or a different type. */
+uint32_t BfMovie_StreamIndexSize(const void* header, uint32_t size);
+/* Frame lookup using a loaded header and index (or the whole file). */
+uint32_t BfMovie_FrameRange(const void* index, uint32_t size, uint32_t frame, uint32_t* start);
+/* Decode a streamed frame already read from that range. */
+int BfMovie_DecodeStreamed(const void* index, const uint8_t* frame, uint32_t len, uint8_t* dst, int pitch);
 
 /* decode frame `frame` of the movie into `dst` (width x height pixels of
  * 4 bytes, `pitch` bytes per row; the target must have the movie's size,

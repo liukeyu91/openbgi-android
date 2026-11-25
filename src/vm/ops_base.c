@@ -29,6 +29,7 @@
 #include "bgi/gfx.h"
 #include "bgi/gfx/bmpops.h"
 #include "bgi/os.h"
+#include "bgi/leb128.h"
 #include <math.h>
 
 // ---- push immediates --------------------------------------------------------
@@ -87,10 +88,8 @@ static int Opcode_PushCodeOff(Thread_t* t) // 06: → addr
  * opcode selects it: 0 a signed byte, 1 a signed 16-bit word, 2 a 32-bit
  * dword.  Any other size byte reads an uninitialised stack slot in the
  * original; here 0 is pushed. */
-static int Opcode_Load(Thread_t* t) // 08: ptr → v
+static uint32_t LoadSized(const uint8_t* p, uint32_t sz)
 {
-	uint8_t* p = (uint8_t*)PopPtr(t);
-	uint8_t sz = RdU8(t);
 	uint32_t v;
 	switch(sz)
 	{
@@ -105,7 +104,13 @@ static int Opcode_Load(Thread_t* t) // 08: ptr → v
 		case 2: memcpy(&v, p, 4); break;
 		default: v = 0; break;
 	}
-	Thread_Push(t, v);
+	return v;
+}
+
+static int Opcode_Load(Thread_t* t) // 08: ptr → v
+{
+	const uint8_t* p = (const uint8_t*)PopPtr(t);
+	Thread_Push(t, LoadSized(p, RdU8(t)));
 	return 0;
 }
 
@@ -148,6 +153,76 @@ static int Opcode_Store(Thread_t* t) // 0A: v, ptr →
 	return 0;
 }
 
+static uint32_t ReadLocalOperand(Thread_t* t)
+{
+	if(t->ip > t->codeUsed || t->codeUsed - t->ip < 2)
+		ScriptError("Truncated local reference", t);
+	return RdU16(t);
+}
+
+static uint32_t ScalarType(uint32_t type)
+{
+	return type == 3 ? 0 : type;
+}
+
+static uint8_t* LocalSlot(Thread_t* t, uint32_t off, uint32_t type)
+{
+	uint32_t fp = Thread_GetFP(t);
+	if(off > fp || fp - off >= t->dataSize || (1u << type) > t->dataSize - (fp - off))
+		ScriptError("Local reference lies outside the data area", t);
+	return t->data + (fp - off);
+}
+
+static uint8_t* ReadLocalSlot(Thread_t* t, uint32_t* type)
+{
+	uint32_t operand = ReadLocalOperand(t);
+	*type = ScalarType(operand >> 14);
+	return LocalSlot(t, operand & 0x3fff, *type);
+}
+
+static int Opcode_StoreLocal(Thread_t* t) // 0F (1.680): v →
+{
+	uint32_t type;
+	uint8_t* slot = ReadLocalSlot(t, &type);
+	StoreSized(slot, type, Thread_Pop(t));
+	return 0;
+}
+
+static uint32_t ReadLocalValue(Thread_t* t)
+{
+	uint32_t type;
+	const uint8_t* slot = ReadLocalSlot(t, &type);
+	return LoadSized(slot, type);
+}
+
+static int Opcode_LoadLocal(Thread_t* t) // 19 (1.680): → v
+{
+	Thread_Push(t, ReadLocalValue(t));
+	return 0;
+}
+
+static int Opcode_LoadLocals680(Thread_t* t) // E3: → v...
+{
+	unsigned count;
+	if(t->ip >= t->codeUsed)
+		ScriptError("Truncated local count", t);
+	count = (unsigned)RdU8(t) + 1;
+	for(unsigned i = 0; i < count; ++i)
+		Thread_Push(t, ReadLocalValue(t));
+	return 0;
+}
+
+static int Opcode_LoadAbsolute680(Thread_t* t) // 18: → v
+{
+	uint32_t operand, type;
+	if(t->ip > t->codeUsed || t->codeUsed - t->ip < 4)
+		ScriptError("Truncated absolute address", t);
+	operand = RdU32(t);
+	type = ScalarType(operand >> 30);
+	Thread_Push(t, LoadSized(ResolveScalar680(operand & 0x3fffffffu, t, 1u << type), type));
+	return 0;
+}
+
 /* copy a literal from the code stream to *ptr: a count byte follows the
  * opcode, then that many bytes (a string constant, typically) */
 static int Opcode_StoreInline(Thread_t* t) // 0B: ptr →
@@ -187,9 +262,8 @@ static int Opcode_PushFp(Thread_t* t) // 10: → fp
 }
 
 // a frame pointer at or beyond the end of the data area is a script error
-static int Opcode_SetFp(Thread_t* t) // 11: v →
+static void SetCheckedFP(Thread_t* t, uint32_t v)
 {
-	uint32_t v = Thread_Pop(t);
 	if(v >= t->dataSize)
 	{
 		char msg[0x100];
@@ -197,6 +271,251 @@ static int Opcode_SetFp(Thread_t* t) // 11: v →
 		ScriptError(msg, t);
 	}
 	Thread_SetFP(t, v);
+}
+
+static int Opcode_SetFp(Thread_t* t) // 11: v →
+{
+	SetCheckedFP(t, Thread_Pop(t));
+	return 0;
+}
+
+static int32_t ReadLeb32(Thread_t* t)
+{
+	int64_t value = 0;
+	uint32_t n = t->ip < t->codeUsed ? ReadSignedLeb32(t->code + t->ip, t->codeUsed - t->ip, &value) : 0;
+	if(!n)
+		ScriptError("Invalid signed variable-length operand", t);
+	t->ip += n;
+	return (int32_t)value;
+}
+
+static uint32_t ReadPackedScalar680(Thread_t* t, uint32_t* type)
+{
+	int64_t packed = 0;
+	uint32_t n = t->ip < t->codeUsed ? ReadSignedLeb128(t->code + t->ip, t->codeUsed - t->ip, &packed) : 0;
+	if(!n || n > 5 || packed < (int64_t)INT32_MIN * 4 || packed > (int64_t)UINT32_MAX * 4 + 3)
+		ScriptError("Invalid packed scalar operand", t);
+	t->ip += n;
+	*type = (uint32_t)packed & 3u;
+	packed -= *type;
+	*type = ScalarType(*type);
+	return (uint32_t)(packed / 4);
+}
+
+static int Opcode_StoreImm680(Thread_t* t) // 0D: ptr →
+{
+	uint32_t type;
+	uint32_t value = ReadPackedScalar680(t, &type);
+	StoreSized(ResolveScalar680(Thread_Pop(t), t, 1u << type), type, value);
+	return 0;
+}
+
+static int Opcode_StoreLocalImm680(Thread_t* t) // 0E: →
+{
+	uint32_t off = ReadLocalOperand(t), type;
+	uint32_t value = ReadPackedScalar680(t, &type);
+	StoreSized(LocalSlot(t, off, type), type, value);
+	return 0;
+}
+
+static int Opcode_StoreLocalPlusImm680(Thread_t* t) // E6: ptr →
+{
+	uint32_t type, local = ReadLocalValue(t);
+	uint32_t value = ReadPackedScalar680(t, &type);
+	uint8_t* dst = ResolveScalar680(Thread_Pop(t), t, 1u << type);
+	StoreSized(dst, type, local + value);
+	return 0;
+}
+
+static int Opcode_StoreIndexedValue680(Thread_t* t) // E7: ptr, base →
+{
+	uint32_t type, local = ReadLocalValue(t);
+	uint32_t stride = ReadPackedScalar680(t, &type);
+	uint32_t base = Thread_Pop(t);
+	uint8_t* dst = ResolveScalar680(Thread_Pop(t), t, 1u << type);
+	StoreSized(dst, type, base + local * stride);
+	return 0;
+}
+
+static int Opcode_LoadLocalIndirect680(Thread_t* t) // E4: → v
+{
+	uint32_t type, local = ReadLocalValue(t);
+	uint32_t off = ReadPackedScalar680(t, &type);
+	Thread_Push(t, LoadSized(ResolveScalar680(local + off, t, 1u << type), type));
+	return 0;
+}
+
+static int Opcode_LoadIndexedValue680(Thread_t* t) // E5: base → v
+{
+	uint32_t type, local = ReadLocalValue(t);
+	uint32_t stride = ReadPackedScalar680(t, &type);
+	uint32_t addr = Thread_Pop(t) + local * stride;
+	Thread_Push(t, LoadSized(ResolveScalar680(addr, t, 1u << type), type));
+	return 0;
+}
+
+static int Opcode_LoadIndirect680(Thread_t* t) // 1F: base → v
+{
+	uint32_t type;
+	uint32_t off = ReadPackedScalar680(t, &type);
+	uint32_t addr = Thread_Pop(t) + off;
+	Thread_Push(t, LoadSized(ResolveScalar680(addr, t, 1u << type), type));
+	return 0;
+}
+
+static int Opcode_LoadLocalAddImm680(Thread_t* t) // 1A: → local + immediate
+{
+	uint32_t local = ReadLocalValue(t);
+	Thread_Push(t, local + (uint32_t)ReadLeb32(t));
+	return 0;
+}
+
+static int Opcode_LoadLocalMulAdd680(Thread_t* t) // 1B: base → base + local * stride
+{
+	uint32_t local = ReadLocalValue(t);
+	uint32_t stride = (uint32_t)ReadLeb32(t);
+	uint32_t base = Thread_Pop(t);
+	Thread_Push(t, base + local * stride);
+	return 0;
+}
+
+static int Opcode_MulLocal680(Thread_t* t) // 1D: v → v * local
+{
+	uint32_t local = ReadLocalValue(t);
+	Thread_Push(t, Thread_Pop(t) * local);
+	return 0;
+}
+
+static uint32_t Divide680(int32_t value, int32_t divisor)
+{
+	return divisor == 0 ? 0x80000000u : (uint32_t)((int64_t)value / divisor);
+}
+
+static int Opcode_DivLocal680(Thread_t* t) // 1E: v → v / local
+{
+	int32_t divisor = (int32_t)ReadLocalValue(t);
+	Thread_Push(t, Divide680((int32_t)Thread_Pop(t), divisor));
+	return 0;
+}
+
+static int Opcode_AddImm680(Thread_t* t) // 2C: v → v + immediate
+{
+	uint32_t value = (uint32_t)ReadLeb32(t);
+	Thread_Push(t, Thread_Pop(t) + value);
+	return 0;
+}
+
+static int Opcode_MulImm680(Thread_t* t) // 2D: v → v * immediate
+{
+	uint32_t factor = (uint32_t)ReadLeb32(t);
+	Thread_Push(t, Thread_Pop(t) * factor);
+	return 0;
+}
+
+static int Opcode_MulAddImm680(Thread_t* t) // 2E: a, b → a + b * immediate
+{
+	uint32_t factor = (uint32_t)ReadLeb32(t);
+	uint32_t b = Thread_Pop(t);
+	Thread_Push(t, Thread_Pop(t) + b * factor);
+	return 0;
+}
+
+static int Opcode_DivImm680(Thread_t* t) // 2F: v → v / immediate
+{
+	int32_t divisor = ReadLeb32(t);
+	Thread_Push(t, Divide680((int32_t)Thread_Pop(t), divisor));
+	return 0;
+}
+
+static int ReadShift680(Thread_t* t)
+{
+	if(t->ip >= t->codeUsed)
+		ScriptError("Truncated shift count", t);
+	return (int8_t)RdU8(t);
+}
+
+static uint32_t Shift680(uint32_t value, int shift)
+{
+	return shift < 0 ? (uint32_t)((int32_t)value >> (-shift & 31)) : value << (shift & 31);
+}
+
+static int Opcode_ShiftLocal680(Thread_t* t) // 1C: → shifted local
+{
+	uint32_t local = ReadLocalValue(t);
+	Thread_Push(t, Shift680(local, ReadShift680(t)));
+	return 0;
+}
+
+static int Opcode_ShiftImm680(Thread_t* t) // 3C: v → shifted v
+{
+	int shift = ReadShift680(t);
+	Thread_Push(t, Shift680(Thread_Pop(t), shift));
+	return 0;
+}
+
+static int Opcode_PushImmediate680(Thread_t* t) // 03: → v...
+{
+	uint32_t width, offset;
+	uint8_t mode;
+	if(t->ip >= t->codeUsed)
+		ScriptError("Truncated push mode", t);
+	mode = RdU8(t);
+	if(mode < 0x80)
+	{
+		unsigned i;
+		for(i = 0; i <= mode; ++i)
+			Thread_Push(t, (uint32_t)ReadLeb32(t));
+		return 0;
+	}
+	width = PushImmediateWidth680(mode);
+	if(width > t->codeUsed - t->ip)
+		ScriptError("Truncated push operand", t);
+	offset = t->ip;
+	if(width)
+	{
+		uint32_t value;
+		if(width == 1)
+			value = (uint32_t)(int32_t)(int8_t)RdU8(t);
+		else if(width == 2)
+			value = (uint32_t)(int32_t)(int16_t)RdU16(t);
+		else
+			value = RdU32(t);
+		Thread_Push(t, value);
+		t->ip = offset + width;
+	}
+	return 0;
+}
+
+static int Opcode_AddFp(Thread_t* t) // 12 (1.680): signed LEB128 →
+{
+	int32_t delta = ReadLeb32(t);
+	SetCheckedFP(t, Thread_GetFP(t) + (uint32_t)delta);
+	return 0;
+}
+
+static uint32_t ReadRelativeTarget(Thread_t* t)
+{
+	uint32_t start = Thread_CurOpIP(t);
+	if(t->ip > t->codeUsed || t->codeUsed - t->ip < 2)
+		ScriptError("Truncated relative jump", t);
+	return start + (uint32_t)(int32_t)(int16_t)RdU16(t);
+}
+
+static void JumpTo(Thread_t* t, uint32_t a)
+{
+	if(a >= t->codeUsed)
+	{
+		char msg[0x100];
+		sprintf(msg, MSG_IP_OUT_OF_RANGE, (unsigned)a);
+		ScriptError(msg, t);
+	}
+	Thread_SetIP(t, a);
+}
+
+static int Opcode_JmpRel16(Thread_t* t) // 13 (1.680): s16 →
+{
+	uint32_t target = ReadRelativeTarget(t);
+	JumpTo(t, target);
 	return 0;
 }
 
@@ -221,23 +540,26 @@ static int Opcode_Jmp(Thread_t* t) // 14: addr →
  * the jump is taken when the condition holds, and a target beyond the code
  * area is then a script error.  A condition above 5 tests an uninitialised
  * local in the original; here it is never taken. */
+static int ConditionHolds(uint8_t cc, int32_t v)
+{
+	switch(cc)
+	{
+		case 0: return v != 0;
+		case 1: return v == 0;
+		case 2: return v > 0;
+		case 3: return v >= 0;
+		case 4: return v <= 0;
+		case 5: return v < 0;
+		default: return 0;
+	}
+}
+
 static int Opcode_Jcc(Thread_t* t) // 15: v, addr →
 {
 	uint32_t a = Thread_Pop(t);
 	int32_t v = (int32_t)Thread_Pop(t);
 	uint8_t cc = RdU8(t);
-	int take;
-	switch(cc)
-	{
-		case 0: take = v != 0; break;
-		case 1: take = v == 0; break;
-		case 2: take = v > 0; break;
-		case 3: take = v >= 0; break;
-		case 4: take = v <= 0; break;
-		case 5: take = v < 0; break;
-		default: take = 0; break;
-	}
-	if(take)
+	if(ConditionHolds(cc, v))
 	{
 		if(a >= t->codeSize)
 		{
@@ -249,6 +571,69 @@ static int Opcode_Jcc(Thread_t* t) // 15: v, addr →
 	}
 	return 0;
 }
+
+static int Opcode_Jcc680(Thread_t* t) // 15: v [, addr] →
+{
+	uint8_t cc;
+	uint32_t target;
+	if(t->ip >= t->codeUsed)
+		ScriptError("Missing jump condition", t);
+	cc = RdU8(t);
+	target = (cc & 8) ? ReadRelativeTarget(t) : Thread_Pop(t);
+	if(ConditionHolds(cc & 7, (int32_t)Thread_Pop(t)))
+		JumpTo(t, target);
+	return 0;
+}
+
+static uint32_t Compare680(uint8_t op, int32_t left, int32_t right)
+{
+	switch(op)
+	{
+		case 0: return left == right;
+		case 1: return left != right;
+		case 2: return left < right;
+		case 3: return left <= right;
+		case 4: return left >= right;
+		case 5: return left > right;
+		case 6: return (uint32_t)left & (uint32_t)right;
+		case 7: return (uint32_t)left | (uint32_t)right;
+		case 8: return left && right;
+		case 9: return left || right;
+		default: return 0;
+	}
+}
+
+static int Opcode_CmpImm680(Thread_t* t) // 36: v → result
+{
+	uint8_t op;
+	int32_t right;
+	if(t->ip >= t->codeUsed)
+		ScriptError("Missing comparison operator", t);
+	op = RdU8(t);
+	right = ReadLeb32(t);
+	Thread_Push(t, Compare680(op, (int32_t)Thread_Pop(t), right));
+	return 0;
+}
+
+static int JumpCompare680(Thread_t* t, int immediate)
+{
+	uint8_t op;
+	uint32_t target, result;
+	int32_t right, left;
+	if(t->ip >= t->codeUsed)
+		ScriptError("Missing comparison operator", t);
+	op = RdU8(t);
+	target = ReadRelativeTarget(t);
+	right = immediate ? ReadLeb32(t) : (int32_t)Thread_Pop(t);
+	left = (int32_t)Thread_Pop(t);
+	result = Compare680(op & 15, left, right);
+	if((result != 0) == ((op & 0x80) != 0))
+		JumpTo(t, target);
+	return 0;
+}
+
+static int Opcode_JcmpImm680(Thread_t* t) { return JumpCompare680(t, 1); } // 37
+static int Opcode_Jcmp680(Thread_t* t) { return JumpCompare680(t, 0); } // 3B
 
 /* push the return address (the instruction after this one) on the frame
  * stack in the data area, then jump as "14" does; a frame stack that would
@@ -348,6 +733,19 @@ static int Opcode_Muldiv(Thread_t* t) // 42: a, b, c → a * b / c
 	int64_t p = (int64_t)a * (int64_t)b;
 	// the original's 64-bit division by zero raises the CRT's integer-divide exception
 	Thread_Push(t, c == 0 ? 0 : (uint32_t)(int32_t)(p / c));
+	return 0;
+}
+
+/* 1.492 keeps the low 32 bits of the product before dividing. */
+static int Opcode_MuldivStore(Thread_t* t) // 47: dst, a, b, c →
+{
+	int32_t c = (int32_t)Thread_Pop(t);
+	uint32_t b = Thread_Pop(t);
+	uint32_t a = Thread_Pop(t);
+	uint8_t* dst = (uint8_t*)PopPtr(t);
+	int32_t product = (int32_t)(a * b);
+	uint32_t result = c ? (uint32_t)((int64_t)product / c) : UINT32_MAX;
+	StoreSized(dst, 2, result);
 	return 0;
 }
 
@@ -777,7 +1175,7 @@ static int Opcode_Getchar(Thread_t* t) // 6C: s → ch, dbcs, kinsoku
 	char* s = (char*)PopPtr(t);
 	uint32_t ch;
 	int dbcs;
-	TextGetCharMode(&ch, &dbcs, s, gTextGbk ? TEXT_GBK : TEXT_SJIS);
+	TextGetCharMode(&ch, &dbcs, s, gTextBig5 ? TEXT_BIG5 : gTextGbk ? TEXT_GBK : TEXT_SJIS);
 	Thread_Push(t, ch);
 	Thread_Push(t, (uint32_t)dbcs);
 	Thread_Push(t, (uint32_t)IsKinsokuChar(ch));
@@ -1363,7 +1761,7 @@ int Opcode_NotImplemented(Thread_t* t)
 	uint32_t ip = Thread_CurOpIP(t);
 	uint8_t op = t->code[ip];
 	char msg[0x100];
-	if(op >= 0x7f && op != 0xff)
+	if(op >= 0x7f && op != 0xff && !(gEngine->gen == GEN_1_680 && op >= 0xe3 && op <= 0xe7))
 		sprintf(msg, "Opcode $%02X%02X of engine version %s is not implemented yet", op, t->code[ip + 1], gEngine->name);
 	else
 		sprintf(msg, "Opcode $%02X of engine version %s is not implemented yet", op, gEngine->name);
@@ -1522,6 +1920,7 @@ void Vm_OptableMainInit(void)
 		{0x00, Opcode_PushI8, GEN_FIRST, GEN_LAST},
 		{0x01, Opcode_PushI16, GEN_FIRST, GEN_LAST},
 		{0x02, Opcode_PushI32, GEN_FIRST, GEN_LAST},
+		{0x03, Opcode_PushImmediate680, GEN_1_680, GEN_1_680},
 		{0x04, Opcode_PushLocalAddr, GEN_FIRST, GEN_LAST},
 		{0x05, Opcode_PushCodeAddr, GEN_FIRST, GEN_LAST},
 		{0x06, Opcode_PushCodeOff, GEN_FIRST, GEN_LAST},
@@ -1530,10 +1929,37 @@ void Vm_OptableMainInit(void)
 		{0x0a, Opcode_Store, GEN_FIRST, GEN_LAST},
 		{0x0b, Opcode_StoreInline, GEN_FIRST, GEN_LAST},
 		{0x0c, Opcode_StoreMulti, GEN_FIRST, GEN_LAST},
+		{0x0d, Opcode_StoreImm680, GEN_1_680, GEN_1_680},
+		{0x0e, Opcode_StoreLocalImm680, GEN_1_680, GEN_1_680},
+		{0x0f, Opcode_StoreLocal, GEN_1_680, GEN_1_680},
 		{0x10, Opcode_PushFp, GEN_FIRST, GEN_LAST},
 		{0x11, Opcode_SetFp, GEN_FIRST, GEN_LAST},
+		{0x12, Opcode_AddFp, GEN_1_680, GEN_1_680},
+		{0x13, Opcode_JmpRel16, GEN_1_680, GEN_1_680},
 		{0x14, Opcode_Jmp, GEN_FIRST, GEN_LAST},
 		{0x15, Opcode_Jcc, GEN_FIRST, GEN_LAST},
+		{0x15, Opcode_Jcc680, GEN_1_680, GEN_1_680},
+		{0x18, Opcode_LoadAbsolute680, GEN_1_680, GEN_1_680},
+		{0x19, Opcode_LoadLocal, GEN_1_680, GEN_1_680},
+		{0x1a, Opcode_LoadLocalAddImm680, GEN_1_680, GEN_1_680},
+		{0x1b, Opcode_LoadLocalMulAdd680, GEN_1_680, GEN_1_680},
+		{0x1c, Opcode_ShiftLocal680, GEN_1_680, GEN_1_680},
+		{0x1d, Opcode_MulLocal680, GEN_1_680, GEN_1_680},
+		{0x1e, Opcode_DivLocal680, GEN_1_680, GEN_1_680},
+		{0x1f, Opcode_LoadIndirect680, GEN_1_680, GEN_1_680},
+		{0x2c, Opcode_AddImm680, GEN_1_680, GEN_1_680},
+		{0x2d, Opcode_MulImm680, GEN_1_680, GEN_1_680},
+		{0x2e, Opcode_MulAddImm680, GEN_1_680, GEN_1_680},
+		{0x2f, Opcode_DivImm680, GEN_1_680, GEN_1_680},
+		{0x36, Opcode_CmpImm680, GEN_1_680, GEN_1_680},
+		{0x37, Opcode_JcmpImm680, GEN_1_680, GEN_1_680},
+		{0x3b, Opcode_Jcmp680, GEN_1_680, GEN_1_680},
+		{0x3c, Opcode_ShiftImm680, GEN_1_680, GEN_1_680},
+		{0xe3, Opcode_LoadLocals680, GEN_1_680, GEN_1_680},
+		{0xe4, Opcode_LoadLocalIndirect680, GEN_1_680, GEN_1_680},
+		{0xe5, Opcode_LoadIndexedValue680, GEN_1_680, GEN_1_680},
+		{0xe6, Opcode_StoreLocalPlusImm680, GEN_1_680, GEN_1_680},
+		{0xe7, Opcode_StoreIndexedValue680, GEN_1_680, GEN_1_680},
 		{0x16, Opcode_Call, GEN_FIRST, GEN_LAST},
 		{0x17, Opcode_Ret, GEN_FIRST, GEN_LAST},
 		{0x20, Opcode_Add, GEN_FIRST, GEN_LAST},
@@ -1561,6 +1987,7 @@ void Vm_OptableMainInit(void)
 		{0x42, Opcode_Muldiv, GEN_FIRST, GEN_LAST},
 		{0x43, Opcode_Atan2, GEN_1_69_472, GEN_LAST},
 		{0x44, Opcode_VecLen, GEN_1_573, GEN_LAST},
+		{0x47, Opcode_MuldivStore, GEN_1_492, GEN_1_492},
 		{0x48, Opcode_Sin, GEN_FIRST, GEN_LAST},
 		{0x49, Opcode_Cos, GEN_FIRST, GEN_LAST},
 		{0x50, Opcode_Add64, GEN_1_69_472, GEN_LAST},

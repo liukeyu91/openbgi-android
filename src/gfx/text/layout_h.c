@@ -54,7 +54,7 @@ int Text_LayoutCoreH(RichState_t* rich, int32_t* outLines, const char* str, int 
 	if(!BmpMgr_FontInfo(gTextBmpMgr, &fi, font))
 		return 0;
 	memset(&m, 0, sizeof m);
-	m.on = gEngine->gen >= GEN_1_494;
+	m.on = gEngine->gen >= GEN_1_492;
 	m.base = &fi;
 	m.cur = fi;
 	m.cur.font = NULL;

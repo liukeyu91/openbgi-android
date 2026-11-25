@@ -53,6 +53,11 @@ extern int gMoviePlaying; // a movie is running (the window paints black, no sty
  * playback started (*outLength receives the length in ms), 0 otherwise.
  * A missing audio device or renderer is a script error. */
 int Movie_Play(int32_t* outLength, const char* path, int x, int y, int w, int h);
+int Movie_PlayArc(int32_t* outLength, const char* arc, const char* name, int x, int y, int w, int h); // "92 F0"
+int Movie_PlayArchiveEntry(struct Thread* t, const char* arc, const char* name, int volume); // "91 F8"
+int Movie_StopArchive(void); // "91 F9"
+int Movie_ArchiveIsPlaying(void); // "91 FA"
+int Movie_SetArchiveVolume(int volume); // "91 FB"
 int Movie_Stop(void); // 1 when there was a graph to release
 int Movie_IsPlaying(void);
 int Movie_SetVolume(uint32_t v);   // 0 .. 0x80; 0 for anything above

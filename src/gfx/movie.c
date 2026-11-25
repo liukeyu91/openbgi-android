@@ -20,14 +20,19 @@
 #include "bgi/gfx/gfxmgr.h"
 #include "bgi/display.h"
 #include "bgi/error.h"
+#include "bgi/file.h"
 #include "bgi/msg.h"
 #include "bgi/os.h"
+#include "bgi/wait.h"
+#include <math.h>
 
 int gMoviePlaying;           // a movie is running: read by the window procedure and the display style toggle
 static int gMovieGraph;      // a graph exists
 static int gMovieLoaded;     // a file is rendered in it
 static int gMovieFx;         // the ffmpeg player runs the movie instead of the OS layer's graph
 static int32_t gMovieVolume; // IBasicAudio units, -10000 .. 0; applied to every movie started
+static uint32_t gMovieSerial; // distinguishes successive plays for a waiting script
+static uint32_t gArchiveMovieSerial;
 
 // "90 F1" (and engine shutdown): release the graph, if any.  1 when there was one, else 0
 int Movie_Stop(void)
@@ -52,12 +57,29 @@ int Movie_Stop(void)
  * then holding the length in ms as the player reports it.  A missing
  * audio device or renderer is a script error (thrown; the graph is kept
  * for the next stop); any other failure returns 0. */
-int Movie_Play(int32_t* outLength, const char* path, int x, int y, int w, int h)
+static int Movie_StartGraph(int32_t* outLength, int x, int y, int w, int h, int32_t volume)
 {
 	Bmp_t scaled;
 	Rect_t r, m;
-	int32_t volume = gMovieVolume;
+	r = (Rect_t){x, y, x + w - 1, y + h - 1};
+	if(Gfx_GetScaledBmp(gGfx, &scaled))
+	{
+		Gfx_MapRectScaled(gGfx, &m, &r);
+		x = m.l;
+		y = m.t;
+		w = m.r - m.l + 1;
+		h = m.b - m.t + 1;
+	}
+	if(!OS_MovieStart(x, y, w, h, volume, outLength))
+		return 0;
+	gMovieLoaded = 1;
+	gMoviePlaying = 1;
+	++gMovieSerial;
+	return 1;
+}
 
+static int Movie_PlayPath(int32_t* outLength, const char* path, int x, int y, int w, int h, int32_t volume, int strict)
+{
 	Movie_Stop();
 	// build the graph with its interfaces and render the file into it (IGraphBuilder::RenderFile)
 	switch(OS_MovieOpen(path))
@@ -70,38 +92,160 @@ int Movie_Play(int32_t* outLength, const char* path, int x, int y, int w, int h)
 			gMovieFx = 1;
 			gMovieLoaded = 1;
 			gMoviePlaying = 1;
+			++gMovieSerial;
 			return 1;
 		case OS_MOVIE_NO_AUDIO_DEVICE:
 			gMovieGraph = 1;
-			ThrowScriptError(MSG_MOVIE_NO_AUDIO_DEVICE);
+			if(strict) ThrowScriptError(MSG_MOVIE_NO_AUDIO_DEVICE);
 			return 0;
 		case OS_MOVIE_VIDEO_NOT_RENDERED:
 			gMovieGraph = 1;
-			ThrowScriptError(MSG_MOVIE_VIDEO_NOT_RENDERED);
+			if(strict) ThrowScriptError(MSG_MOVIE_VIDEO_NOT_RENDERED);
 			return 0;
 		case OS_MOVIE_AUDIO_NOT_RENDERED:
 			gMovieGraph = 1;
-			ThrowScriptError(MSG_MOVIE_AUDIO_NOT_RENDERED);
+			if(strict) ThrowScriptError(MSG_MOVIE_AUDIO_NOT_RENDERED);
 			return 0;
 		default: return 0; // the original keeps a failed graph until the next stop; the OS layer releases it at once
 	}
-	r.l = x;
-	r.t = y;
-	r.r = x + w - 1;
-	r.b = y + h - 1;
-	if(Gfx_GetScaledBmp(gGfx, &scaled)) // a scaled display: map the picture rectangle to window coordinates
+	return Movie_StartGraph(outLength, x, y, w, h, volume);
+}
+
+int Movie_Play(int32_t* outLength, const char* path, int x, int y, int w, int h)
+{
+	return Movie_PlayPath(outLength, path, x, y, w, h, gMovieVolume, 1);
+}
+
+// The linked player may take ownership of the view, even if probing fails.
+static int Movie_PlayView(FileView_t* view, int32_t* length, int x, int y, int w, int h, int32_t volume)
+{
+	int started = 0;
+#ifdef BGI_HAVE_FFMPEG
+	Movie_Stop();
+	if(OS_MovieOpenView(view) == OS_MOVIE_OK)
 	{
-		Gfx_MapRectScaled(gGfx, &m, &r);
-		x = m.l;
-		y = m.t;
-		w = m.r - m.l + 1;
-		h = m.b - m.t + 1;
+		gMovieGraph = 1;
+		started = Movie_StartGraph(length, x, y, w, h, volume);
+		if(!started)
+			Movie_Stop();
 	}
-	if(!OS_MovieStart(x, y, w, h, volume, outLength))
-		return 0;
-	gMovieLoaded = 1;
-	gMoviePlaying = 1;
+#else
+	fprintf(stderr, "bgi: archive movie playback requires the linked FFmpeg backend\n");
+#endif
+	File_Close(&view->file);
+	return started;
+}
+
+int Movie_PlayArc(int32_t* outLength, const char* arc, const char* name, int x, int y, int w, int h)
+{
+#ifdef BGI_HAVE_FFMPEG
+	FileView_t view;
+	return arc && *arc && name && *name && LoadFile_OpenArchiveView(&view, arc, name) &&
+		Movie_PlayView(&view, outLength, x, y, w, h, gMovieVolume);
+#else
+	return 0;
+#endif
+}
+
+typedef struct MovieWait
+{
+	Wait_t base;
+	uint32_t movie;
+} MovieWait_t;
+
+static int PollMovieWait(Wait_t* wait)
+{
+	MovieWait_t* movie = (MovieWait_t*)wait;
+	if(movie->movie == gMovieSerial && Movie_IsPlaying())
+	{
+		if(!wait->cancelled)
+			return 0;
+		Movie_Stop();
+		Window_Repaint();
+	}
+	Thread_Push(wait->thread, 0);
 	return 1;
+}
+
+static void DestroyMovieWait(Wait_t* wait)
+{
+	MovieWait_t* movie = (MovieWait_t*)wait;
+	if(movie->movie == gMovieSerial && Movie_IsPlaying())
+	{
+		Movie_Stop();
+		Window_Repaint();
+	}
+	Wait_Destroy(wait);
+}
+
+static int32_t ArchiveVolume(int volume)
+{
+	volume = BGI_MAX(0, BGI_MIN(128, volume));
+	return volume ? (int32_t)(2000.0 * log10(volume / 128.0)) : -10000;
+}
+
+int Movie_PlayArchiveEntry(Thread_t* t, const char* arc, const char* name, int volume)
+{
+	static const WaitVtbl_t vtable = {DestroyMovieWait, PollMovieWait, Wait_SetTimer, Wait_IsDirtyBase, Wait_OnMessage};
+	char path[0x104];
+	FileView_t view;
+	Bmp_t back;
+	int32_t length;
+	int loose, started = 0, result = -3;
+	if(!name || !*name)
+		goto done;
+	volume = ArchiveVolume(volume);
+	Gfx_CopyBackBmp(gGfx, &back);
+	loose = FindMoviePath(path, name);
+	if(loose)
+	{
+		started = Movie_PlayPath(&length, path, 0, 0, back.w, back.h, volume, 0);
+		if(!started)
+			Movie_Stop();
+		result = -1;
+	}
+	if(!started && LoadFile_OpenArchiveView(&view, arc, name))
+	{
+		result = -4;
+		started = Movie_PlayView(&view, &length, 0, 0, back.w, back.h, volume);
+	}
+	if(started)
+	{
+		MovieWait_t* movie = (MovieWait_t*)BGI_Calloc(sizeof *movie);
+		Wait_Ctor(&movie->base, t);
+		movie->base.vt = &vtable;
+		movie->movie = gMovieSerial;
+		gArchiveMovieSerial = gMovieSerial;
+		Thread_SetWait(t, &movie->base);
+		return 2;
+	}
+done:
+	Thread_Push(t, (uint32_t)result);
+	return 0;
+}
+
+int Movie_StopArchive(void)
+{
+	if(gArchiveMovieSerial != gMovieSerial || !Movie_Stop())
+		return -2;
+	Window_Repaint();
+	return 0;
+}
+
+int Movie_ArchiveIsPlaying(void)
+{
+	return gArchiveMovieSerial == gMovieSerial && Movie_IsPlaying();
+}
+
+int Movie_SetArchiveVolume(int volume)
+{
+	if(!Movie_ArchiveIsPlaying())
+		return -2;
+	if(gMovieFx)
+		MovieFx_SetVolume(ArchiveVolume(volume));
+	else
+		OS_MovieSetVolume(ArchiveVolume(volume));
+	return 0;
 }
 
 // "90 F2": a movie was started and the player still runs it

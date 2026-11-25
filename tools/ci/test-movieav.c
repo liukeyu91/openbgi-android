@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Exercise the actual threaded decoder with encoded synthetic files. */
 #include "bgi/movieav.h"
+#include "bgi/file.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,10 +11,19 @@
 
 static void Wait(int ms){struct timespec t={ms/1000,(ms%1000)*1000000L};nanosleep(&t,NULL);}
 static int64_t Now(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1000000LL+t.tv_nsec/1000;}
-static MovieAv_t* Open(const char* path,int audio,MovieAvInfo_t* info)
+
+/* This standalone test already supplies native paths. */
+void OsPosix_ReadPath(const char* path,char* out,size_t size){snprintf(out,size,"%s",path);}
+struct VolEntry;
+const struct VolEntry* OsPosix_DiscPath(const char* path,int localized){(void)path;(void)localized;return NULL;}
+int Disc_Dup(void){return -1;}
+
+static MovieAv_t* Open(const char* path,FileView_t* view,int audio,MovieAvInfo_t* info)
 {
-    char error[256];MovieAv_t* m=MovieAv_Open(path,audio,info,error,sizeof error);
+    char error[256];
+    MovieAv_t* m=view?MovieAv_OpenView(view,audio,info,error,sizeof error):MovieAv_Open(path,audio,info,error,sizeof error);
     if(!m){fprintf(stderr,"%s: %s\n",path,error);abort();}
+    assert(!view || view->file.h==OS_INVALID_FILE);
     assert(info->width==160&&info->height==90);
     assert(!MovieAv_Start(m,0,46));assert(!MovieAv_Start(m,4096,2161));
     assert(MovieAv_Start(m,80,46));
@@ -21,9 +31,9 @@ static MovieAv_t* Open(const char* path,int audio,MovieAvInfo_t* info)
     for(int i=0;!MovieAv_Ready(m)&&i<5000;i++)Wait(1);
     assert(MovieAv_Ready(m));return m;
 }
-static void Play(const char* path,int audio,int gain,int fallback,int vfr)
+static void Play(const char* path,FileView_t* view,int audio,int gain,int fallback,int vfr)
 {
-    MovieAvInfo_t info;MovieAv_t* m=Open(path,audio,&info);
+    MovieAvInfo_t info;MovieAv_t* m=Open(path,view,audio,&info);
     uint8_t picture[80*46*4];int32_t mix[441*2];char error[256];
     int shown=0,nonzero=0,crossings=0,previous=0,done=0;int64_t clock=0;double energy=0;
     MovieAv_Begin(m);
@@ -81,18 +91,35 @@ static void Probe(const char* path)
     printf("Real movie probe: %dx%d, duration=%dms, audio=%d, frames=%d, audio energy=%lld\n",info.width,info.height,info.durationMs,info.audio,frames,(long long)energy);
     MovieAv_Close(m);
 }
+
+static void TestView(const char* path)
+{
+    MovieAvInfo_t info;char error[256];
+    FileView_t view={0};
+    assert(File_OpenRead(&view.file,path));
+    uint32_t size=File_Size(&view.file);
+    assert(size>64);
+    view.offset=32;view.size=size-64;
+    Play(path,&view,1,65536,0,0);
+    assert(File_OpenRead(&view.file,path));
+    view.size=16;
+    assert(!MovieAv_OpenView(&view,1,&info,error,sizeof error));
+    File_Close(&view.file);
+}
+
 int main(int argc,char** argv)
 {
     if(argc==2){Probe(argv[1]);return 0;}
-    assert(argc==6);MovieAvInfo_t info;char error[256];
+    assert(argc==7);MovieAvInfo_t info;char error[256];
     assert(!MovieAv_Open("/missing-movie",1,&info,error,sizeof error)&&error[0]);
     assert(!MovieAv_Open(argv[5],1,&info,error,sizeof error));
-    Play(argv[1],1,65536,0,0);Play(argv[1],1,0,0,0);
-    Play(argv[2],1,65536,0,0);Play(argv[3],1,65536,0,0);
-    Play(argv[4],0,65536,0,1);Play(argv[1],0,65536,0,0);Play(argv[1],1,65536,1,0);
+    Play(argv[1],NULL,1,65536,0,0);Play(argv[1],NULL,1,0,0,0);
+    Play(argv[2],NULL,1,65536,0,0);Play(argv[3],NULL,1,65536,0,0);
+    Play(argv[4],NULL,0,65536,0,1);Play(argv[1],NULL,0,65536,0,0);Play(argv[1],NULL,1,65536,1,0);
+    TestView(argv[6]);
     for(int i=0;i<20;i++)
     {
-        MovieAv_t* m=Open(argv[1],1,&info);Wait(5);
+        MovieAv_t* m=Open(argv[1],NULL,1,&info);Wait(5);
         int64_t start=Now();MovieAv_Close(m);assert(Now()-start<1000000);
     }
     puts("Movie decoder playback, pause, mute, resampling, VFR, fallback and blocked-stop checks passed");return 0;

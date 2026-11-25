@@ -741,7 +741,7 @@ static int Sprite_SetParam(DispObj_t* o, int no, int a, int c)
 				Sprite_SetAngle(s, a);
 			return 0;
 		case 0x42: // 1.494 on; one value until 1.573
-			if(gEngine->gen < GEN_1_494)
+			if(gEngine->gen < GEN_1_492)
 				break;
 			Sprite_SetZoom(s, a, gEngine->gen >= GEN_1_588 ? c : 0);
 			return 0;

@@ -12,7 +12,7 @@
  * The class tables are the MSG_TXT_* strings of tools/messages.txt; a
  * character is tested by membership in the table (CharInSet).
  */
-#include "text_internal.h"
+#include "layout_internal.h"
 
 // ---- Shift-JIS helpers -------------------------------------------------------------------------
 
@@ -71,9 +71,7 @@ int Text_MeasureInfo(int32_t out[3], const char* str, const FontInfo_t* fi, int 
 	Bmp_t cell;
 	int glyphW, total = 0, firstHalf = 0, first = 1, gap = 0, pitch;
 
-	pitch = proportional ? 0 : gCharPitch;
-	if(!proportional && gEngine->gen >= GEN_1_529 && fi->font)
-		pitch += fi->font->extraW[fi->italic ? 1 : 0];
+	pitch = Layout_Pitch(proportional, fi);
 	Bmp_AllocScreen(&cell, 2 * fi->size, fi->size, 1);
 	glyphW = FontInfo_GlyphW(fi);
 	while(*str)
@@ -89,7 +87,7 @@ int Text_MeasureInfo(int32_t out[3], const char* str, const FontInfo_t* fi, int 
 		{
 			Bmp_CropGlyph(&view, &g);
 			gap = Font_GapFor2(&g, glyphW);
-			total += view.w + gap;
+			total += view.w + gap + pitch;
 			if(first)
 			{
 				first = 0;

@@ -118,7 +118,7 @@ static int AllDoubleByte(const char* s)
 {
 	while(*s)
 	{
-		if(gOsTextGbk ? OS_GbkCharLen(s) != 2 : !OsCommon_SjisIsLead((uint8_t)*s) || !s[1])
+		if((gOsTextGbk || gOsTextBig5) ? OsCommon_ChineseCharLen(s) != 2 : !OsCommon_SjisIsLead((uint8_t)*s) || !s[1])
 			return 0;
 		s += 2;
 	}

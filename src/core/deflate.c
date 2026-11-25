@@ -844,17 +844,25 @@ static int InflateCodes(In_t* in, Buf_t* out, const Huff_t* lit, const Huff_t* d
 	}
 }
 
-uint8_t* Deflate_Uncompress(const uint8_t* data, size_t n, size_t hint, size_t* outSize)
+/* The decoder of both wrappers: `zlib` says whether the stream has the
+ * RFC 1950 header and Adler-32 trailer, or is raw deflate (RFC 1951) as a
+ * ZIP entry holds it. */
+static uint8_t* InflateBuffer(const uint8_t* data, size_t n, size_t hint, size_t* outSize, int zlib)
 {
 	In_t in;
 	Buf_t out;
 	Huff_t* lit;
 	Huff_t* dist;
 	int final, ok = 1;
-	if(n < 6 || (data[0] & 0x0f) != 8 || ((data[0] << 8) | data[1]) % 31 != 0 || (data[1] & 0x20))
+	if(zlib)
+	{
+		if(n < 6 || (data[0] & 0x0f) != 8 || ((data[0] << 8) | data[1]) % 31 != 0 || (data[1] & 0x20))
+			return NULL;
+	}
+	else if(!n)
 		return NULL;
 	memset(&in, 0, sizeof in);
-	in.p = data + 2;
+	in.p = zlib ? data + 2 : data;
 	in.end = data + n;
 	memset(&out, 0, sizeof out);
 	lit = (Huff_t*)malloc(sizeof *lit);
@@ -945,7 +953,7 @@ uint8_t* Deflate_Uncompress(const uint8_t* data, size_t n, size_t hint, size_t* 
 		if(!ok || final)
 			break;
 	}
-	if(ok)
+	if(ok && zlib)
 	{ // the check value follows at the next byte boundary, most significant byte first
 		uint32_t adler = 0;
 		int i;
@@ -964,4 +972,14 @@ uint8_t* Deflate_Uncompress(const uint8_t* data, size_t n, size_t hint, size_t* 
 	}
 	*outSize = out.len;
 	return out.p;
+}
+
+uint8_t* Deflate_Uncompress(const uint8_t* data, size_t n, size_t hint, size_t* outSize)
+{
+	return InflateBuffer(data, n, hint, outSize, 1);
+}
+
+uint8_t* Deflate_InflateRaw(const uint8_t* data, size_t n, size_t hint, size_t* outSize)
+{
+	return InflateBuffer(data, n, hint, outSize, 0);
 }

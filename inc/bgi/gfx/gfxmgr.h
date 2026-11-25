@@ -128,6 +128,7 @@ void Gfx_MapPoint(Gfx_t* g, int32_t out[2], int x, int y, int dir);             
 uint32_t Gfx_SplitCopyJobs(Rect_t* outOrNull, const Rect_t* r, uint32_t pixelsPerJob); // the band count; fills `out` when given
 int Gfx_Snapshot(Gfx_t* g, int bmpNo);                                                 // "90 04"; the bitmap manager's 1 ok / 0
 int Gfx_SnapshotPrio(Gfx_t* g, int bmpNo, int prio);                                   // "90 05"
+int Gfx_SnapshotOffset(Gfx_t* g, int bmpNo, int x, int y, int prio); // "91 05": 0 ok, 1 format, 2 missing
 void Gfx_SetProjCentre(Gfx_t* g, int x, int y);                                        // "90 06"
 int Gfx_GetProjCentre(Gfx_t* g, int32_t out[2]);                                       // 1 when inside the back buffer
 void Gfx_SetGlobalEffect(Gfx_t* g, int v);                                             // "90 08"

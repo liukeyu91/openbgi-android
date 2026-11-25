@@ -13,10 +13,7 @@ final class GameImport {
         Archive(String name, long size, OpenArchive source) { this.name=name; this.size=size; this.source=source; }
     }
     static boolean gamePresent(File dir) {
-        if(dir==null)return false;
-        File[] files=dir.listFiles(); if(files==null)return false;
-        for(File file:files)if(file.isFile() && file.length()>0 && (file.getName().equalsIgnoreCase("system.arc") || file.getName().equalsIgnoreCase("ipl._bp")))return true;
-        return false;
+        return ArchiveLanguage.hasBootFiles(dir);
     }
     static Path safePath(Path root, String name) throws IOException {
         if (name.isEmpty() || name.startsWith("/") || name.contains("\\") || name.indexOf(0)>=0)
@@ -31,6 +28,12 @@ final class GameImport {
         install(target,files,progress,staging->{});
     }
     static synchronized void install(File target, List<Archive> files, Progress progress, Prepare prepare) throws IOException {
+        installFiles(target,files,progress,staging->{
+            prepare.run(staging);
+            if(!gamePresent(staging))throw new IOException("目录根部缺少可启动的游戏资源，请选择完整游戏目录");
+        });
+    }
+    static synchronized void installFiles(File target, List<Archive> files, Progress progress, Prepare prepare) throws IOException {
         Path game=target.toPath(), staging=game.resolveSibling(".import-"+target.getName());
         if (Files.exists(game)) throw new IOException("目标游戏目录已存在");
         remove(staging);
@@ -62,7 +65,6 @@ final class GameImport {
                 progress.copied(++done,files.size());
             }
             prepare.run(staging.toFile());
-            if(!gamePresent(staging.toFile())) throw new IOException("目录根部缺少非空的 system.arc 或 ipl._bp，请选择完整游戏目录");
             Files.move(staging,game,StandardCopyOption.ATOMIC_MOVE);
         } catch(IOException|RuntimeException error) {
             try { remove(staging); } catch(IOException cleanup) { error.addSuppressed(cleanup); }

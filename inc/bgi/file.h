@@ -197,6 +197,7 @@ void Loader_DestroyBitmap(BitmapJob_t* job);
  * file is missing; throws when the user gives up (or without a disc). */
 uint32_t LoadFile(void* buf, const char* arc, const char* name);
 int LoadFile_OpenView(FileView_t* view, const char* arc, const char* name);
+int LoadFile_OpenArchiveView(FileView_t* view, const char* arc, const char* name);
 /* "80 31" up to 1.69 build 444, "81 30" of 1.529 on: part of a file as
  * stored; 0 ok, 1 not found, 2 the range reaches past the end, 3 the size
  * exceeds the file, -1 short read */

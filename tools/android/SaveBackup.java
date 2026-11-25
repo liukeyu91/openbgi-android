@@ -83,6 +83,57 @@ final class SaveBackup {
         return files;
     }
     static int count(File game)throws IOException { return inventory(game).size(); }
+    static void seed(File source,Path destination)throws IOException {
+        List<Entry> files=inventory(source);
+        List<String> shadowed=new ArrayList<>(files.size());
+        for(Entry entry:files){
+            Path target=destination.resolve(entry.name);
+            Files.createDirectories(target.getParent());
+            unchanged(entry);
+            Files.copy(entry.file,target,LinkOption.NOFOLLOW_LINKS);
+            Files.setLastModifiedTime(target,entry.modified);
+            unchanged(entry);
+            if(entry.name.indexOf('\n')>=0 || entry.name.indexOf('\r')>=0)
+                throw new IOException("存档路径包含换行");
+            shadowed.add(entry.name);
+        }
+        writeIndex(destination,shadowed);
+    }
+    /** The writable layer of a game that ships no saves of its own. */
+    static void seedEmpty(Path destination)throws IOException { writeIndex(destination,Collections.emptyList()); }
+    /** The same migration for a container (disc image or ZIP): the saves it carries become private copies. */
+    static void seedImage(DiscImage.Source source,Path destination)throws IOException {
+        List<DiscImage.Entry> files=new ArrayList<>();List<String> shadowed=new ArrayList<>();long total=0;
+        Set<String> names=new HashSet<>();
+        for(DiscImage.Entry entry:source.entries){
+            if(!entry.file())continue;
+            String name=entry.path;
+            if(name.length()>1024 || !allowedSavePath(name))continue;
+            total+=entry.size;
+            if(files.size()>=MAX_FILES || total>MAX_BYTES)
+                throw new IOException("来源中的存档超过导出大小限制（512 MB / 10000 个文件）");
+            if(!names.add(name.toLowerCase(Locale.ROOT)))throw new IOException("存档文件路径有冲突，无法导出");
+            files.add(entry);shadowed.add(name);
+        }
+        byte[] buffer=new byte[1024*1024];
+        for(DiscImage.Entry entry:files){
+            Path target=destination.resolve(entry.path);
+            Files.createDirectories(target.getParent());
+            try(OutputStream out=Files.newOutputStream(target,StandardOpenOption.CREATE_NEW)){
+                long done=0;
+                while(done<entry.size){
+                    int n=source.read(entry,done,buffer,(int)Math.min(buffer.length,entry.size-done));
+                    if(n<=0)throw new IOException("来源读取不完整："+entry.path);
+                    out.write(buffer,0,n);done+=n;
+                }
+            }
+        }
+        writeIndex(destination,shadowed);
+    }
+    private static void writeIndex(Path destination,List<String> shadowed)throws IOException {
+        if(!Files.isDirectory(destination.resolve(".openbgi")))Files.createDirectory(destination.resolve(".openbgi"));
+        Files.write(destination.resolve(".openbgi/original-saves.txt"),shadowed,StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW);
+    }
     static String filename(String title){
         String name=title.replaceAll("[\\p{Cntrl}\\\\/:*?\"<>|]","_").trim();
         if(name.isEmpty())name="game";

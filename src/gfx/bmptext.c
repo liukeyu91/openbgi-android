@@ -106,11 +106,11 @@ int FontNames_AddFile(const char* file)
 {
 	char path[0x208];
 	int r;
-	if(gEngine->gen >= GEN_1_494 && FontFiles_Known(file))
+	if(gEngine->gen >= GEN_1_492 && FontFiles_Known(file))
 		return 1;
 	snprintf(path, sizeof path, "%s%s", gBaseDir, file);
 	r = OS_FontAddFile(path);
-	if(r && gEngine->gen >= GEN_1_494)
+	if(r && gEngine->gen >= GEN_1_492)
 		FontFiles_Remember(file);
 	return r;
 }

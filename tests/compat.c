@@ -40,6 +40,8 @@ int main(void)
 	const uint8_t vector[] = {0x5d, 0x17}, immediate[] = {0x02, 0x5d, 0, 0, 0, 0x17};
 	const uint8_t data[] = {0x05, 4, 0, 0x17, 'a', 0x5d, 'b', 0, 0};
 	const uint8_t missing[] = {0xd0, 0x40, 0xd0, 0x40, 0x17};
+	const uint8_t muldivStore[] = {0x47, 0x17};
+	const uint8_t editAlign[] = {0xb0, 0x2a, 0x17};
 	const uint8_t expanded[] = {0x44, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5e, 0x5f, 0x64, 0x65, 0x91, 0xbb, 0x17};
 	const uint8_t farJump[] = {0x06, 0xff, 0x7f, 0x16, 0x17}, negativeData[] = {0x05, 0xff, 0xff, 0x17};
 	uint8_t bad[16] = {16};
@@ -50,7 +52,12 @@ int main(void)
 	OS_Init();
 	CHECK(!Compat_Configure(NULL, "auto", NULL, 0));
 	CHECK(!Compat_Configure(NULL, "not-a-profile", NULL, 0));
+	CHECK(Compat_Configure(NULL, "1.492", NULL, 0) != NULL);
+	CHECK(Check(muldivStore, sizeof muldivStore, &result) && result.total == 0 && result.problems == 0 && result.instructions == 2);
+	CHECK(Compat_Configure(NULL, "1.494", NULL, 0) != NULL);
+	CHECK(Check(muldivStore, sizeof muldivStore, &result) && result.problems > 0);
 	CHECK(Compat_Configure(NULL, "1.636", NULL, 0) != NULL);
+	CHECK(Check(editAlign, sizeof editAlign, &result) && result.total == 0 && result.problems == 0 && result.instructions == 2);
 	CHECK(Check(vector, sizeof vector, &result) && result.count == 0 && result.instructions == 2);
 	CHECK(Check(expanded, sizeof expanded, &result) && result.total == 0 && result.problems == 0 && result.instructions == 13);
 	Put32(shortened + 4, 32);
@@ -87,6 +94,20 @@ int main(void)
 		CHECK(!strcmp(gEngine->name, "1.659.8"));
 		CHECK(vm_optable_80[0x52] != NULL && vm_optable_80[0x52] != Opcode_NotImplemented);
 		CHECK(Check(idle, sizeof idle, &result) && result.total == 0 && result.instructions == 3);
+	}
+	{
+		const uint8_t love[] = "LovepicalPoppy";
+		const uint8_t newer[] = {
+			0x12, 0x80, 0x02, 0x03, 1, 0x80, 0x80, 0x80, 0x80, 0x08, 0x7f, 0x13, 4, 0, 0x00, 0x17
+		};
+		const uint8_t truncated[] = {0x03, 1, 0x01, 0x80};
+		const uint8_t scalar[] = {0xe6, 0, 0x80, 0x82, 0x02, 0xe3, 0, 0, 0x40, 0x17};
+		CHECK(Compat_Configure(NULL, "auto", love, sizeof love) != NULL);
+		CHECK(!strcmp(gEngine->name, "1.680") && VM_TAG_SHIFT == 28);
+		CHECK(Check(newer, sizeof newer, &result) && result.total == 0 && result.problems == 0 && result.instructions == 4);
+		CHECK(Check(truncated, sizeof truncated, &result) && result.problems > 0);
+		CHECK(Check(scalar, sizeof scalar, &result) && result.problems == 0 && result.instructions == 3);
+		CHECK(result.total == 0);
 	}
 	OS_Shutdown();
 	if(failures)

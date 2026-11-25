@@ -171,6 +171,10 @@ final class TextInput {
                 suppress = true; edit.setText(""); suppress = false; dirty = false;
                 limit = 1023; rejectAscii = false; break;
             case 11: canvasW = a; canvasH = b; layout(); break;
+            case 12:
+                int alignment = a == 0 ? Gravity.LEFT : a == 2 ? Gravity.RIGHT : Gravity.CENTER_HORIZONTAL;
+                edit.setGravity(alignment | Gravity.CENTER_VERTICAL);
+                break;
         }
     }
     void pause() { focus(false); }

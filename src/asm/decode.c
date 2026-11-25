@@ -16,6 +16,7 @@
  * assembler reads it back to the same bytes under the same generation.
  */
 #include "bgi/asm.h"
+#include "bgi/leb128.h"
 
 // ---- families ----------------------------------------------------------------------------
 
@@ -145,7 +146,8 @@ int Asm_LookupName(const char* name, size_t len, EngineGen_t gen, int* fam, int*
 	{
 		char* end;
 		long v = strtol(rest + 2, &end, 16);
-		if(end == rest + restLen && v >= 0 && v < 256 && (dot || v < 0x80))
+		if(end == rest + restLen && v >= 0 && v < 256 &&
+			(dot || v < 0x80 || (!Asm_FamilyName((int)v) && Defined(0, (int)v, gen))))
 		{
 			*fam = f;
 			*op = (int)v;
@@ -201,15 +203,22 @@ static const char* Formats(int op, EngineGen_t gen)
 		case 0x0a: return "z";
 		case 0x0b: return "i";
 		case 0x0c: return "zq";
+		case 0x0d: return "s";
+		case 0x0e: return "ns";
 		case 0x15: return (gen == GEN_COUNT || gen >= GEN_1_667) ? "k?" : "k";
 		case 0x0f:
 		case 0x19:
 		case 0x1d:
 		case 0x1e: return "L";
-		case 0x12: return "S";
+		case 0x12: return gen == GEN_1_680 || gen == GEN_COUNT ? "s" : "S";
+		case 0x13: return "r";
 		case 0x18: return "w";
 		case 0x1a:
-		case 0x1b: return "Ls";
+		case 0x1b:
+		case 0xe4:
+		case 0xe5:
+		case 0xe6:
+		case 0xe7: return "Ls";
 		case 0x1c: return "Lb";
 		case 0x1f:
 		case 0x2c:
@@ -217,6 +226,8 @@ static const char* Formats(int op, EngineGen_t gen)
 		case 0x2e:
 		case 0x2f: return "s";
 		case 0x3b: return "kr";
+		case 0x36: return "ks";
+		case 0x37: return "krs";
 		case 0x3c: return "b";
 		default: return "";
 	}
@@ -245,30 +256,27 @@ static enum AsmOperandKind KindOfCode(char c)
 	}
 }
 
-/* read a signed LEB128 varint (7 bits per byte, bit 7 continues, bit 6 of
- * the last byte is the sign) from `p`: 1 with the value and the number of
- * bytes consumed; 0 when no final byte comes within `avail` bytes (or
- * within the 10 bytes a 64-bit value can take) */
-static int ReadSleb(const uint8_t* p, uint32_t avail, int64_t* out, uint32_t* len)
+static uint32_t PushImmediateLength680(const uint8_t* area, uint32_t size)
 {
-	int64_t v = 0;
-	int shift = 0;
-	uint32_t i;
-	for(i = 0; i < avail && i < 10; i++)
+	uint32_t p = 1;
+	uint8_t mode;
+	if(!size)
+		return 0;
+	mode = area[0];
+	if(mode >= 0x80)
 	{
-		uint8_t b = p[i];
-		v |= (int64_t)(b & 0x7f) << shift;
-		shift += 7;
-		if(!(b & 0x80))
-		{
-			if((b & 0x40) && shift < 64)
-				v |= -((int64_t)1 << shift);
-			*out = v;
-			*len = i + 1;
-			return 1;
-		}
+		uint32_t width = PushImmediateWidth680(mode);
+		return width <= size - p ? p + width : 0;
 	}
-	return 0;
+	for(unsigned i = 0; i <= mode; ++i)
+	{
+		int64_t value;
+		uint32_t n = ReadSignedLeb32(area + p, size - p, &value);
+		if(!n)
+			return 0;
+		p += n;
+	}
+	return p;
 }
 
 /* Decode the instruction at `off` into `*out`: the opcode (two bytes for a
@@ -303,8 +311,27 @@ int Asm_Decode(const uint8_t* area, uint32_t size, uint32_t off, EngineGen_t gen
 		out->len = p - off;
 		return 1;
 	}
-	if(out->op >= 0x80 || !Defined(0, out->op, gen))
+	if(!Defined(0, out->op, gen))
 		return 0; // an unknown family byte, or a base opcode the generation lacks
+	if(out->op == 0x03 && (gen == GEN_1_680 || gen == GEN_COUNT))
+	{
+		uint32_t n = PushImmediateLength680(area + p, size - p);
+		if(!n)
+			return 0;
+		out->bytes = area + off;
+		out->len = 1 + n;
+		return 1;
+	}
+	if(out->op == 0xe3)
+	{
+		if(size == p)
+			return 0;
+		out->len = 2 + 2u * (area[p] + 1u);
+		if(out->len > size - off)
+			return 0;
+		out->bytes = area + off;
+		return 1;
+	}
 	fmt = Formats(out->op, gen);
 	for(i = 0; fmt[i]; i++)
 	{
@@ -361,7 +388,9 @@ int Asm_Decode(const uint8_t* area, uint32_t size, uint32_t off, EngineGen_t gen
 				break;
 			case ASM_OPD_SLEB:
 			case ASM_OPD_SLEBREL:
-				if(!ReadSleb(area + p, size - p, &v, &n))
+				n = ReadSignedLeb128(area + p, size - p, &v);
+				/* Keep the encoded value so reassembly preserves the operand bytes. */
+				if(!n || (k == ASM_OPD_SLEB && n > 5))
 					return 0;
 				need = n;
 				break;
@@ -436,10 +465,17 @@ size_t Asm_Format(const AsmInsn_t* in, EngineGen_t gen, char* buf, size_t n)
 #define PUT(...)                                                    \
 	do                                                              \
 	{                                                               \
-		int w_ = snprintf(buf + o, o < n ? n - o : 0, __VA_ARGS__); \
+		int w_ = snprintf(o < n ? buf + o : NULL, o < n ? n - o : 0, __VA_ARGS__); \
 		if(w_ > 0)                                                  \
 			o += (size_t)w_;                                        \
 	} while(0)
+	if(!in->fam && (in->op == 0x03 || in->op == 0xe3) && in->bytes)
+	{
+		PUT(".db ");
+		for(uint32_t j = 0; j < in->len; ++j)
+			PUT("%s0x%02x", j ? ", " : "", in->bytes[j]);
+		return o;
+	}
 	if(in->fam)
 	{
 		if(name)

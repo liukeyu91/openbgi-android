@@ -51,6 +51,8 @@ extern AndroidHost_t* gAndroidHost; // only the engine thread reads this pointer
 int OsAndroid_InitPaths(void);
 void OsAndroid_EngineOptions(char* out, size_t size);
 void OsAndroid_Log(const char* text);
+void OsAndroid_ReportVm(int final);
+void OsAndroid_ReportError(const char* body);
 size_t OsAndroid_ScriptToUtf8(const char* text,char* out,size_t size);
 void OsAndroid_AudioForeground(int resumed);
 int OsAndroid_AudioStatus(void);
@@ -67,6 +69,6 @@ void OsAndroid_EditCommand(int op, int a, int b, int c, int d, const char* text)
 enum { ANDROID_EDIT_SHOW, ANDROID_EDIT_MOVE, ANDROID_EDIT_FONT,
     ANDROID_EDIT_SELECT, ANDROID_EDIT_FOCUS, ANDROID_EDIT_COLOUR,
     ANDROID_EDIT_REFRESH, ANDROID_EDIT_REJECT, ANDROID_EDIT_LIMIT,
-    ANDROID_EDIT_TEXT, ANDROID_EDIT_DESTROY, ANDROID_EDIT_CANVAS };
+    ANDROID_EDIT_TEXT, ANDROID_EDIT_DESTROY, ANDROID_EDIT_CANVAS, ANDROID_EDIT_ALIGNMENT };
 
 #endif

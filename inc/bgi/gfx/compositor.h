@@ -91,6 +91,7 @@ void Compositor_InvalidateAll(Compositor_t* c);
 void Compositor_SetDrawLimit(Compositor_t* c, int prio); // "90 09"
 void Compositor_SetBgType(Compositor_t* c, int type);
 void Compositor_Snapshot(Compositor_t* c, const Bmp_t* dst, int prio); // "90 05": the objects up to `prio` into dst
+void Compositor_SnapshotOffset(Compositor_t* c, const Bmp_t* dst, int x, int y, int prio); // "91 05"
 int Compositor_CanBand(Compositor_t* c);                               // 0 while something reads the screen
 void Compositor_RenderAll(Compositor_t* c);                            // the whole screen
 int Compositor_Render(Compositor_t* c, Rect_t* outRects);              // one frame; the repainted rectangles' count, -1 = everything

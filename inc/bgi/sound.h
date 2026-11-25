@@ -21,7 +21,7 @@
 #include "bgi/common.h"
 
 #define BGM_CHANNELS      0x10 // music channels
-#define SE_SLOTS          0x40 // sound effect slots
+#define SE_SLOTS          0x80 // storage capacity; the active range follows the engine profile
 #define SE_DESC_SIZE      0x40 // an effect's descriptor: the BW header of its file
 
 // the library's result codes the manager and the handlers test

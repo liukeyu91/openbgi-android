@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 
 /** Expands translation resources locally before an imported game is published. */
 final class PatchImport {
-    interface Progress{void update(String message);}
+    interface Progress{void update(int done,int total);}
     static final class Source{
         final String format,path,key;final String[] select,exclude;
         Source(String format,String path,String key,String[] select,String[] exclude){this.format=format;this.path=path;this.key=key;this.select=select;this.exclude=exclude;}
@@ -22,7 +22,6 @@ final class PatchImport {
     }
     static final class Result{
         String profile="",engine="",encoding="",fontFamily="";int resources,preserved,containers,repaired;
-        String summary(){return repaired>0?"已处理汉化资源 "+resources+" 项，其中修复 "+repaired+" 项。":resources>0?"已展开汉化资源 "+resources+" 项。":preserved>0?"汉化资源已就绪。":!profile.isEmpty()?"已识别汉化游戏设置。":containers>0?"未发现可展开的游戏资源。":"未发现需要展开的汉化资源。";}
         void apply(GameSettings settings){
             if(!encoding.isEmpty())settings.chooseEncoding(encoding);
             if(!engine.isEmpty()&&Arrays.asList(EngineProfiles.NAMES).contains(engine))settings.profile=engine;
@@ -82,18 +81,26 @@ final class PatchImport {
         try{MessageDigest hash=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)hash.update(b,0,n);}StringBuilder s=new StringBuilder();for(byte b:hash.digest())s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}
         catch(NoSuchAlgorithmException e){throw new IOException(e);}
     }
+    private static void readReport(Path path,Properties properties)throws IOException{
+        if(Files.isRegularFile(path)&&Files.size(path)<=4*1024*1024)
+            try(InputStream in=Files.newInputStream(path)){properties.load(in);}
+    }
     static Result process(File game,Profile[] profiles,Progress progress)throws IOException{
-        Path root=game.toPath().toRealPath();Path config=root.resolve(".openbgi");
+        return process(game,game,profiles,progress);
+    }
+    static Result process(File game,File outputDirectory,Profile[] profiles,Progress progress)throws IOException{
+        Path root=outputDirectory.toPath().toRealPath();Path config=root.resolve(".openbgi");
+        boolean separate=!root.equals(game.toPath().toRealPath());
         if(Files.isSymbolicLink(config))throw new IOException("配置目录不能使用符号链接");
         Files.createDirectories(config);Path work=Files.createTempDirectory(config,"patch-import-");
         List<Pack> packs=new ArrayList<>();List<Path> installed=new ArrayList<>();Result result=new Result();
         Map<Path,Path> backups=new LinkedHashMap<>();boolean keepRecovery=false;
-        Properties record=new Properties(),previous=new Properties();
+        Properties record=new Properties(),previous=new Properties(),sourceReport=new Properties();
         Path previousReport=config.resolve("translation.properties");
         try{
-            if(Files.isRegularFile(previousReport)&&Files.size(previousReport)<=4*1024*1024)
-                try(InputStream in=Files.newInputStream(previousReport)){previous.load(in);}
-            progress.update("正在检测汉化补丁…");Profile chosen=null;Set<String> used=new HashSet<>();
+            readReport(previousReport,previous);
+            if(separate)readReport(game.toPath().resolve(".openbgi/translation.properties"),sourceReport);
+            progress.update(0,0);Profile chosen=null;Set<String> used=new HashSet<>();
             for(Profile profile:profiles){boolean complete=true;for(Source source:profile.sources){File f=lookup(game,source.path);if(f==null||!f.isFile()){complete=false;break;}if(!source.key.isEmpty()&&lookup(game,source.key)==null){complete=false;break;}}
                 if(complete){chosen=profile;break;}}
             List<Job> jobs=new ArrayList<>();
@@ -129,21 +136,23 @@ final class PatchImport {
                 Pack pack=new Pack(file,null,PatchCpk.open(file,key));packs.add(pack);for(Item item:pack.items)if(!excluded(item.name))jobs.add(new Job(pack,item));
             }
             long total=0;for(Job job:jobs){PatchEvb.safeName(job.item.name);total=Math.addExact(total,job.item.size);}
-            if(total>8L*1024*1024*1024||total>game.getUsableSpace())throw new IOException("手机剩余空间不足以展开汉化资源");
+            if(total>8L*1024*1024*1024||total>outputDirectory.getUsableSpace())throw new IOException("手机剩余空间不足以展开汉化资源");
             Map<String,Path> staged=new LinkedHashMap<>(),targets=new HashMap<>();Map<String,String> hashes=new HashMap<>();Set<String> preserved=new HashSet<>(),repairs=new HashSet<>();int done=0;
             for(Job job:jobs){
                 if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("汉化处理已取消");
                 String lower=job.item.name.toLowerCase(Locale.ROOT);
-                File existing=lookup(game,job.item.name);
+                File existing=lookup(outputDirectory,job.item.name);
+                boolean privateFile=existing!=null;
+                if(!privateFile && separate)existing=lookup(game,job.item.name);
                 boolean repair=false;
                 if(existing!=null){
                     if(!existing.isFile())throw new IOException("资源与目录重名："+job.item.name);
-                    String owned=previous.getProperty("resource."+lower,"");
+                    String owned=(privateFile?previous:sourceReport).getProperty("resource."+lower,"");
                     boolean managed=owned.matches("[0-9a-f]{64}")&&!Files.isSymbolicLink(existing.toPath())&&owned.equals(digest(existing));
                     repair=managed || job.pack.evb!=null&&!Files.isSymbolicLink(existing.toPath())&&job.pack.evb.matchesStored((PatchEvb.Entry)job.item.entry,existing);
                     if(!repair){if(preserved.add(lower))result.preserved++;continue;}
                 }
-                Path output=work.resolve("resource-"+(done++));progress.update("正在展开汉化资源："+done+" / "+jobs.size());
+                Path output=work.resolve("resource-"+(done++));progress.update(done,jobs.size());
                 try(OutputStream stream=new BufferedOutputStream(Files.newOutputStream(output,StandardOpenOption.CREATE_NEW))){job.pack.decode(job.item,stream);}
                 if(Files.size(output)!=job.item.size)throw new IOException("汉化资源展开长度不符："+job.item.name);
                 String hash=digest(output.toFile());
@@ -158,7 +167,11 @@ final class PatchImport {
                     Files.delete(output);continue;
                 }
                 staged.put(lower,output);hashes.put(lower,hash);record.setProperty("resource."+lower,hash);
-                targets.put(lower,repair?existing.toPath():root.resolve(lower));if(repair)repairs.add(lower);
+                targets.put(lower,repair&&privateFile?existing.toPath():root.resolve(lower));
+                if(repair){
+                    result.repaired++;
+                    if(privateFile)repairs.add(lower);
+                }
             }
             // Replace only our recorded, unmodified outputs or an exact old
             // compression envelope. Keep rollback copies until publication.
@@ -169,7 +182,7 @@ final class PatchImport {
                     Files.move(entry.getValue(),target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
                 }else{Files.move(entry.getValue(),target);installed.add(target);}
             }
-            result.resources=staged.size();result.containers=packs.size();result.repaired=repairs.size();
+            result.resources=staged.size();result.containers=packs.size();
             record.setProperty("profile",result.profile);record.setProperty("encoding",result.encoding);record.setProperty("engine",result.engine);
             record.setProperty("fontFamily",result.fontFamily);
             record.setProperty("expanded",Integer.toString(result.resources));record.setProperty("preserved",Integer.toString(result.preserved));

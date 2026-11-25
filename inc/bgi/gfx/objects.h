@@ -26,7 +26,7 @@ typedef struct Effector
 	int32_t vec1Gen, vec2Gen; // their generations when set
 	int32_t amount;           // mode 0: passed to Blit_Displace (non-zero: bilinear)
 	Bmp_t snap;               // screen-sized copy of what lies below
-	int32_t gradType;         // mode 1: 0 pads with black, 1 repeats the edge
+	int32_t gradType;         // mode 1: axis and edge handling
 	int32_t rippleMap;        // mode 2: vector + distance map (pixel mode 6)
 	int32_t rippleMapGen;
 	int32_t rings;

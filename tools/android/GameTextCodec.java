@@ -6,6 +6,11 @@ import java.nio.charset.Charset;
 /** Script limits count encoded bytes, never Java UTF-16 code units. */
 final class GameTextCodec {
     static Charset charset(int encoding) {
+        if(encoding==3){
+            if(Charset.isSupported("x-windows-950"))return Charset.forName("x-windows-950");
+            if(Charset.isSupported("windows-950"))return Charset.forName("windows-950");
+            return Charset.forName("Big5");
+        }
         return Charset.forName(encoding == 2 ? "GBK" : encoding == 1 ? "UTF-8" : "windows-31j");
     }
     static String insertion(CharSequence source, int start, int end, CharSequence dest,

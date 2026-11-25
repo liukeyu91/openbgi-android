@@ -3005,7 +3005,7 @@ static int Opcode_Gfx0_SeqLoad(Thread_t* t) // 90 F4 (1.69/472 on): &no, &info, 
 	const char* arc = (const char*)PopPtr(t);
 	int32_t* info = (int32_t*)PopPtr(t);
 	int32_t* outNo = (int32_t*)PopPtr(t);
-	Thread_SetWait(t, WaitSeqLoad_New(t, arc, name, outNo, info));
+	Thread_SetWait(t, WaitSeqLoad_New(t, arc, name, outNo, info, 0));
 	return 2;
 }
 
@@ -3160,7 +3160,7 @@ void Vm_Optable90Init(void)
 		{0x04, Opcode_Gfx0_Snapshot, GEN_FIRST, GEN_LAST},
 		{0x05, Opcode_Gfx0_SnapshotPrio, GEN_FIRST, GEN_LAST},
 		{0x06, Opcode_Gfx0_SetProjCentre, GEN_1_529, GEN_LAST},
-		{0x17, Opcode_Gfx0_BmpSetMode, GEN_1_494, GEN_LAST},
+		{0x17, Opcode_Gfx0_BmpSetMode, GEN_1_492, GEN_LAST},
 		{0x07, Opcode_Gfx0_SetSyncLoadWindow, GEN_1_69_472, GEN_LAST},
 		{0x08, Opcode_Gfx0_SetGlobalEffect, GEN_FIRST, GEN_LAST},
 		{0x09, Opcode_Gfx0_SetDrawLimit, GEN_FIRST, GEN_LAST},
@@ -3200,7 +3200,7 @@ void Vm_Optable90Init(void)
 		{0x34, Opcode_Gfx0_ObjSetFade, GEN_FIRST, GEN_LAST},
 		{0x39, Opcode_Gfx0_ObjSetOpacity, GEN_1_599, GEN_LAST},
 		{0x35, Opcode_Gfx0_ObjSetProgress, GEN_FIRST, GEN_LAST},
-		{0x36, Opcode_Gfx0_ObjSetOffset2, GEN_1_494, GEN_LAST},
+		{0x36, Opcode_Gfx0_ObjSetOffset2, GEN_1_492, GEN_LAST},
 		{0x37, Opcode_Gfx0_ObjSetOffset, GEN_FIRST, GEN_LAST},
 		{0x38, Opcode_Gfx0_ObjSetParam, GEN_FIRST, GEN_LAST},
 		{0x3A, Opcode_Gfx0_ObjSetPriority, GEN_1_69_472, GEN_LAST},
@@ -3268,7 +3268,7 @@ void Vm_Optable90Init(void)
 		 * files of their later family and are shared through bgi/vm.h) */
 		{0x87, Opcode_Gfx1_WindowSetFont, GEN_1_58, GEN_1_64},
 		{0x87, Opcode_Gfx0_WindowSetPunch, GEN_1_66, GEN_LAST},
-		{0x82, Opcode_Gfx0_WindowSetLayerOrder, GEN_1_494, GEN_LAST},
+		{0x82, Opcode_Gfx0_WindowSetLayerOrder, GEN_1_492, GEN_LAST},
 		{0x88, Opcode_Gfx0_WindowSetTextArea, GEN_FIRST, GEN_LAST},
 		{0x89, Opcode_Gfx0_WindowGetTextArea, GEN_FIRST, GEN_LAST},
 		{0x8A, Opcode_Gfx1_WindowSetSpacing, GEN_1_58, GEN_1_64},

@@ -68,9 +68,16 @@ static uint32_t GetFileSizeDecoded(const char* arc, const char* name);
 
 int LoadFile_OpenView(FileView_t* view, const char* arc, const char* name)
 {
-	char path[0x104];
 	if(File_OpenView(view,gBaseDir,name))return 1;
 	if(!arc)return File_OpenView(view,gAltDir,name);
+	return LoadFile_OpenArchiveView(view, arc, name);
+}
+
+int LoadFile_OpenArchiveView(FileView_t* view, const char* arc, const char* name)
+{
+	char path[0x104];
+	if(!arc)
+		return 0;
 	CheckArcName(name);
 	PathJoin(path,gBaseDir,arc);
 	if(ArcMgr_OpenView(gArcMgr,view,path,name))return 1;
@@ -192,7 +199,7 @@ static uint32_t DecodedLimit(void)
 {
 	if(gEngine->gen <= GEN_1_69_472)
 		return 0x2800000u; // 40 MB
-	if(gEngine->gen == GEN_1_494)
+	if(gEngine->gen <= GEN_1_494)
 		return 0x3000000u; // 48 MB
 	return 0x4000000u;     // 64 MB from 1.529
 }

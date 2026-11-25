@@ -45,6 +45,52 @@ VmHandler_t vm_optable_92[256]; // the "92 xx" dispatch table, filled by Vm_Opta
 	} while(0)
 
 // -------------------------------------------------------------------------
+// 92 0E, 92 0F : per-face glyph correction and tracking (1.680)
+// -------------------------------------------------------------------------
+
+static int Opcode_Gfx2_SetFaceExtension(Thread_t* t) // 92 0E: face, count, values →
+{
+	FontFaceExtension_t ext = {0};
+	uint32_t address = Thread_Pop(t);
+	uint32_t count = Thread_Pop(t);
+	const char* face = (const char*)PopPtr(t);
+	uint32_t bytes;
+	int result;
+	if(count != 4 && count != 5)
+		GFX_ERROR(t, "Invalid font extension parameter count (%u)", (unsigned)count);
+	bytes = count * sizeof(int32_t);
+	memcpy(&ext, ResolveScalar680(address, t, bytes), bytes);
+	result = FontCache_SetFaceExtension(gBmpMgr->fonts, face, &ext);
+	switch(result)
+	{
+		case 4: GFX_ERROR(t, "Invalid font face name"); break;
+		case 5: GFX_ERROR(t, MSG_BAD_FACE_SCALE, (unsigned)ext.sx, (unsigned)ext.sy); break;
+		case 6: GFX_ERROR(t, MSG_BAD_FACE_COORDS, (unsigned)ext.dx, (unsigned)ext.dy); break;
+		case 7: GFX_ERROR(t, "Invalid font spacing adjustment (%.3f)", ext.spacing / 65536.0); break;
+	}
+	return 0;
+}
+
+static int Opcode_Gfx2_SetFaceSpacing(Thread_t* t) // 92 0F: face, spacing →
+{
+	int32_t spacing = (int32_t)Thread_Pop(t);
+	const char* face = (const char*)PopPtr(t);
+	int result = FontCache_SetFaceSpacing(gBmpMgr->fonts, face, spacing);
+	if(result == 8)
+	{
+		/* A platform fallback face may be selected after the script's initial
+		 * extension registrations. Start it at the default glyph geometry. */
+		FontFaceExtension_t defaults = {.spacing = spacing};
+		result = FontCache_SetFaceExtension(gBmpMgr->fonts, face, &defaults);
+	}
+	if(result == 7)
+		GFX_ERROR(t, "Invalid font spacing adjustment (%.3f)", spacing / 65536.0);
+	if(result == 4)
+		GFX_ERROR(t, "Invalid font face name");
+	return 0;
+}
+
+// -------------------------------------------------------------------------
 // 92 00, 92 01 : ripple definitions
 // -------------------------------------------------------------------------
 
@@ -651,10 +697,7 @@ static int Opcode_Gfx2_VideoTextureAttach(Thread_t* t)
 }
 
 /* 92 F0 (1.494 on): arc, name, x, y, w, h → length
- * A movie played out of an archive (the original feeds DirectShow from
- * the entry through its own source filter) at (x, y) in a w x h area.
- * Without video playback the player answers 0 - as "90 F0" does here -
- * and the scripts move on; a non-positive size is still a script error. */
+ * Play an archive entry in the requested rectangle. A failed start pushes 0. */
 static int Opcode_Gfx2_MoviePlayArc(Thread_t* t)
 {
 	int h = (int)Thread_Pop(t), w = (int)Thread_Pop(t);
@@ -662,13 +705,9 @@ static int Opcode_Gfx2_MoviePlayArc(Thread_t* t)
 	const char* name = (const char*)PopPtr(t);
 	const char* arc = (const char*)PopPtr(t);
 	int32_t length = 0;
-	(void)x;
-	(void)y;
-	(void)name;
-	(void)arc;
 	if(w <= 0 || h <= 0)
 		GFX_ERROR(t, MSG_BAD_MOVIE_SIZE, w, h);
-	Thread_Push(t, (uint32_t)length);
+	Thread_Push(t, Movie_PlayArc(&length, arc, name, x, y, w, h) ? (uint32_t)length : 0u);
 	return 0;
 }
 
@@ -676,9 +715,7 @@ static int Opcode_Gfx2_MoviePlayArc(Thread_t* t)
  * The BF_Movie sequence load of "90 F4" (the wait pushes 0 ok / 1 / 2 not
  * a movie when it ends; the thread blocks on it).  `streamed` asks for
  * the form that keeps only the header and index in memory and reads the
- * frames from the archive, whose files are of the BF_Movie types 0x10000
- * / 0x10001 that this build does not decode - the whole file is loaded
- * instead, which serves a type-0 file. */
+ * frames on demand for BF_Movie types 0x10000 and 0x10001. */
 static int Opcode_Gfx2_SeqLoad(Thread_t* t)
 {
 	int streamed = (int)Thread_Pop(t);
@@ -686,8 +723,7 @@ static int Opcode_Gfx2_SeqLoad(Thread_t* t)
 	const char* arc = (const char*)PopPtr(t);
 	int32_t* info = (int32_t*)PopPtr(t);
 	int32_t* outNo = (int32_t*)PopPtr(t);
-	(void)streamed;
-	Thread_SetWait(t, WaitSeqLoad_New(t, arc, name, outNo, info));
+	Thread_SetWait(t, WaitSeqLoad_New(t, arc, name, outNo, info, streamed));
 	return 2;
 }
 
@@ -749,11 +785,13 @@ static int Opcode_Gfx2_VideoTexturePosition(Thread_t* t)
 void Vm_Optable92Init(void)
 {
 	static const OpEntry_t ops[] = {
+		{0x0e, Opcode_Gfx2_SetFaceExtension, GEN_1_680, GEN_1_680},
+		{0x0f, Opcode_Gfx2_SetFaceSpacing, GEN_1_680, GEN_1_680},
 		{0x94, Opcode_Gfx2_TakeLineHeights, GEN_FIRST, GEN_LAST},
 		{0x95, Opcode_Gfx2_WindowFontHeight, GEN_FIRST, GEN_LAST},
 		{0xF6, Opcode_Gfx2_VideoTextureVolume, GEN_FIRST, GEN_LAST},
-		{0x14, Opcode_Gfx2_PreloadImage, GEN_1_494, GEN_LAST},
-		{0x15, Opcode_Gfx2_PreloadClear, GEN_1_494, GEN_LAST},
+		{0x14, Opcode_Gfx2_PreloadImage, GEN_1_492, GEN_LAST},
+		{0x15, Opcode_Gfx2_PreloadClear, GEN_1_492, GEN_LAST},
 		{0x12, Opcode_Gfx2_BmpSetBaseSize, GEN_1_535, GEN_LAST},
 		{0x16, Opcode_Gfx2_BmpBaseSize, GEN_1_529, GEN_LAST},
 		{0x17, Opcode_Gfx2_BmpGetPixel, GEN_1_529, GEN_LAST},
@@ -769,7 +807,7 @@ void Vm_Optable92Init(void)
 		{0xF2, Opcode_Gfx2_VideoTextureAttach, GEN_1_494, GEN_LAST},
 		{0xF4, Opcode_Gfx2_VideoTextureControl, GEN_1_547, GEN_LAST},
 		{0xF5, Opcode_Gfx2_VideoTexturePosition, GEN_1_573, GEN_LAST},
-		{0x1A, Opcode_Gfx2_AlphaToScreenGray, GEN_1_494, GEN_LAST},
+		{0x1A, Opcode_Gfx2_AlphaToScreenGray, GEN_1_492, GEN_LAST},
 		{0x37, Opcode_Gfx2_ObjSetFixedOffset2, GEN_1_69_472, GEN_1_69_472}, // the other builds have it at "91 36" from 1.494
 		{0x00, Opcode_Gfx2_DefineRipple, GEN_FIRST, GEN_LAST},
 		{0x01, Opcode_Gfx2_DefineRippleEx, GEN_FIRST, GEN_LAST},

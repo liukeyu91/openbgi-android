@@ -70,6 +70,7 @@ struct Thread;
 /* tagged pointer -> host pointer (NULL for 0; script error for a
  * pointer into an unmapped region) */
 void* ResolvePtr(uint32_t ptr, struct Thread* t);
+uint8_t* ResolveScalar680(uint32_t ptr, struct Thread* t, uint32_t width);
 // pop a tagged pointer from the thread stack and resolve it
 void* PopPtr(struct Thread* t);
 /* resolve n consecutive tagged pointers of an array (the
