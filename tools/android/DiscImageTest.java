@@ -200,14 +200,73 @@ public final class DiscImageTest {
             reject(()->DiscImage.parse(image,new String[]{"system.arc\t12\t4"}),"missing field");
             reject(()->DiscImage.parse(image,new String[]{"system.arc\tx\t4\t6"}),"non-numeric range");
             check(DiscImage.parse(image,new String[0])==null,"Empty index");
-            reject(()->DiscImage.parse(zip,new String[]{"system.arc\t0\t4\t4\t9\t2"}),"unknown method");
             reject(()->DiscImage.parse(zip,new String[]{"system.arc\t0\t4\t8\t0\t6"}),"stored size mismatch");
             reject(()->DiscImage.parse(zip,new String[]{"system.arc\t0\t4\t999999\t8\t2"}),"compressed range beyond the file");
+
+            // Listed but unopenable entries keep their place, named with the reason:
+            // a boot archive compressed with another method, or an encrypted one.
+            DiscImage.Source locked=DiscImage.parse(zip,new String[]{
+                "system.arc\t0\t4\t12\t12\t0","system.cn.arc\t0\t4\t4\t0\t0","readme.txt\t0\t4\t4\t0\t6"});
+            check(locked!=null,"Unopenable entries still parse into an index");
+            DiscImage.Entry bzip2=locked.find("system.arc");
+            check(bzip2!=null&&!bzip2.readable&&bzip2.unsupported()&&!bzip2.file(),"An unsupported method is not a file");
+            check(bzip2.reason().contains("BZIP2"),"The unsupported method is named");
+            DiscImage.Entry secret=locked.find("system.cn.arc");
+            check(secret!=null&&!secret.readable&&secret.encrypted()&&"已加密".equals(secret.reason()),"An encrypted entry is named");
+            check(locked.unreadable().size()==2,"Unopenable entries are counted");
+            check(!locked.hasBootFiles()&&ArchiveLanguage.hasBootFiles(locked.allRootNames()),
+                "Boot resources are listed, just not readable");
+            check(locked.describeUnreadable(1).startsWith("2 个条目")&&locked.describeUnreadable(1).contains("已加密"),
+                "The summary counts the entries and their reasons");
+            reject(()->locked.bytes(bzip2),"reading a bzip2 entry");
+            reject(()->locked.bytes(secret),"reading an encrypted entry");
+            reject(()->locked.read(bzip2,0,4),"positioned read of an unsupported entry");
+            try{
+                ContainerGame.register(new File(root.toFile(),"locked"),zip,ContainerGame.Kind.ZIP,locked);
+                check(false,"Expected rejection: unreadable boot resources");
+            }catch(IOException expected){
+                check(expected.getMessage().contains("无法读取")&&expected.getMessage().contains("已加密"),
+                    "The refusal names the reason instead of calling the archive incomplete");
+            }
+
+            // A deflated entry past the 256 MiB ceiling is refused before anything is allocated.
+            DiscImage.Source oversized=DiscImage.parse(zip,new String[]{"huge.bin\t0\t"+(257L*1024*1024)+"\t4\t8\t2"});
+            check(oversized!=null&&oversized.find("huge.bin")!=null,"An oversized entry parses");
+            try{
+                oversized.bytes(oversized.find("huge.bin"));
+                check(false,"Expected rejection: entry past the inflate ceiling");
+            }catch(IOException expected){
+                check(expected.getMessage().contains("256 MiB"),"The refusal names the inflate ceiling");
+            }
 
             check(ContainerGame.find(root.toFile(),image)!=null,"Duplicate image detected");
             Files.write(new File(entry,ContainerGame.SOURCE).toPath(),"relative/path".getBytes(StandardCharsets.UTF_8));
             reject(()->ContainerGame.source(entry),"relative reference refused");
-            System.out.println("DISC_IMAGE_PASS: "+checks+" checks; index parse, language, sampling, migration, summary, ZIP deflate and validation");
+            Files.write(new File(entry,ContainerGame.SOURCE).toPath(),image.getAbsolutePath().getBytes(StandardCharsets.UTF_8));
+
+            // A source that disappeared keeps its entry and saves, and the
+            // refusal says which of the two things went missing.
+            File copy=new File(root.toFile(),"copy.iso");
+            Files.copy(image.toPath(),copy.toPath(),StandardCopyOption.REPLACE_EXISTING);
+            File gone=new File(root.toFile(),"gone");
+            ContainerGame.register(gone,copy,ContainerGame.Kind.IMAGE,source,staging->ContainerGame.data(staging,source));
+            check(Files.deleteIfExists(copy.toPath()),"Source moved away");
+            try{
+                ResourceLayers.of(gone,gone).close();
+                check(false,"Expected rejection: source removed");
+            }catch(IOException expected){
+                check(expected.getMessage().contains("恢复后即可启动"),"The refusal tells the user the source is gone");
+            }
+            check(ContainerGame.linked(gone)&&ContainerGame.summary(gone)!=null,"The entry and its summary survive");
+            check(new File(ContainerGame.data(gone),"UserData/bgi0001.sud").isFile(),"The migrated saves survive");
+            try(ResourceLayers cached=ResourceLayers.summary(gone,gone)){
+                check(cached.hasBootFiles(),"The cached summary still answers without the source");
+            }
+            Files.copy(image.toPath(),copy.toPath(),StandardCopyOption.REPLACE_EXISTING);
+            check(ContainerGame.validate(ContainerGame.source(gone)).getCanonicalFile().equals(copy.getCanonicalFile()),
+                "A restored source resolves again");
+            check(Files.deleteIfExists(copy.toPath()),"Cleanup: restored source");
+            System.out.println("DISC_IMAGE_PASS: "+checks+" checks; index parse, language, sampling, migration, summary, ZIP deflate, unreadable entries, missing source and validation");
         }finally{GameImport.remove(root);}
     }
 }

@@ -272,9 +272,10 @@ typedef struct ZipSpec
 {
     const char* name;   // as stored, '/' separated; a trailing '/' marks a directory
     const char* text;
-    int method;         // 0 stored, 8 deflated
+    int method;         // 0 stored, 8 deflated, anything else unsupported here
     int badCrc;         // write a check value that cannot match
     int zip64;          // sizes and local offset in a zip64 extra field
+    int flags;          // general purpose bits; 1 marks an encrypted entry
 } ZipSpec_t;
 
 /* A minimal archive writer: local headers, the central directory, and the
@@ -312,6 +313,7 @@ static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int
             uint8_t h[30] = {0};
             PutLe32(h, SIG_LOCAL);
             PutLe16(h + 4, 20);
+            PutLe16(h + 6, (uint32_t)files[i].flags);
             PutLe16(h + 8, (uint32_t)files[i].method);
             PutLe32(h + 14, crc[i]);
             PutLe32(h + 18, (uint32_t)stored);
@@ -330,6 +332,7 @@ static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int
         PutLe32(h, SIG_CENTRAL);
         PutLe16(h + 4, 45);
         PutLe16(h + 6, 45);
+        PutLe16(h + 8, (uint32_t)files[i].flags);
         PutLe16(h + 10, (uint32_t)files[i].method);
         PutLe32(h + 16, crc[i]);
         if(files[i].zip64)
@@ -397,15 +400,19 @@ static const char kArcText[] = "deflated-arc-0123456789-deflated-arc-0123456789"
 static void ReadZip(void)
 {
     static const ZipSpec_t files[] = {
-        {"Game/IPL._BP", "o", 0, 0, 0},
-        {"Game/SYSTEM.ARC", kArcText, 8, 0, 0},
-        {"Game/SYSTEM.CN.ARC", "cn", 0, 0, 0},
-        {"Game/MEDIA/DATA.DAT", "data-data", 8, 0, 0},
-        {"Game/README.TXT", "readme", 0, 0, 0},
-        {"Game/BROKEN.DAT", "broken", 8, 1, 0},
-        {"Game/dir/", "", 0, 0, 0},
-        {"__MACOSX/._junk", "x", 0, 0, 0},
-        {"../escape.txt", "x", 0, 0, 0},
+        {"Game/IPL._BP", "o", 0, 0, 0, 0},
+        {"Game/SYSTEM.ARC", kArcText, 8, 0, 0, 0},
+        {"Game/SYSTEM.CN.ARC", "cn", 0, 0, 0, 0},
+        {"Game/MEDIA/DATA.DAT", "data-data", 8, 0, 0, 0},
+        {"Game/README.TXT", "readme", 0, 0, 0, 0},
+        {"Game/BROKEN.DAT", "broken", 8, 1, 0, 0},
+        {"Game/dir/", "", 0, 0, 0, 0},
+        {"__MACOSX/._junk", "x", 0, 0, 0, 0},
+        {"../escape.txt", "x", 0, 0, 0, 0},
+        /* Two entries the reader keeps in the index but cannot open: another
+         * compression method, and an entry with the encryption bit set. */
+        {"Game/PACKED.DAT", "packed", 12, 0, 0, 0},
+        {"Game/SECRET.DAT", "secret", 0, 0, 0, 1},
     };
     struct stat st;
     const VolEntry_t *ipl, *sys;
@@ -419,7 +426,7 @@ static void ReadZip(void)
     /* The game root is the wrapper folder; macOS metadata and names that
      * leave the root are dropped, and the directories the archive does not
      * list (MEDIA) are added from their files. */
-    CHECK(Disc_Count() == 9 && !strcmp(Disc_ImagePath(), "fixture.zip") && !strcmp(Disc_Root(), "Game/"));
+    CHECK(Disc_Count() == 11 && !strcmp(Disc_ImagePath(), "fixture.zip") && !strcmp(Disc_Root(), "Game/"));
     for(uint32_t i = 0; i < Disc_Count(); ++i)
     {
         const VolEntry_t* entry = Disc_At(i);
@@ -458,6 +465,25 @@ static void ReadZip(void)
     CHECK(!unlink("zip-copy.dat"));
     /* A wrong check value is reported when the bytes are wanted, not hidden. */
     CHECK(OS_FileAttrs("C:\\broken.dat") == OS_ATTR_READONLY && !OS_FileOpenRead("C:\\broken.dat"));
+    /* An entry compressed another way, or an encrypted one, keeps its place in
+     * the index so the launcher can name it - but no file service opens it. */
+    {
+        const VolEntry_t* packed = NULL;
+        const VolEntry_t* secret = NULL;
+        DiscHandle_t handle;
+        for(uint32_t i = 0; i < Disc_Count(); ++i)
+        {
+            const VolEntry_t* entry = Disc_At(i);
+            if(entry && !strcasecmp(entry->path, "Game/PACKED.DAT"))
+                packed = entry;
+            if(entry && !strcasecmp(entry->path, "Game/SECRET.DAT"))
+                secret = entry;
+        }
+        CHECK(packed && !packed->readable && packed->method == 12 && !packed->stored);
+        CHECK(secret && !secret->readable && secret->method == 0 && !secret->stored);
+        CHECK(!Disc_Open(packed, &handle) && !Disc_Open(secret, &handle));
+        CHECK(!OS_FileOpenRead("C:\\packed.dat") && !OS_FileOpenRead("C:\\secret.dat"));
+    }
     find = OS_FindFirst("C:\\readme.*", &item);
     CHECK(find && !strcasecmp(item.name, "readme.txt") && !OS_FindNext(find, &item));
     OS_FindClose(find);
@@ -471,8 +497,8 @@ static void ReadZip(void)
 static void ReadZip64(void)
 {
     static const ZipSpec_t files[] = {
-        {"Game/IPL._BP", "z", 0, 0, 1},
-        {"Game/SYSTEM.ARC", "s", 0, 0, 1},
+        {"Game/IPL._BP", "z", 0, 0, 1, 0},
+        {"Game/SYSTEM.ARC", "s", 0, 0, 1, 0},
     };
     WriteZip("fixture64.zip", files, sizeof files / sizeof files[0], 1);
     CHECK(OsPosix_MountDisc("fixture64.zip"));

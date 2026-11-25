@@ -45,7 +45,9 @@ final class ResourceLayers implements Closeable {
     /** Read the container index. Worker threads only: a large container takes a moment to index. */
     static ResourceLayers of(File game, File resources) throws IOException {
         if (ContainerGame.linked(game)) {
-            DiscImage.Source source = DiscImage.open(ContainerGame.source(game));
+            File container = ContainerGame.source(game);
+            if (container == null) throw new IOException("来源记录无效，请移除条目后重新添加");
+            DiscImage.Source source = DiscImage.open(ContainerGame.validate(container));
             if (source == null) throw new IOException("无法读取来源索引，请检查镜像或压缩包文件");
             return new ResourceLayers(game, game, source, overlays(game, null));
         }

@@ -68,7 +68,8 @@ final class ContainerGame {
         File file = source.getCanonicalFile();
         if (file.getPath().getBytes(StandardCharsets.UTF_8).length > 3000 || file.getPath().indexOf('\n') >= 0)
             throw new IOException("来源路径过长或包含换行");
-        if (!file.isFile() || !file.canRead()) throw new IOException("无法读取来源文件，请检查存储权限或存储卡");
+        if (!file.isFile() || !file.canRead())
+            throw new IOException("无法读取来源文件，来源可能已移动、重命名或被移除；游戏条目和存档会保留，恢复后即可启动");
         return file;
     }
 
@@ -114,12 +115,31 @@ final class ContainerGame {
         p.setProperty("boot", source.hasBootFiles() ? "1" : "0");
         p.setProperty("default", names.contains("system.arc") || names.contains("ipl._bp") ? "1" : "0");
         p.setProperty("languages", languages.toString());
+        int unreadable = source.unreadable().size();
+        if (unreadable > 0) p.setProperty("unreadable", Integer.toString(unreadable));
         File file = new File(entry, SUMMARY);
         Path temp = file.toPath().resolveSibling("source.properties.tmp");
         try {
             try (OutputStream out = Files.newOutputStream(temp)) { p.store(out, "OpenBGI container summary"); }
             Files.move(temp, file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temp); }
+    }
+
+    /** Why a container cannot boot: the resources are missing, or they are
+     *  listed but the engine cannot open them (encrypted, or compressed with a
+     *  method the reader does not implement). */
+    private static String unbootable(Kind kind, DiscImage.Source source) {
+        String why = source.describeUnreadable(3);
+        boolean listed = ArchiveLanguage.hasBootFiles(source.allRootNames());
+        if (kind == Kind.ZIP) {
+            if (listed) return "压缩包里的启动资源无法读取：" + why
+                + "。请去掉口令，并用存储或 Deflate 方式重新打包";
+            if (!why.isEmpty()) return "压缩包内没有可启动的游戏资源，其中 " + why
+                + " 无法读取，请确认打包完整或改用其他压缩包";
+            return "压缩包内没有可启动的游戏资源，请选择完整的游戏压缩包";
+        }
+        if (!why.isEmpty()) return "光盘镜像里有 " + why + " 无法读取，请重新制作镜像";
+        return "镜像根目录缺少可启动的游戏资源，请选择完整的游戏光盘";
     }
 
     /** Create the entry for an existing container; `source` is the index already read. */
@@ -131,8 +151,7 @@ final class ContainerGame {
         File file = validate(container);
         if (source == null) throw new IOException(kind == Kind.ZIP
             ? "无法识别压缩包格式，请选择 ZIP 文件" : "无法识别镜像格式，请选择 ISO 或 UDF 光盘镜像");
-        if (!source.hasBootFiles()) throw new IOException(kind == Kind.ZIP
-            ? "压缩包内没有可启动的游戏资源，请选择完整的游戏压缩包" : "镜像根目录缺少可启动的游戏资源，请选择完整的游戏光盘");
+        if (!source.hasBootFiles()) throw new IOException(unbootable(kind, source));
         Path target = entry.toPath(), staging = target.resolveSibling(".import-" + entry.getName());
         if (Files.exists(target)) throw new IOException("游戏条目已存在");
         Files.createDirectories(target.getParent());

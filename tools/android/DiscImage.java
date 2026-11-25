@@ -34,6 +34,34 @@ final class DiscImage {
         String name() { int at = path.lastIndexOf('/'); return at < 0 ? path : path.substring(at + 1); }
         /** A file the engine can open and read: not a directory, non-empty. */
         boolean file() { return !directory && readable && size > 0; }
+        /** A stored or deflated entry with the encryption bit set. */
+        boolean encrypted() { return !directory && !readable && (method == 0 || method == 8); }
+        /** An entry compressed with a method this reader does not implement. */
+        boolean unsupported() { return !directory && method != 0 && method != 8; }
+
+        /** Why the engine cannot read a listed entry; null when it can. */
+        String reason() {
+            if (directory || readable) return null;
+            if (unsupported()) return "不支持的压缩方式 " + method + "（" + compressionName(method) + "）";
+            if (encrypted()) return "已加密";
+            return "无法读取";
+        }
+    }
+
+    /** APPNOTE's compression method numbers, for the ones users actually meet. */
+    private static String compressionName(int method) {
+        switch (method) {
+            case 1: return "Shrink";
+            case 6: return "Implode";
+            case 9: return "Deflate64";
+            case 12: return "BZIP2";
+            case 14: return "LZMA";
+            case 93: return "Zstandard";
+            case 95: return "XZ";
+            case 98: return "PPMd";
+            case 99: return "AES 加密";
+            default: return "未知";
+        }
     }
 
     /** The container plus its index; reads are positioned, never buffered whole. */
@@ -67,6 +95,41 @@ final class DiscImage {
 
         boolean hasBootFiles() { return ArchiveLanguage.hasBootFiles(rootNames()); }
 
+        /** Root names including the entries the engine cannot open, so a refusal
+         *  can tell "nothing to boot" apart from "cannot read what is there". */
+        Set<String> allRootNames() {
+            Set<String> names = new TreeSet<>();
+            for (Entry entry : entries)
+                if (entry.path.indexOf('/') < 0 && !entry.directory && entry.size > 0)
+                    names.add(entry.path.toLowerCase(Locale.ROOT));
+            return names;
+        }
+
+        /** File entries listed in the container that the engine cannot open. */
+        List<Entry> unreadable() {
+            List<Entry> found = new ArrayList<>();
+            for (Entry entry : entries) if (!entry.directory && !entry.readable) found.add(entry);
+            return found;
+        }
+
+        /** "3 个条目（已加密，如 a.arc、b.arc）" - a phrase that fits both
+         *  "启动资源无法读取：…" and "其中 … 无法读取". */
+        String describeUnreadable(int shown) {
+            List<Entry> found = unreadable();
+            if (found.isEmpty()) return "";
+            Set<String> reasons = new LinkedHashSet<>();
+            for (Entry entry : found) reasons.add(entry.reason());
+            StringBuilder text = new StringBuilder();
+            text.append(found.size()).append(" 个条目（").append(String.join("、", reasons));
+            int limit = Math.min(shown, found.size());
+            if (limit > 0) {
+                text.append("，如 ");
+                for (int i = 0; i < limit; i++) text.append(i == 0 ? "" : "、").append(found.get(i).path);
+                if (found.size() > limit) text.append(" 等");
+            }
+            return text.append("）").toString();
+        }
+
         synchronized void seek(Entry entry, long offset) throws IOException {
             if (stream == null) stream = new RandomAccessFile(image, "r");
             stream.seek(entry.data + offset);
@@ -75,6 +138,7 @@ final class DiscImage {
         /** Fill `buffer` from `offset` inside `entry`; the count read, or -1 at its end. */
         synchronized int read(Entry entry, long offset, byte[] buffer, int length) throws IOException {
             if (entry == null || offset < 0 || offset >= entry.size) return -1;
+            refuseUnreadable(entry);
             int wanted = (int)Math.min(length, entry.size - offset);
             if (entry.method != 0) {
                 byte[] all = inflate(entry);
@@ -86,11 +150,24 @@ final class DiscImage {
             return wanted;
         }
 
+        private static void refuseUnreadable(Entry entry) throws IOException {
+            if (entry == null || entry.readable) return;
+            throw new IOException("来源条目无法读取（" + entry.reason() + "）：" + entry.path);
+        }
+
+        /** The size limits of a deflated entry, checked before anything is allocated. */
+        private static void checkInflatable(Entry entry) throws IOException {
+            if (entry.csize > Integer.MAX_VALUE || entry.size > Integer.MAX_VALUE)
+                throw new IOException("压缩条目超过 2 GiB 上限：" + entry.path);
+            if (entry.size > MAX_INFLATE)
+                throw new IOException("压缩条目超过 " + (MAX_INFLATE >> 20) + " MiB 上限："
+                    + entry.path + "（" + (entry.size >> 20) + " MiB），请改用存储方式重新打包");
+        }
+
         /** The whole entry decompressed; ZIP entries are cached (one at a time). */
         private byte[] inflate(Entry entry) throws IOException {
             if (entry == inflated && inflatedBytes != null) return inflatedBytes;
-            if (entry.size > MAX_INFLATE || entry.csize > Integer.MAX_VALUE || entry.size > Integer.MAX_VALUE)
-                throw new IOException("压缩条目过大：" + entry.path);
+            checkInflatable(entry);
             byte[] raw = new byte[(int)entry.csize];
             seek(entry, 0);
             stream.readFully(raw, 0, raw.length);
@@ -114,6 +191,9 @@ final class DiscImage {
 
         synchronized byte[] read(Entry entry, long offset, int length) throws IOException {
             long available = entry == null ? 0 : Math.max(0, Math.min(entry.size - offset, length));
+            // A caller that asks for a whole deflated entry gets the size refusal
+            // before the buffer for it is allocated.
+            if (entry != null && entry.method != 0) { refuseUnreadable(entry); checkInflatable(entry); }
             byte[] buffer = new byte[(int)Math.min(available, Integer.MAX_VALUE)];
             if (buffer.length == 0) return buffer;
             int got = read(entry, offset, buffer, buffer.length);
@@ -176,13 +256,16 @@ final class DiscImage {
             // The mount spells directories with a trailing separator; the index keeps the bare path.
             if (path.length() > 1 && path.endsWith("/")) path = path.substring(0, path.length() - 1);
             if (!validPath(path)) throw new IOException("来源索引包含非法路径：" + path);
-            if (data < 0 || length < 0 || csize < 0 || method != 0 && method != 8)
+            if (data < 0 || length < 0 || csize < 0 || method < 0 || method > 255)
                 throw new IOException("来源索引格式错误：" + path);
             // For a deflated entry the range is its compressed bytes; its size is the uncompressed length.
             if (data > size || csize > size - data) throw new IOException("来源索引越界：" + path);
-            if (method == 0 && csize != length) throw new IOException("来源索引长度不符：" + path);
+            // A listed entry the engine cannot open (encrypted, or compressed another
+            // way) keeps its place in the index so the app can name it and say why.
+            boolean openable = (flags & 2) != 0 && (method == 0 || method == 8);
+            if (openable && method == 0 && csize != length) throw new IOException("来源索引长度不符：" + path);
             entries.add(new Entry(path, data, length, csize, method,
-                (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0));
+                (flags & 1) != 0, openable, (flags & 4) != 0));
         }
         if (entries.isEmpty()) return null;
         entries.sort(Comparator.comparing(entry -> entry.path, String.CASE_INSENSITIVE_ORDER));

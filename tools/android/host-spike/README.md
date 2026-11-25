@@ -36,3 +36,19 @@ APK 使用试验目录中的调试密钥。可以通过 `adb logcat -s OpenBGIHo
 | `movie.c` | `OpenBGI_MovieDecoder_t` | 评估由上游 FFmpeg decoder 接管；验证 Android 暂停与跳过。 |
 | `sjis.c`、`compat_jni.c`、`crash.c` | `OpenBGI_FontFiles_t`、公开 profile 接口、host 错误与日志 | 字体供应和日志归 host。GBK/Big5 文本、指令预检及本地引擎差异分别核对后再迁。 |
 
+## 迁移评估（2026-11-25）
+
+**契约规模** 上游 v1.0 的 `openbgi.h` 共 18 组宿主表、155 个回调指针，全部可为 NULL（缺失即该项失败）。与本分叉相关的是：`Files` 39、`Window` 26、`TextEntry` 14、`FontRenderer` 12、`Machine` 11、`ChildWindows` 8、`Shell` 8、`CdAudio` 6、`FontFiles` 5、`MoviePlayer` 5、`MovieDecoder` 5、`Registry` 4、`DebugWindow` 3、`MovieFile` 2。原型只接通了 `Files` 的读取、`Window`、触摸与按键、`OpenBGI_AudioRead` 和 `NextRequest`/`Answer`，`host.c` 全篇 343 行——足以证明契约能跑通，不足以说明可以整体替换。
+
+| 层 | 分叉现状 | 迁移成本 | 结论 |
+| --- | --- | --- | --- |
+| 文件 | `src/os/posix/*` 已有路径、属性、查找、时间和原生路径分离，外加 ISO/UDF/ZIP 只读容器与覆盖包 | 小：把现有实现包成表；Android 上 `nativeSep` 取 `/`、`nativeSjis` 取 0 | 先做。上游后续的存储修复可复用，风险最低 |
+| 画布 | `renderer.c` 走 EGL/GLES 纹理上传与 viewport 缩放 | 中：把 `OpenBGI_Frame_t` 的像素、行距、脏矩形接到现有 GL 管线，保留缩放与坐标换算 | 第二位，先做主机像素对照 |
+| 输入 | `window.c` 的事件队列加 Java 手势与长按映射 | 小到中：映射 `Pointer`/`Button`/`Key`/`Wheel`/`Focus`；IME 另走 `TextEntry` | 与画布同期，IME 是独立子项 |
+| 音频 | `audio_output.c` 用 AAudio，自带重采样 | 中：`AudioRead`/`RunAudio`/`SetAudioLead` 换混音输入；上游按 44.1 kHz 取数，与现有输出协商不同 | 后置，需按同一素材复核音轨 |
+| 影片 | `movie.c` 自带 FFmpeg 后端 | 大：要实现 `OpenBGI_MovieDecoder_t`（含画面与音轨），否则放弃上游解码 | 暂不迁 |
+| 文字与编码 | CP932/CP936/CP950 三张表，SJIS/UTF-8/GBK/BIG5 四模式管线 | **阻塞项**：上游 `textEncoding` 只有 UTF-8 与 Shift-JIS 两种状态，`typeface` 只认字符集码页，不提供 GBK/CP950 的语句文本转换 | 不迁。迁掉等于丢汉化兼容 |
+| 服务与对话框 | `services.c` 是阻塞式对话框加 Java 界面 | 中：改成 `NextRequest`/`Answer` 的请求应答模型，界面复用 | 可与输入同期 |
+
+**结论** 不整体迁移。上游 host API 的价值是让引擎核心不碰 OS，而本分叉的差异化——容器直读、汉化编码、Android 音频与影片后端——正好都在 host 侧；换掉 host 侧等于把这些能力重写一遍。只在需要跟进上游修复时按层对齐：先文件，再画布与输入，音频随后；影片与文字不迁。将来若要迁文字，前提是上游提供可插拔的文本编码钩子（GBK/CP950 双向转换），否则本分叉必须保留自己的转换管线。
+
