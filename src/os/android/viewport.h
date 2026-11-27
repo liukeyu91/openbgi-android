@@ -19,4 +19,12 @@ static inline int AndroidViewportNearest(Viewport_t v,int cw,int ch)
     return cw>0 && ch>0 && v.w>=cw && v.h>=ch &&
         v.w%cw==0 && v.h%ch==0 && v.w/cw==v.h/ch;
 }
+/* Outside coordinates are used for drags. The caller decides when to clamp them. */
+static inline int AndroidViewportPoint(Viewport_t v,int cw,int ch,float x,float y,int* gx,int* gy)
+{
+    if(v.w<=0 || v.h<=0)return 0;
+    *gx=(int)((x-v.x)*cw/v.w);
+    *gy=(int)((y-v.y)*ch/v.h);
+    return x>=v.x && x<v.x+v.w && y>=v.y && y<v.y+v.h;
+}
 #endif

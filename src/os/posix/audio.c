@@ -28,8 +28,9 @@
 #include <alsa/asoundlib.h>
 #endif
 #ifdef BGI_ANDROID
-#include "../android/android_internal.h"
+#include "../android/audio.h"
 #include "../android/audio_output.h"
+void OsAndroid_Log(const char* text);
 #endif
 
 static struct

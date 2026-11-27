@@ -126,15 +126,9 @@ static void Blit(int dx, int dy, int dw, int dh, const OsSurface_t* src,
 
 static int MapPoint(float x, float y, int width, int height)
 {
-	Viewport_t v;
 	if(!gCanvas || width <= 0 || height <= 0)
 		return 0;
-	v = Viewport(width, height);
-	if(v.w <= 0 || v.h <= 0)
-		return 0;
-	gMouseX = (int)((x - v.x) * gWidth / v.w);
-	gMouseY = (int)((y - v.y) * gHeight / v.h);
-	return x >= v.x && x < v.x + v.w && y >= v.y && y < v.y + v.h;
+	return AndroidViewportPoint(Viewport(width, height),gWidth,gHeight,x,y,&gMouseX,&gMouseY);
 }
 
 static void MouseButton(int button, int down)
@@ -221,7 +215,7 @@ int OS_PumpMessages(void)
     if(gRedraw!=redraw){gRedraw=redraw;gDirty=1;gRetryAt=0;}
     if(!window){OsAndroid_RenderClose();gDirty=1;}
     else if(gDirty && gVisible && gCanvas && frame!=gLastFrame && OsAndroid_ClockNs()>=gRetryAt){
-        int result=OsAndroid_Render(window,redraw,gCanvas,gWidth,gHeight,gDamage,host->scaleMode);
+        int result=OsAndroid_Render(window,redraw,gCanvas,gWidth,gHeight,gDamage,host->scaleMode,NULL);
         gLastFrame=frame;
         if(result>0){gDirty=0;gDamage=(AndroidDamage_t){0};gRetryAt=0;}
         else if(result<0)gRetryAt=OsAndroid_ClockNs()+1000000000u;

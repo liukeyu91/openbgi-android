@@ -19,6 +19,7 @@ typedef struct VolEntry
 	uint32_t check; // the archive's CRC-32, 0 when the format has none
 	uint64_t mtime;
 	uint8_t isDir, readable, stored, method; // method: 0 stored, 8 deflated (zip)
+	uint8_t encrypted;
 } VolEntry_t;
 typedef struct VolList VolList_t;
 

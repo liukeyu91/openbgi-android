@@ -366,8 +366,8 @@ $(BIN_DIR)/test_androidfont$(EXE): $(ANDROIDFONT_SRC) inc/bgi/os_posix.h inc/bgi
 	$(CC) $(filter-out -DBGI_HAVE_FONTCONFIG,$(CFLAGS)) $(LDFLAGS) -DBGI_ANDROID -o $@ $(ANDROIDFONT_SRC) $(LDLIBS)
 TEST_BIN += $(BIN_DIR)/test_androidfont$(EXE)
 
-ANDROIDOUTPUT_SRC := tools/tests/androidoutput.c src/os/android/audio_output.c
-$(BIN_DIR)/test_androidoutput$(EXE): $(ANDROIDOUTPUT_SRC) src/os/android/audio_output.h src/os/android/viewport.h tools/android/tests/stubs/aaudio/AAudio.h | $(BIN_DIR)
+ANDROIDOUTPUT_SRC := tools/tests/androidoutput.c src/os/android/audio_output.c tools/android/tests/stubs/aaudio/mock.c
+$(BIN_DIR)/test_androidoutput$(EXE): $(ANDROIDOUTPUT_SRC) src/os/android/audio_output.h src/os/android/viewport.h tools/android/tests/stubs/aaudio/AAudio.h tools/android/tests/stubs/aaudio/mock.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Itools/android/tests/stubs -o $@ $(ANDROIDOUTPUT_SRC) -lm
 TEST_BIN += $(BIN_DIR)/test_androidoutput$(EXE)
 

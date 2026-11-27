@@ -12,6 +12,6 @@ sh "$src/generate-profiles.sh" "$out/EngineProfiles.java"
     "$src/GameImport.java" "$src/DirectGame.java" "$src/ArchiveLanguage.java" "$src/GamePatch.java" \
     "$src/GameSettings.java" "$out/EngineProfiles.java" "$src/GameDataLock.java" "$src/SaveBackup.java" \
     "$src/SaveRestore.java" "$src/Blob.java" "$src/DiscImage.java" "$src/ContainerGame.java" "$src/ResourceLayers.java" \
-    "$src/ArchiveTextSamples.java" "$src/EncodingDetector.java" "$src/GameTextCodec.java" \
+    "$src/ArchiveTextSamples.java" "$src/EncodingDetector.java" "$src/GameEncoding.java" "$src/GameTextCodec.java" \
     "$src/EncodingProbeTest.java" "$src/DiscImageTest.java"
 "${JAVA:-java}" -Xmx128m -cp "$out" org.openbgi.port.DiscImageTest

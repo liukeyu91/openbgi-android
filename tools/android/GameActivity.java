@@ -32,6 +32,8 @@ import java.io.File;
 /** A single session in :engine. Android UI never calls into the VM directly. */
 public final class GameActivity extends Activity implements SurfaceHolder.Callback, InputManager.InputDeviceListener {
     static { System.loadLibrary("openbgi"); }
+    static final String COMPARE_PACKAGE = "org.openbgi.hostcompare";
+    static final String UPSTREAM = "upstream";
     private boolean ready, resumed, focused, surfaceReady, framePosted;
     private SurfaceView surface;
     private GameSettings settings;
@@ -50,7 +52,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
     private native void nativeInputResult(int serial, byte[][] values, int month, int day);
     private native void nativeDialogResult(int serial, int result);
     private native void nativeEditChanged(byte[] text, int revision, boolean ime);
-    private native boolean nativeCreate(String internal, String external, int scaleMode,long sessionEpoch);
+    private native boolean nativeCreate(String internal, String external, int scaleMode,long sessionEpoch,boolean upstream);
     private native void nativeFontFamily(String family);
     private native void nativeSurface(Surface surface);
     private native void nativeVsync();
@@ -92,7 +94,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
         super.onCreate(state);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        File game,storage,data;
+        File game=null,storage=null,data=null;
         try {
             game=GameSettings.activeGame(getFilesDir());
             storage=DirectGame.resources(game);
@@ -111,15 +113,21 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             } else data=DirectGame.data(game,storage);
             SaveRestore.recover(data);settings=TranslationRuntime.prepare(game,storage);
         }
-        catch(java.io.IOException error) { Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();engineFinished();return; }
+        catch(java.io.IOException error) {
+            CrashLogs.recordStartFailure(this,game,error.getMessage());
+            Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();engineFinished();return;
+        }
         if(!settings.encodingReady()) {
+            CrashLogs.recordStartFailure(this,game,getString(R.string.encoding_unset));
             Toast.makeText(this,getString(R.string.encoding_unset),Toast.LENGTH_LONG).show();engineFinished();return;
         }
-        long sessionEpoch=CrashLogs.beginSession(this,game,storage,data,settings);
+        boolean upstream=COMPARE_PACKAGE.equals(getPackageName()) && getIntent().getBooleanExtra(UPSTREAM,false);
+        long sessionEpoch=CrashLogs.beginSession(this,game,storage,data,settings,upstream);
         nativeFontFamily(settings.fontFamily);
         File external = getExternalFilesDir(null);
-        ready = nativeCreate(getFilesDir().getAbsolutePath(), external == null ? "" : external.getAbsolutePath(), settings.scale,sessionEpoch);
+        ready = nativeCreate(getFilesDir().getAbsolutePath(), external == null ? "" : external.getAbsolutePath(), settings.scale,sessionEpoch,upstream);
         if(!ready) {
+            CrashLogs.recordStartFailure(this,game,getString(R.string.engine_start_error));
             Toast.makeText(this, getString(R.string.engine_start_error), Toast.LENGTH_LONG).show();
             engineFinished(); return;
         }

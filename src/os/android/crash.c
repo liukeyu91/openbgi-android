@@ -26,7 +26,8 @@
 #endif
 #define RING_COUNT 32
 #define NAME_WORDS 16
-#define MAP_LIMIT (256 * 1024)
+#define MAP_SCAN_LIMIT (4 * 1024 * 1024)
+#define MAP_ENTRY_LIMIT 200
 typedef struct Breadcrumb {
     unsigned sequence, thread, ip, relative, opcode, name[NAME_WORDS];
 } Breadcrumb;
@@ -35,6 +36,8 @@ static unsigned gNext, gPublished, gReporting, gVmTid;
 static int gReport = -1, gMemory = -1, gMaps = -1;
 static struct timespec gSession;
 static char gSessionText[4096], gImageText[512];
+static char gUpstreamImageText[512], gBridgeImageText[512];
+static unsigned gCompareImages;
 static const char gImageMarker[]="OpenBGI crash reporter v2";
 static __thread unsigned char gAltStack[64 * 1024] __attribute__((aligned(16)));
 
@@ -172,23 +175,64 @@ static uintptr_t Untag(uintptr_t address)
     return address;
 #endif
 }
+static int FrameRead(uintptr_t at, uintptr_t out[2])
+{
+    return gMemory>=0 &&
+        pread(gMemory,out,sizeof(uintptr_t)*2,(off_t)at)==(ssize_t)(sizeof(uintptr_t)*2);
+}
 static void DumpFrames(uintptr_t lr, uintptr_t sp, uintptr_t fp)
 {
     unsigned i, frames=0;
     Literal("Native frame candidates (frame-pointer walk; may be incomplete):\n");
     if(lr) Field("lr candidate: ",Untag(lr),16);
-    if(gMemory<0) { Literal("Frame memory unavailable (/proc/self/mem denied).\n"); return; }
     fp=Untag(fp); sp=Untag(sp);
     for(i=0;i<32;i++) {
         uintptr_t pair[2], next;
         if(fp<sp || fp-sp>8*1024*1024 || fp%sizeof(uintptr_t) || fp>UINTPTR_MAX-sizeof pair) break;
-        if(pread(gMemory,pair,sizeof pair,(off_t)fp)!=(ssize_t)sizeof pair) break;
+        if(!FrameRead(fp,pair)) break;
         Field("return candidate: ",Untag(pair[1]),16);
         frames++;
         next=Untag(pair[0]); if(next<=fp) break; fp=next;
     }
     if(!frames) Literal("No readable caller frame.\n");
 }
+
+static void DumpMaps(void)
+{
+    Literal("Executable memory maps (up to 200 entries):\n");
+    if(gMaps<0 || lseek(gMaps,0,SEEK_SET)<0) {
+        Literal("Memory maps unavailable.\n");
+        return;
+    }
+    char buffer[4096], line[512];
+    size_t used=0, kept=0, total=0;
+    while(total<MAP_SCAN_LIMIT && kept<MAP_ENTRY_LIMIT) {
+        size_t remaining=MAP_SCAN_LIMIT-total;
+        ssize_t n=read(gMaps,buffer,remaining<sizeof buffer?remaining:sizeof buffer);
+        if(n<=0) break;
+        total+=(size_t)n;
+        for(ssize_t i=0;i<n;i++) {
+            if(buffer[i]!='\n') {
+                if(used+1<sizeof line) line[used++]=buffer[i];
+                continue;
+            }
+            line[used]=0;
+            const char* perms=strchr(line,' ');
+            if(perms) {
+                while(*perms==' ') ++perms;
+                if(line+used-perms>=4 && perms[2]=='x') {
+                    WriteBytes(line,used);
+                    Literal("\n");
+                    if(++kept==MAP_ENTRY_LIMIT) break;
+                }
+            }
+            used=0;
+        }
+    }
+    if(total==MAP_SCAN_LIMIT || kept==MAP_ENTRY_LIMIT) Literal("[maps limit reached]\n");
+    if(!kept) Literal("No executable mapping listed.\n");
+}
+
 static void RecordSignal(int number, siginfo_t* info, void* context)
 {
     uintptr_t pc=0,lr=0,sp=0,fp=0;
@@ -199,6 +243,10 @@ static void RecordSignal(int number, siginfo_t* info, void* context)
     { size_t n=0; while(n<sizeof gSessionText && gSessionText[n]) n++;
       WriteBytes(gSessionText,n); }
     Literal(gImageText);
+    if(__atomic_load_n(&gCompareImages,__ATOMIC_ACQUIRE)) {
+        Literal(gUpstreamImageText);
+        Literal(gBridgeImageText);
+    }
     Field("Native start epoch ms: ",(uint64_t)gSession.tv_sec*1000+gSession.tv_nsec/1000000,10);
     if(clock_gettime(CLOCK_REALTIME,&now)==0)
         Field("Crash epoch ms: ",(uint64_t)now.tv_sec*1000+now.tv_nsec/1000000,10);
@@ -227,19 +275,33 @@ static void RecordSignal(int number, siginfo_t* info, void* context)
     }
     Field("pc: ",pc,16); Field("sp: ",sp,16); Field("fp: ",fp,16); Field("lr: ",lr,16);
     DumpFrames(lr,sp,fp); DumpVm();
-    Literal("Memory maps (bounded to 256 KiB):\n");
-    if(gMaps>=0 && lseek(gMaps,0,SEEK_SET)>=0) {
-        char buffer[1024]; size_t total=0; ssize_t n;
-        while(total<MAP_LIMIT && (n=read(gMaps,buffer,sizeof buffer))>0) {
-            WriteBytes(buffer,(size_t)n); total+=(size_t)n;
-        }
-        if(total==MAP_LIMIT) Literal("[maps limit reached]\n");
-    } else Literal("Memory maps unavailable.\n");
+    DumpMaps();
     Literal("End. Terminated with _exit(128+signal); Android REASON_EXIT_SELF is expected.\n");
     /* Do not re-raise through ART sigchain: it can reenter indefinitely.
      * Never claim that this exit produces a system native tombstone. */
     _exit(128+number);
 }
+
+static void ImageText(char* out, size_t size, const char* name, const void* anchor)
+{
+    Dl_info image;
+    if(anchor && dladdr(anchor,&image))
+        snprintf(out,size,"%s ELF load bias: 0x%llx\n%s image: %.384s\n",
+            name,(unsigned long long)(uintptr_t)image.dli_fbase,
+            name,image.dli_fname?image.dli_fname:"unknown");
+    else
+        snprintf(out,size,"%s image: unavailable\n",name);
+}
+
+void OsAndroid_CrashSetCompareImages(const void* upstream, const void* bridge)
+{
+    if(upstream || bridge) {
+        ImageText(gUpstreamImageText,sizeof gUpstreamImageText,"Upstream",upstream);
+        ImageText(gBridgeImageText,sizeof gBridgeImageText,"Bridge",bridge);
+    }
+    __atomic_store_n(&gCompareImages,upstream || bridge,__ATOMIC_RELEASE);
+}
+
 void OsAndroid_CrashInstall(const char* directory)
 {
     char current[PATH_MAX], previous[PATH_MAX];
@@ -251,10 +313,7 @@ void OsAndroid_CrashInstall(const char* directory)
     { int session=open(current,O_RDONLY|O_CLOEXEC);
       if(session>=0) { ssize_t n=read(session,gSessionText,sizeof gSessionText-1);
           if(n>0) gSessionText[n]=0; close(session); } }
-    { Dl_info image;
-      if(dladdr(gImageMarker,&image))
-          snprintf(gImageText,sizeof gImageText,"Engine ELF load bias: 0x%llx\nEngine image: %s\n",
-              (unsigned long long)(uintptr_t)image.dli_fbase,image.dli_fname?image.dli_fname:"unknown"); }
+    ImageText(gImageText,sizeof gImageText,"Engine",gImageMarker);
     snprintf(current,sizeof current,"%s/native-crash.txt",directory);
     snprintf(previous,sizeof previous,"%s/native-crash-previous.txt",directory);
     /* Keep the last nonempty crash across normal launches, not just one. */

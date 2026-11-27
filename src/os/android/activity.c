@@ -14,45 +14,15 @@
 #include "bgi/version.h"
 #include <android/log.h>
 #include <android/native_window_jni.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <time.h>
 
 AndroidHost_t* gAndroidHost;
 /* Kept until process exit, so late lifecycle callbacks cannot use freed state. */
 static AndroidHost_t* gHost;
-/* Independent lock: clock reads also happen from asset/audio threads. */
-static pthread_mutex_t gClockLock = PTHREAD_MUTEX_INITIALIZER;
-static uint64_t gPausedNs, gPauseAt;
-static int gClockPaused;
-
-static uint64_t RawClockNs(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
-}
-
-static void ClockState(int resumed)
-{
-    uint64_t now;
-    pthread_mutex_lock(&gClockLock);
-    now = RawClockNs();
-    if(!resumed && !gClockPaused) { gPauseAt = now; gClockPaused = 1; }
-    else if(resumed && gClockPaused) { gPausedNs += now - gPauseAt; gClockPaused = 0; }
-    pthread_mutex_unlock(&gClockLock);
-}
-
-uint64_t OsAndroid_ClockNs(void)
-{
-    uint64_t result;
-    pthread_mutex_lock(&gClockLock);
-    result = (gClockPaused ? gPauseAt : RawClockNs()) - gPausedNs;
-    pthread_mutex_unlock(&gClockLock);
-    return result;
-}
 
 static int gLogFd = -1;
 static pthread_mutex_t gLogLock = PTHREAD_MUTEX_INITIALIZER;
@@ -87,7 +57,7 @@ void OsAndroid_ReportVm(int final)
     char program[65], where[144];
     uint32_t ip,opcode;
     if(!final){
-        uint64_t now=RawClockNs();
+        uint64_t now=OsAndroid_MonotonicNs();
         if(now<next)return;
         next=now+UINT64_C(4000000000);
     }
@@ -130,11 +100,15 @@ static void* RunEngine(void* context)
     {
         if(OS_Init())
         {
-            char options[128];
-            OsAndroid_EngineOptions(options, sizeof options);
-            int code=Engine_Main(options);
             char status[20];
-            OsAndroid_ReportVm(1);
+            int code;
+            if(host->run) code=host->run(host);
+            else {
+                char options[128];
+                OsAndroid_EngineOptions(options, sizeof options);
+                code=Engine_Main(options);
+                OsAndroid_ReportVm(1);
+            }
             snprintf(status,sizeof status,"%d",code);
             RunReport("exit",status);
             OS_Shutdown();
@@ -144,6 +118,10 @@ static void* RunEngine(void* context)
             RunReport("exit","storage initialization failed");
             OsAndroid_Log("Could not open the app's game or configuration directory.");
         }
+    }
+    if(host->backend) {
+        OsAndroid_CrashSetCompareImages(NULL,NULL);
+        dlclose(host->backend);
     }
     gAndroidHost = NULL;
     pthread_mutex_lock(&host->lock);
@@ -177,7 +155,7 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeFontFamily(JNIEn
 }
 
 JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
-    JNIEnv* env, jobject activity, jstring internalPath, jstring externalPath, jint scaleMode, jlong sessionEpoch)
+    JNIEnv* env, jobject activity, jstring internalPath, jstring externalPath, jint scaleMode, jlong sessionEpoch, jboolean upstream)
 {
     AndroidHost_t* host;
     pthread_t worker;
@@ -208,12 +186,26 @@ JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
     }
     pthread_mutex_unlock(&gLogLock);
 
-    ClockState(0);
+    OsAndroid_ClockSetResumed(0);
     host = calloc(1, sizeof *host);
     if(!host) goto failed;
-    if(pthread_mutex_init(&host->lock, NULL) != 0) { free(host); goto failed; }
+    if(pthread_mutex_init(&host->lock, NULL) != 0) goto freeHost;
     if(pthread_cond_init(&host->changed, NULL) != 0)
-    { pthread_mutex_destroy(&host->lock); free(host); goto failed; }
+    { pthread_mutex_destroy(&host->lock); goto freeHost; }
+    if(upstream) {
+        host->backend=dlopen("libopenbgi_compare.so",RTLD_NOW|RTLD_LOCAL);
+        if(host->backend) {
+            void* entry=dlsym(host->backend,"OsAndroid_RunUpstream");
+            memcpy(&host->run,&entry,sizeof host->run);
+            if(entry) OsAndroid_CrashSetCompareImages(dlsym(host->backend,"OpenBGI_ApiVersion"),entry);
+        }
+        if(!host->run) {
+            OsAndroid_Log("Could not load the upstream engine bridge.");
+            pthread_cond_destroy(&host->changed);
+            pthread_mutex_destroy(&host->lock);
+            goto freeHost;
+        }
+    }
     (*env)->GetJavaVM(env, &host->vm);
     host->scaleMode = scaleMode>=0 && scaleMode<=2 ? scaleMode : 0;
     host->activity = (*env)->NewGlobalRef(env, activity);
@@ -230,8 +222,7 @@ JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
         if(host->activity) (*env)->DeleteGlobalRef(env, host->activity);
         pthread_cond_destroy(&host->changed);
         pthread_mutex_destroy(&host->lock);
-        free(host);
-        goto failed;
+        goto freeHost;
     }
     gHost = host;
     pthread_detach(worker);
@@ -239,6 +230,12 @@ JNIEXPORT jboolean JNICALL Java_org_openbgi_port_GameActivity_nativeCreate(
     (*env)->ReleaseStringUTFChars(env, externalPath, external);
     OsAndroid_Log("SurfaceView/JNI engine host started.");
     return JNI_TRUE;
+freeHost:
+    if(host->backend) {
+        OsAndroid_CrashSetCompareImages(NULL,NULL);
+        dlclose(host->backend);
+    }
+    free(host);
 failed:
     (*env)->ReleaseStringUTFChars(env, internalPath, internal);
     (*env)->ReleaseStringUTFChars(env, externalPath, external);
@@ -282,7 +279,10 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeVsync(JNIEnv* en
     BGI_UNUSED(env);BGI_UNUSED(activity);
     if(!host)return;
     pthread_mutex_lock(&host->lock);
-    if(host->resumed && !host->destroyed && host->window)++host->frameSerial;
+    if(host->resumed && !host->destroyed && host->window) {
+        ++host->frameSerial;
+        if(host->run) pthread_cond_broadcast(&host->changed);
+    }
     pthread_mutex_unlock(&host->lock);
 }
 
@@ -293,7 +293,7 @@ JNIEXPORT void JNICALL Java_org_openbgi_port_GameActivity_nativeState(JNIEnv* en
     if(!host) return;
     OsAndroid_AudioForeground(resumed);
     OsAndroid_MovieForeground(resumed);
-    ClockState(resumed);
+    OsAndroid_ClockSetResumed(resumed);
     pthread_mutex_lock(&host->lock);
     if(host->resumed != resumed) OsAndroid_Log(resumed ? "Host running" : "Host paused");
     host->resumed = resumed;

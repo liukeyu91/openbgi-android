@@ -47,7 +47,21 @@ and resolves candidates inside the engine. External-library faults still require
 the corresponding vendor/system symbols. Raw stack memory and script text are
 not dumped.
 
+The comparison APK records a hash and load bias for each of its libraries when
+the upstream core is selected. The default module is the Android core. Use
+`--module upstream` with the APK's `libopenbgi-arm64.so`, or `--module bridge`
+with `libopenbgi_compare.so`. The third positional argument can be omitted to
+resolve symbols embedded in the hash-verified ELF. A separate debug file must
+match that ELF's build ID.
+
+```sh
+python3 tools/android/symbolize-crash.py native-crash.txt libopenbgi-arm64.so \
+  --module upstream --addr2line /path/to/llvm-addr2line
+```
+
 `tools/ci/test_crash.py` deliberately triggers SIGSEGV, SIGABRT, a worker-thread
 fault and a stack overflow in disposable Linux subprocesses. It checks report
 completion, address-to-source resolution, concurrent VM snapshots, and retention
-across normal launches. These tests do not establish Android/device coverage.
+across normal launches. The comparison fixture also verifies executable
+mappings, module identities, and symbolization through the selected module.
+Android device validation is separate.

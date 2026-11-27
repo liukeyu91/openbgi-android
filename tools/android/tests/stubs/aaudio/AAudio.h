@@ -18,6 +18,8 @@ aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder*,AAudioStream
 int32_t AAudioStream_getSampleRate(AAudioStream*);
 int32_t AAudioStream_getChannelCount(AAudioStream*);
 aaudio_format_t AAudioStream_getFormat(AAudioStream*);
+int64_t AAudioStream_getFramesWritten(AAudioStream*);
+int64_t AAudioStream_getFramesRead(AAudioStream*);
 aaudio_result_t AAudioStream_requestStart(AAudioStream*);
 aaudio_result_t AAudioStream_close(AAudioStream*);
 aaudio_result_t AAudioStream_write(AAudioStream*,const void*,int32_t,int64_t);

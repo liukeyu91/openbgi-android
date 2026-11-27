@@ -3,6 +3,7 @@ package org.openbgi.port;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.FileTime;
 import java.util.*;
 
 /**
@@ -141,6 +142,25 @@ public final class DiscImageTest {
                 check(translatedLayers.hasBootFiles(),"Localized boot counts");
             }
 
+            // A wrapper folder that ships only the traditional pair: once the
+            // native root detection strips it, these are the only root names.
+            Builder traditional=new Builder();
+            traditional.add("system.tc.arc",archive);
+            traditional.add("sysprg.tc.arc",new byte[]{2});
+            File traditionalImage=traditional.write(root,"traditional.iso");
+            DiscImage.Source traditionalSource=DiscImage.parse(traditionalImage,traditional.lines.toArray(new String[0]));
+            check(traditionalSource.hasBootFiles(),"A localized-only root boots");
+            check(traditionalSource.rootNames().contains("system.tc.arc"),"The localized archive is a root name");
+            File traditionalEntry=new File(root.toFile(),"traditional");
+            ContainerGame.register(traditionalEntry,traditionalImage,ContainerGame.Kind.IMAGE,traditionalSource);
+            check(ContainerGame.summary(traditionalEntry).languages.equals(Arrays.asList(ArchiveLanguage.TC)),
+                "Summary records the traditional pair");
+            try(ResourceLayers traditionalLayers=ResourceLayers.ofImage(traditionalEntry,traditionalSource)){
+                check(traditionalLayers.available().equals(Arrays.asList(ArchiveLanguage.TC)),"Only the traditional pair is offered");
+                check(traditionalLayers.resolve("tc")==ArchiveLanguage.TC,"The explicit choice matches the only pair");
+                check(ArchiveTextSamples.scan(traditionalLayers,null).samples.size()>0,"Sampling reads the localized archive");
+            }
+
             File entry=new File(root.toFile(),"entry");
             ContainerGame.register(entry,image,ContainerGame.Kind.IMAGE,source,staging->ContainerGame.data(staging,source));
             check(ContainerGame.linked(entry),"Reference written");
@@ -206,13 +226,13 @@ public final class DiscImageTest {
             // Listed but unopenable entries keep their place, named with the reason:
             // a boot archive compressed with another method, or an encrypted one.
             DiscImage.Source locked=DiscImage.parse(zip,new String[]{
-                "system.arc\t0\t4\t12\t12\t0","system.cn.arc\t0\t4\t4\t0\t0","readme.txt\t0\t4\t4\t0\t6"});
+                "system.arc\t0\t4\t12\t12\t0","system.cn.arc\t0\t4\t4\t0\t8","readme.txt\t0\t4\t4\t0\t6"});
             check(locked!=null,"Unopenable entries still parse into an index");
             DiscImage.Entry bzip2=locked.find("system.arc");
             check(bzip2!=null&&!bzip2.readable&&bzip2.unsupported()&&!bzip2.file(),"An unsupported method is not a file");
             check(bzip2.reason().contains("BZIP2"),"The unsupported method is named");
             DiscImage.Entry secret=locked.find("system.cn.arc");
-            check(secret!=null&&!secret.readable&&secret.encrypted()&&"已加密".equals(secret.reason()),"An encrypted entry is named");
+            check(secret!=null&&!secret.readable&&secret.encrypted&&"已加密".equals(secret.reason()),"An encrypted entry is named");
             check(locked.unreadable().size()==2,"Unopenable entries are counted");
             check(!locked.hasBootFiles()&&ArchiveLanguage.hasBootFiles(locked.allRootNames()),
                 "Boot resources are listed, just not readable");
@@ -227,6 +247,12 @@ public final class DiscImageTest {
             }catch(IOException expected){
                 check(expected.getMessage().contains("无法读取")&&expected.getMessage().contains("已加密"),
                     "The refusal names the reason instead of calling the archive incomplete");
+            }
+            try(DiscImage.Source unavailable=DiscImage.parse(zip,new String[]{
+                "aes.bin\t0\t4\t32\t99\t8","broken.bin\t0\t4\t4\t8\t0"
+            })){
+                check("AES 加密".equals(unavailable.find("aes.bin").reason()),"AES reports encryption");
+                check("无法读取".equals(unavailable.find("broken.bin").reason()),"An unencrypted read failure is not called encrypted");
             }
 
             // A deflated entry past the 256 MiB ceiling is refused before anything is allocated.
@@ -249,7 +275,9 @@ public final class DiscImageTest {
             File copy=new File(root.toFile(),"copy.iso");
             Files.copy(image.toPath(),copy.toPath(),StandardCopyOption.REPLACE_EXISTING);
             File gone=new File(root.toFile(),"gone");
-            ContainerGame.register(gone,copy,ContainerGame.Kind.IMAGE,source,staging->ContainerGame.data(staging,source));
+            try(DiscImage.Source copiedIndex=DiscImage.parse(copy,builder.lines.toArray(new String[0]))){
+                ContainerGame.register(gone,copy,ContainerGame.Kind.IMAGE,copiedIndex,staging->ContainerGame.data(staging,copiedIndex));
+            }
             check(Files.deleteIfExists(copy.toPath()),"Source moved away");
             try{
                 ResourceLayers.of(gone,gone).close();
@@ -266,7 +294,75 @@ public final class DiscImageTest {
             check(ContainerGame.validate(ContainerGame.source(gone)).getCanonicalFile().equals(copy.getCanonicalFile()),
                 "A restored source resolves again");
             check(Files.deleteIfExists(copy.toPath()),"Cleanup: restored source");
-            System.out.println("DISC_IMAGE_PASS: "+checks+" checks; index parse, language, sampling, migration, summary, ZIP deflate, unreadable entries, missing source and validation");
+            replaceSource(root);
+            System.out.println("DISC_IMAGE_PASS: "+checks+" checks; index parse, language, sampling, migration, summary, ZIP deflate, unreadable entries and source replacement");
         }finally{GameImport.remove(root);}
+    }
+
+    private static void replaceSource(Path root)throws IOException {
+        ZipBuilder original=new ZipBuilder();
+        original.add("system.cn.arc",new byte[]{1},false);
+        original.add("sysprg.cn.arc",new byte[]{2},false);
+        File zip=original.write(root,"localized.zip").getCanonicalFile();
+        File entry=root.resolve("localized").toFile();
+        try(DiscImage.Source index=DiscImage.parse(zip,original.lines.toArray(new String[0]))){
+            ContainerGame.register(entry,zip,ContainerGame.Kind.ZIP,index);
+        }
+        ContainerGame.SourceStamp first=ContainerGame.stamp(zip);
+        GameSettings settings=new GameSettings();
+        settings.profile="1.636";
+        settings.save(entry);
+        try(ResourceLayers layers=ResourceLayers.ofImage(entry,DiscImage.parse(zip,original.lines.toArray(new String[0])))){
+            settings=GameEncoding.prepareContainer(layers);
+        }
+        check(settings.archiveLanguage.equals("cn")&&settings.encoding.equals("gbk"),"Original archive uses GBK");
+        File save=new File(ContainerGame.data(entry),"UserData/bgi0001.sud");
+        Files.createDirectories(save.toPath().getParent());
+        byte[] saved={1,2,3};
+        Files.write(save.toPath(),saved);
+
+        ZipBuilder replacement=new ZipBuilder();
+        replacement.add("system.tc.arc",new byte[]{3},false);
+        replacement.add("sysprg.tc.arc",new byte[]{4},false);
+        File next=replacement.write(root,"replacement.zip");
+        Files.setLastModifiedTime(next.toPath(),FileTime.fromMillis(first.modified));
+        try(ResourceLayers stale=ResourceLayers.ofImage(entry,DiscImage.parse(zip,original.lines.toArray(new String[0])))){
+            Files.move(next.toPath(),zip.toPath(),StandardCopyOption.REPLACE_EXISTING);
+            reject(()->GameEncoding.prepareContainer(stale),"Reject a source changed during reading");
+        }
+        ContainerGame.SourceStamp second=ContainerGame.stamp(zip);
+        if(first.fileKey.isEmpty()||second.fileKey.isEmpty()){
+            Files.setLastModifiedTime(zip.toPath(),FileTime.fromMillis(first.modified+4000));
+            second=ContainerGame.stamp(zip);
+        }else{
+            check(second.bytes==first.bytes&&second.modified==first.modified,"Replacement preserves size and time");
+        }
+        check(!second.same(first),"File replacement invalidates the summary");
+        try(ResourceLayers layers=ResourceLayers.ofImage(entry,DiscImage.parse(zip,replacement.lines.toArray(new String[0])))){
+            settings=GameEncoding.prepareContainer(layers);
+        }
+        check(settings.archiveLanguage.equals("tc")&&settings.encoding.equals("big5")&&settings.encodingReady(),
+            "Replacement updates archive selection and automatic encoding");
+        check(settings.profile.equals("1.636"),"Manual engine profile survives replacement");
+        check(second.same(ContainerGame.summary(entry).stamp),"Refreshed summary matches the replacement file");
+        check(Arrays.equals(Files.readAllBytes(save.toPath()),saved),"Replacement preserves the existing save");
+
+        settings.chooseEncoding("sjis");
+        settings.save(entry);
+        Files.delete(new File(entry,ContainerGame.SUMMARY).toPath());
+        try(ResourceLayers summary=ResourceLayers.summary(entry,entry)){
+            check(!summary.hasBootFiles(),"Missing metadata can be displayed before opening the container");
+        }
+        try(ResourceLayers layers=ResourceLayers.ofImage(entry,DiscImage.parse(zip,replacement.lines.toArray(new String[0])))){
+            settings=GameEncoding.prepareContainer(layers);
+        }
+        check(!settings.automaticEncoding&&settings.encoding.equals("sjis"),"Refreshing a summary retains manual encoding");
+
+        Files.write(zip.toPath(),new byte[]{1});
+        try(ResourceLayers layers=ResourceLayers.ofImage(entry,DiscImage.parse(zip,new String[]{"readme.txt\t0\t1\t6"}))){
+            reject(()->GameEncoding.prepareContainer(layers),"Replacement has no boot resources");
+        }
+        check(second.same(ContainerGame.summary(entry).stamp),"Unbootable replacement keeps the last successful summary");
+        check(Arrays.equals(Files.readAllBytes(save.toPath()),saved),"Unbootable replacement preserves the save");
     }
 }

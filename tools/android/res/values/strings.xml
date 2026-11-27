@@ -167,6 +167,8 @@
     <string name="game_folder_unavailable">"Game folder unavailable"</string>
     <string name="encoding_unset">"Choose a text encoding in Game settings."</string>
     <string name="engine_start_error">"The engine failed to start. Export logs from About for details."</string>
+    <string name="core_android">"OpenBGI Android"</string>
+    <string name="core_upstream">"OpenBGI 1.0 (upstream)"</string>
     <string name="resume_game">"Resume game"</string>
     <string name="stop_skip">"Stop fast-forward"</string>
     <string name="skip">"Fast-forward"</string>
@@ -311,4 +313,5 @@
     <string name="patch_check_width">"Estimated line width %1$d px exceeds the declared %2$d px box. Shorten the line or review the layout."</string>
     <string name="patch_check_conflict">"Conflicting file path %1$s. Keep one file for each path."</string>
     <string name="patch_check_import">"Cannot read or stage the patch (%1$s). Check the archive and available storage."</string>
+    <string name="compat_container_unreadable">Unreadable entries in the source archive: %1$d.</string>
 </resources>

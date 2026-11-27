@@ -6,6 +6,8 @@
 #define BGI_ANDROID_INTERNAL_H
 
 #include "bgi/os.h"
+#include "audio.h"
+#include "clock.h"
 
 #include <android/native_window.h>
 #include <android/input.h>
@@ -25,6 +27,8 @@ enum { ANDROID_POINTER_MOVE, ANDROID_POINTER_DOWN, ANDROID_POINTER_UP, ANDROID_P
 
 typedef struct AndroidHost
 {
+	int (*run)(struct AndroidHost*);
+	void* backend;
 	pthread_mutex_t lock;
 	pthread_cond_t changed;
 	JavaVM* vm;
@@ -54,14 +58,10 @@ void OsAndroid_Log(const char* text);
 void OsAndroid_ReportVm(int final);
 void OsAndroid_ReportError(const char* body);
 size_t OsAndroid_ScriptToUtf8(const char* text,char* out,size_t size);
-void OsAndroid_AudioForeground(int resumed);
-int OsAndroid_AudioStatus(void);
 void OsAndroid_MovieForeground(int resumed);
 int OsAndroid_MovieStatus(void);
 int OsAndroid_MovieTick(void);
 int OsAndroid_MovieSkip(void);
-int OsAndroid_AudioDelayUs(void);
-uint64_t OsAndroid_ClockNs(void);
 JNIEnv* OsAndroid_GetEnv(int* attached);
 void OsAndroid_ReleaseEnv(int attached);
 void OsAndroid_EditCommand(int op, int a, int b, int c, int d, const char* text);

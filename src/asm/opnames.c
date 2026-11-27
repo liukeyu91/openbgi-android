@@ -225,7 +225,7 @@ const AsmOpName_t kAsmOpNames[] = {
 	{0x81, 0x2b, GEN_1_573, GEN_LAST, "file_seek"},
 	{0x81, 0x2c, GEN_FIRST, GEN_LAST, "get_file_times"},
 	{0x81, 0x2d, GEN_FIRST, GEN_LAST, "set_file_times"},
-	{0x81, 0x39, GEN_FIRST, GEN_LAST, "archive_names"},
+	{0x81, 0x39, GEN_1_588, GEN_LAST, "archive_names"},
 	{0x81, 0xe0, GEN_FIRST, GEN_LAST, "run_program_args"},
 	{0x81, 0x2f, GEN_1_616, GEN_LAST, "dir_writable"},
 	{0x81, 0x30, GEN_1_529, GEN_LAST, "load_file_range_raw"},

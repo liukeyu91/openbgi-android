@@ -167,6 +167,8 @@
     <string name="game_folder_unavailable">"Dossier du jeu indisponible."</string>
     <string name="encoding_unset">"Choisissez l’encodage du texte dans les paramètres du jeu."</string>
     <string name="engine_start_error">"Le moteur n’a pas démarré. Vous pouvez exporter les journaux depuis À propos."</string>
+    <string name="core_android">"OpenBGI Android"</string>
+    <string name="core_upstream">"OpenBGI 1.0 (amont)"</string>
     <string name="resume_game">"Reprendre le jeu"</string>
     <string name="stop_skip">"Arrêter l’avance rapide"</string>
     <string name="skip">"Avance rapide"</string>
@@ -294,4 +296,5 @@
     <string name="patch_check_pass">"Vérification réussie"</string>
     <string name="patch_check_warning">"Avertissements"</string>
     <string name="patch_check_reject">"Correctif refusé"</string>
+    <string name="compat_container_unreadable">Entrées illisibles dans l’archive source : %1$d.</string>
 </resources>

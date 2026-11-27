@@ -22,10 +22,13 @@ class NativeCrash(unittest.TestCase):
             '-fno-omit-frame-pointer','-fno-optimize-sibling-calls','-I'+str(ROOT/'inc'),
             str(ROOT/'tools/tests/androidcrash.c'),str(ROOT/'src/os/android/crash.c'),
             '-pthread','-ldl','-Wl,--build-id=sha1','-o',str(cls.binary)],check=True)
-    def run_case(self,mode):
+    def run_case(self,mode,modules=()):
         directory=self.base/mode;directory.mkdir(exist_ok=True)
-        (directory/'session-current.txt').write_text('Package: test.fixture\nEncoding: utf8\nEngine selection: 1.659.8\nNative SHA256: '+hashlib.sha256(self.binary.read_bytes()).hexdigest()+'\n')
-        result=subprocess.run([str(self.binary),str(directory),mode],timeout=8,capture_output=True)
+        metadata='Package: test.fixture\nEncoding: utf8\nEngine selection: 1.659.8\n'
+        for label,elf in zip(('Native','Upstream','Bridge'),(self.binary,*modules)):
+            metadata+=f'{label} SHA256: {hashlib.sha256(elf.read_bytes()).hexdigest()}\n'
+        (directory/'session-current.txt').write_text(metadata)
+        result=subprocess.run([str(self.binary),str(directory),mode,*map(str,modules)],timeout=8,capture_output=True)
         report=(directory/'native-crash.txt').read_text()
         self.assertEqual(result.returncode,134 if mode=='abort' else 139,result.stderr)
         self.assertIn('OpenBGI native crash report v2',report)
@@ -46,6 +49,7 @@ class NativeCrash(unittest.TestCase):
         bias=int(re.search(r'Engine ELF load bias: 0x([0-9a-f]+)',report)[1],16)
         result=subprocess.check_output(['addr2line','-f','-e',str(self.binary),hex(pc-bias)],text=True)
         self.assertIn('FaultLeaf',result);self.assertIn('androidcrash.c:',result)
+        self.assertRegex(report,rf'(?m)^[0-9a-f]+-[0-9a-f]+ r-xp .*{re.escape(self.binary.name)}$')
     def test_abort_is_distinguished(self):
         _,report=self.run_case('abort');self.assertIn('Signal: 6\n',report)
     def test_symbolizer_verifies_identity_and_resolves_source(self):
@@ -58,6 +62,27 @@ class NativeCrash(unittest.TestCase):
         self.assertIn('FaultLeaf',result.stdout);self.assertIn('androidcrash.c:',result.stdout)
         bad=directory/'other-elf';bad.write_bytes(self.binary.read_bytes()+b'different build')
         command[3]=str(bad)
+        result=subprocess.run(command,text=True,capture_output=True,timeout=8)
+        self.assertNotEqual(result.returncode,0);self.assertIn('SHA256',result.stderr)
+    def test_comparison_report_keeps_module_identity(self):
+        source=self.base/'compare-module.c'
+        source.write_text('static volatile unsigned long badAddress=1;\n'
+                          'void CrashFixtureFault(void){ *(volatile unsigned*)badAddress=7; }\n')
+        modules=[self.base/'libfixture-upstream.so',self.base/'libfixture-bridge.so']
+        for module in modules:
+            subprocess.run([*shlex.split(os.environ.get('CC','cc')),'-g','-shared','-fPIC',str(source),
+                            f'-Wl,--build-id=sha1,-soname,{module.name}','-o',str(module)],check=True)
+        directory,report=self.run_case('compare',modules)
+        for name in ('Engine','Upstream','Bridge'):
+            self.assertRegex(report,rf'(?m)^{name} ELF load bias: 0x[0-9a-f]+$')
+        for module in modules:
+            self.assertRegex(report,rf'(?m)^[0-9a-f]+-[0-9a-f]+ r-xp .*{re.escape(module.name)}$')
+        command=[sys.executable,str(ROOT/'tools/android/symbolize-crash.py'),str(directory/'native-crash.txt'),
+                 str(modules[0]),'--module','upstream','--addr2line','addr2line']
+        result=subprocess.run(command,text=True,capture_output=True,timeout=8)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('CrashFixtureFault',result.stdout);self.assertIn('compare-module.c:',result.stdout)
+        command[3]=str(modules[1])
         result=subprocess.run(command,text=True,capture_output=True,timeout=8)
         self.assertNotEqual(result.returncode,0);self.assertIn('SHA256',result.stderr)
     def test_other_thread_is_not_misreported_as_vm(self):

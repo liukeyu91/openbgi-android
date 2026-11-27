@@ -28,6 +28,9 @@ int OsPosix_MountDisc(const char* native); // NULL unmounts
 int OsPosix_SetArchiveLanguage(const char* language);
 const char* OsPosix_LocalizedArchive(const char* path, char* out, size_t n);
 void OsPosix_ArchiveLogicalName(const char* name, char* out, size_t n);
+// 1 when `name` is a localized script archive (system.cn.arc and its kin): a
+// container whose wrapper holds only such a pair still marks the game root
+int OsPosix_IsLocalizedSystemArc(const char* name);
 // Shift-JIS text -> UTF-8 (window titles, dialog labels, font lookups); NUL-terminated into out (n bytes)
 void OsPosix_SjisToUtf8(const char* sjis, char* out, size_t n);
 // one two-byte Shift-JIS code -> Unicode (0xfffd when unmapped)

@@ -251,7 +251,7 @@ static void ResolveEntry(const VolIn_t* f, VolEntry_t* e, uint64_t fileSize)
 		return;
 	}
 	off = local + 30 + Le16(h + 26) + Le16(h + 28);
-	if(off > fileSize || e->size > fileSize || e->csize > fileSize - off)
+	if(off > fileSize || e->csize > fileSize - off || (e->method == 0 && e->size != e->csize))
 	{
 		e->readable = 0;
 		return;
@@ -300,7 +300,8 @@ static int ReadDirectory(const VolIn_t* f, uint64_t fileSize, uint64_t cdOff, ui
 			snprintf(name, sizeof name, "%s", uname);
 		else
 			DecodeName(h + 46, nameLen, (flags & 0x0800) != 0, name, sizeof name);
-		e.readable = !(flags & 1) && (e.method == 0 || e.method == 8);
+		e.encrypted = (flags & 1) != 0;
+		e.readable = !e.encrypted && (e.method == 0 || e.method == 8);
 		p += 46 + nameLen + extraLen + commentLen;
 		if(!CleanPath(name, &isDir))
 			continue;

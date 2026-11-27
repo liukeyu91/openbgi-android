@@ -5,8 +5,7 @@
 
 | Version | Changes |
 | --- | --- |
-| Next release (unreleased) | The library takes ISO/UDF disc images and ZIP archives in place, without copying resources, and migrates the saves the medium ships. Encrypted entries and entries compressed with BZIP2, LZMA and the like are named when the archive is added, and an entry keeps its saves after the source is moved away. |
-| 1.0.1-android | Add eight interface languages, translation overlay checks, a desktop installer-to-ZIP tool, read-only game folders, a SAF APK and runtime summaries. Improve 1.492, 1.636 and 1.680 compatibility. |
+| 1.0.1-android | Open ISO/UDF images and ZIP archives in place. Add interface languages, translation overlay checks, an installer-to-ZIP tool, a SAF APK and runtime summaries. Fix missing sprites in 1.680 and archive enumeration across engine versions. |
 | 1.0 | Add direct-folder play, translation font overrides and patch updates; improve large-image loading and crash diagnostics. |
 | 0.10.22-preview | Fix clipped Latin letters in mixed SJIS/UTF-8 text; keep rendering, measurement and wrapping widths consistent. |
 | 0.10.21-preview | Fix equal-size compressed translation resources being treated as uncompressed; repair affected images in existing imports. |

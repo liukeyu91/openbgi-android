@@ -26,6 +26,38 @@ public final class ProgramCompatibilityTest {
     static ProgramCompatibility.Result scan(Path dir,String profile,Analyzer a)throws Exception {
         return ProgramCompatibility.scan(dir.toFile(),dir.toFile(),profile,a,(done,total)->check(done>=0 && done<=total));
     }
+
+    static void containerTests(Path root)throws Exception {
+        File image=root.resolve("source.zip").toFile(), game=root.resolve("container-entry").toFile();
+        Files.write(image.toPath(),program(0x17));
+        try(DiscImage.Source source=DiscImage.parse(image,new String[]{
+            "ipl._bp\t0\t18\t18\t0\t6", "blocked._bp\t0\t4\t4\t12\t0", "portrait.bmp\t0\t4\t4\t14\t0"
+        })){
+            ContainerGame.register(game,image,ContainerGame.Kind.ZIP,source,
+                staging->ContainerGame.data(staging,source));
+            try(ResourceLayers layers=ResourceLayers.ofImage(game,source)){
+                ProgramCompatibility.Result result=ProgramCompatibility.scan(layers,"auto",new Analyzer(),(d,n)->{});
+                check(result.checked==1 && result.unreadableEntries==2 &&
+                    result.unreadablePaths.equals(Arrays.asList("blocked._bp","portrait.bmp")));
+                check(result.status()==ProgramCompatibility.Status.PARTIAL);
+                File data=ContainerGame.data(game);
+                Files.write(data.toPath().resolve("blocked._bp"),program(0x17));
+            }
+            try(ResourceLayers layers=ResourceLayers.ofImage(game,source)){
+                ProgramCompatibility.Result result=ProgramCompatibility.scan(layers,"auto",new Analyzer(),(d,n)->{});
+                check(result.checked==2 && result.unreadableEntries==2 && result.status()==ProgramCompatibility.Status.PASS);
+                ProgramCompatibility.save(layers,"auto","test",result,"2 unreadable entries");
+                check(ProgramCompatibility.cachedSummary(game,game,"auto","test").status==ProgramCompatibility.Status.PASS);
+                Files.write(image.toPath(),new byte[]{0},StandardOpenOption.APPEND);
+                boolean rejected=false;
+                try{ProgramCompatibility.save(layers,"auto","test",result,"stale report");}
+                catch(IOException changed){rejected=true;}
+                check(rejected);
+            }
+            check(ProgramCompatibility.cachedSummary(game,game,"auto","test").status==ProgramCompatibility.Status.RECHECK);
+        }
+    }
+
     static void tests(Path root)throws Exception {
         ProgramCompatibility.Result platform=new ProgramCompatibility.Result();platform.profile="1.616";
         platform.findings.put(0x381e0,new ProgramCompatibility.Finding(0x81e0,3));
@@ -87,6 +119,7 @@ public final class ProgramCompatibilityTest {
         check(result.profile.equals("1.616") && result.checked==2);
         ProgramCompatibility.save(config.toFile(),game.toFile(),"1.616","test",result,"Localized report");
         check(Files.isRegularFile(config.resolve(".openbgi/compatibility.properties")) && !Files.exists(config.resolve(".openbgi/compatibility.properties.tmp")));
+        containerTests(root);
         System.out.println("Program compatibility: "+checks+" checks passed");
     }
     public static void main(String[] args)throws Exception {

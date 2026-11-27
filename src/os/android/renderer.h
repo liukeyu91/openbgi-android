@@ -2,7 +2,9 @@
 #ifndef BGI_ANDROID_RENDERER_H
 #define BGI_ANDROID_RENDERER_H
 #include <stdint.h>
-#include <android/native_window.h>
+#include "viewport.h"
+
+struct ANativeWindow;
 
 /* Half-open canvas coordinates. Empty rectangles never cause an upload. */
 typedef struct AndroidDamage { int l,t,r,b; } AndroidDamage_t;
@@ -16,7 +18,7 @@ static inline void AndroidDamageAdd(AndroidDamage_t* d,int l,int t,int r,int b,i
 typedef struct AndroidRenderStats { uint64_t frames,full,partial,bytes,errors; } AndroidRenderStats_t;
 AndroidRenderStats_t OsAndroid_RenderStats(void);
 /* All calls, including cleanup, run on the engine thread without the host lock. */
-int OsAndroid_Render(ANativeWindow* window,unsigned generation,const uint32_t* pixels,
-    int w,int h,AndroidDamage_t damage,int mode);
+int OsAndroid_Render(struct ANativeWindow* window,unsigned generation,const uint32_t* pixels,
+    int w,int h,AndroidDamage_t damage,int mode,Viewport_t* presented);
 void OsAndroid_RenderClose(void);
 #endif

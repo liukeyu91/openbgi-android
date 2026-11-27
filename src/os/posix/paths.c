@@ -160,6 +160,16 @@ void OsPosix_ArchiveLogicalName(const char* name, char* out, size_t n)
 		snprintf(out, n, "%s", name);
 }
 
+/* A localized distribution need not ship the shared system.arc: the tree may
+ * hold only system.cn.arc (or .c2/.tc/.t2/.en/.e2) beside sysprg of the same
+ * kind. Such a name marks the game root as firmly as system.arc does, which
+ * is what the disc reader looks for when it infers a container's root. */
+int OsPosix_IsLocalizedSystemArc(const char* name)
+{
+	size_t len = strlen(name);
+	return len == 13 && !strncasecmp(name, "system.", 7) && ArchiveHasLanguage(name, len);
+}
+
 /* The input is a native path already converted and case-corrected by
  * OsPosix_Path. Keep the spelling of a localized file found on disk. */
 const char* OsPosix_LocalizedArchive(const char* path, char* out, size_t n)
@@ -393,8 +403,14 @@ void OsPosix_ReadPath(const char* win, char* out, size_t n)
 
 int OsPosix_WritePath(const char* win, char* out, size_t n, int createParents)
 {
-	char native[PATH_MAX], path[PATH_MAX];
+	char native[PATH_MAX];
 	OsPosix_Path(win, native, sizeof native);
+	return OsPosix_WriteNativePath(native, out, n, createParents);
+}
+
+int OsPosix_WriteNativePath(const char* native, char* out, size_t n, int createParents)
+{
+	char path[PATH_MAX];
 	if(!*gDataDirectory)
 		return snprintf(out, n, "%s", native) < (int)n;
 	const char* relative = GameRelative(native);
@@ -467,6 +483,19 @@ static void NormalizePath(char* path)
  * becomes '/'; every component that does not exist as spelled is replaced
  * by a case-insensitive match when there is one.  A relative path stays
  * relative (to the current directory); an empty one becomes "." or "/". */
+static int gUtf8Paths;
+
+void OsPosix_SetUtf8Paths(int utf8) { gUtf8Paths = utf8; }
+int OsPosix_Utf8Paths(void) { return gUtf8Paths; }
+
+void OsPosix_PathToUtf8(const char* path, char* out, size_t n)
+{
+	if(gUtf8Paths)
+		snprintf(out, n, "%s", path);
+	else
+		OsPosix_SjisToUtf8(path, out, n);
+}
+
 void OsPosix_Path(const char* win, char* out, size_t n)
 {
 	char utf[PATH_MAX * 2];
@@ -475,7 +504,7 @@ void OsPosix_Path(const char* win, char* out, size_t n)
 	size_t o = 0;
 	int absolute = 0;
 
-	OsPosix_SjisToUtf8(win, utf, sizeof utf);
+	OsPosix_PathToUtf8(win, utf, sizeof utf);
 	p = utf;
 	if(((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1] == ':')
 	{

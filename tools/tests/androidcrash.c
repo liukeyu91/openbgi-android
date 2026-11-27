@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Deliberately crashes a disposable subprocess, never a game/device. */
 #include "bgi/crash.h"
+#include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -29,9 +30,22 @@ static void* Worker(void* mode)
 int main(int argc,char** argv)
 {
     unsigned i;
-    if(argc!=3) return 2;
+    if(argc!=3 && argc!=5) return 2;
     OsAndroid_CrashInstall(argv[1]);
     for(i=0;i<80;i++)OsAndroid_CrashInstruction(7,0x100+i,i,0x9010,"cnfgwndtxt._bp");
+    if(argc==5 && !strcmp(argv[2],"compare")) {
+        void* upstream=dlopen(argv[3],RTLD_NOW|RTLD_LOCAL);
+        void* bridge=dlopen(argv[4],RTLD_NOW|RTLD_LOCAL);
+        if(!upstream || !bridge) return 3;
+        void* entry=dlsym(upstream,"CrashFixtureFault");
+        void* bridgeEntry=dlsym(bridge,"CrashFixtureFault");
+        if(!entry || !bridgeEntry) return 3;
+        OsAndroid_CrashSetCompareImages(entry,bridgeEntry);
+        void (*fault)(void);
+        memcpy(&fault,&entry,sizeof fault);
+        fault();
+        return 4;
+    }
     if(!strcmp(argv[2],"no-proc")) {
         for(i=3;i<64;i++) {
             char path[64],target[512];ssize_t length;

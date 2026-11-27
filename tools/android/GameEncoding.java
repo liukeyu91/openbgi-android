@@ -36,10 +36,38 @@ final class GameEncoding {
     }
 
     static GameSettings prepare(File game,File resources) throws IOException {
-        GameSettings settings=GameSettings.load(game);
         try(ResourceLayers layers=ResourceLayers.of(game,resources)){
-            if(applyArchiveLanguage(layers,settings))settings.save(game);
-            if(!settings.needsEncodingDetection())return settings;
+            return layers.disc==null ? prepare(layers,false) : prepareContainer(layers);
+        }
+    }
+
+    static GameSettings prepareContainer(ResourceLayers layers) throws IOException {
+        File game=layers.game;
+        layers.disc.requireUnchanged(ContainerGame.requireSource(game));
+        ContainerGame.Summary known=ContainerGame.summary(game);
+        ContainerGame.Kind kind=ContainerGame.kind(game);
+        if(!layers.hasBootFiles())throw new IOException(ContainerGame.unbootable(kind,layers.disc));
+        if(ContainerGame.data(game)==null)
+            try(GameDataLock lock=GameDataLock.acquire(game)){ContainerGame.data(game,layers.disc);}
+        boolean refresh=known==null||!layers.disc.stamp.same(known.stamp);
+        GameSettings settings=prepare(layers,refresh);
+        if(refresh)ContainerGame.writeSummary(game,kind,layers.disc);
+        return settings;
+    }
+
+    private static boolean resolveLanguage(ResourceLayers layers,GameSettings settings,boolean refresh) {
+        if(refresh&&settings.automaticEncoding){
+            settings.encodingDetection="";
+            settings.encodingDetectorVersion=0;
+        }
+        return applyArchiveLanguage(layers,settings);
+    }
+
+    private static GameSettings prepare(ResourceLayers layers,boolean refresh) throws IOException {
+        File game=layers.game;
+        GameSettings settings=GameSettings.load(game);
+        boolean changed=resolveLanguage(layers,settings,refresh);
+        if(settings.needsEncodingDetection()){
             String detected=null,status;
             try {
                 EncodingDetector.Result result=EncodingDetector.analyze(ArchiveTextSamples.scan(layers,null).samples);
@@ -49,13 +77,16 @@ final class GameEncoding {
             catch(IOException failed) { status="error"; }
             // Re-read to preserve settings changed while sampling. Manual choice wins.
             settings=GameSettings.load(game);
-            if(applyArchiveLanguage(layers,settings))settings.save(game);
-            if(!settings.needsEncodingDetection())return settings;
-            if(detected!=null)settings.encoding=detected;
-            settings.encodingDetection=status;
-            settings.encodingDetectorVersion=GameSettings.ENCODING_DETECTOR_VERSION;
-            settings.save(game);
+            changed=resolveLanguage(layers,settings,refresh);
+            if(settings.needsEncodingDetection()){
+                if(detected!=null)settings.encoding=detected;
+                settings.encodingDetection=status;
+                settings.encodingDetectorVersion=GameSettings.ENCODING_DETECTOR_VERSION;
+                changed=true;
+            }
         }
+        if(layers.disc!=null)layers.disc.requireUnchanged(ContainerGame.requireSource(game));
+        if(changed)settings.save(game);
         return settings;
     }
 }

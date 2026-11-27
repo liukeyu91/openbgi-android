@@ -23,27 +23,26 @@ final class DiscImage {
         final long data, size;          // byte range the engine reads at run time
         final long csize;               // bytes kept in the container (compressed size)
         final int method;               // 0 stored, 8 deflated
-        final boolean directory, readable, stored;
+        final boolean directory, readable, stored, encrypted;
 
         Entry(String path, long data, long size, long csize, int method,
-              boolean directory, boolean readable, boolean stored) {
+              boolean directory, boolean readable, boolean stored, boolean encrypted) {
             this.path = path; this.data = data; this.size = size; this.csize = csize; this.method = method;
-            this.directory = directory; this.readable = readable; this.stored = stored;
+            this.directory = directory; this.readable = readable; this.stored = stored; this.encrypted = encrypted;
         }
 
         String name() { int at = path.lastIndexOf('/'); return at < 0 ? path : path.substring(at + 1); }
         /** A file the engine can open and read: not a directory, non-empty. */
         boolean file() { return !directory && readable && size > 0; }
-        /** A stored or deflated entry with the encryption bit set. */
-        boolean encrypted() { return !directory && !readable && (method == 0 || method == 8); }
         /** An entry compressed with a method this reader does not implement. */
-        boolean unsupported() { return !directory && method != 0 && method != 8; }
+        boolean unsupported() { return !directory && method != 0 && method != 8 && method != 99; }
 
         /** Why the engine cannot read a listed entry; null when it can. */
         String reason() {
             if (directory || readable) return null;
+            if (method == 99) return "AES 加密";
             if (unsupported()) return "不支持的压缩方式 " + method + "（" + compressionName(method) + "）";
-            if (encrypted()) return "已加密";
+            if (encrypted) return "已加密";
             return "无法读取";
         }
     }
@@ -59,7 +58,6 @@ final class DiscImage {
             case 93: return "Zstandard";
             case 95: return "XZ";
             case 98: return "PPMd";
-            case 99: return "AES 加密";
             default: return "未知";
         }
     }
@@ -68,15 +66,22 @@ final class DiscImage {
     static final class Source implements Closeable {
         final File image;
         final long size;
+        final ContainerGame.SourceStamp stamp;
         final List<Entry> entries;
         private final Map<String,Entry> index = new HashMap<>();
         private RandomAccessFile stream;
         private Entry inflated;
         private byte[] inflatedBytes;
 
-        Source(File image, long size, List<Entry> entries) {
-            this.image = image; this.size = size; this.entries = entries;
+        Source(File image, ContainerGame.SourceStamp stamp, List<Entry> entries) {
+            this.image = image; this.size = stamp.bytes; this.stamp = stamp; this.entries = entries;
             for (Entry entry : entries) index.put(entry.path.toLowerCase(Locale.ROOT), entry);
+        }
+
+        ContainerGame.SourceStamp requireUnchanged(File current) throws IOException {
+            if (!stamp.same(ContainerGame.stamp(current)))
+                throw new IOException("来源在读取期间发生变化，请重试");
+            return stamp;
         }
 
         Entry find(String path) {
@@ -229,17 +234,28 @@ final class DiscImage {
             catch (UnsatisfiedLinkError missing) { throw new IOException("无法读取来源索引：" + missing.getMessage()); }
             library = true;
         }
-        String[] lines = nativeEntries(image.getAbsolutePath());
+        image = image.getCanonicalFile();
+        ContainerGame.SourceStamp stamp = ContainerGame.stamp(image);
+        String[] lines = nativeEntries(image.getPath());
         if (lines == null) return null;
-        try { return parse(image, lines); }
+        try {
+            Source source = parse(image, stamp, lines);
+            if (source != null) source.requireUnchanged(image);
+            return source;
+        }
         finally { nativeRelease(); }
     }
 
     /** Build a source from the index lines ("path<TAB>data<TAB>size<TAB>csize<TAB>method<TAB>flags";
      * the four-field form of the first disc-image build is still read). */
     static Source parse(File image, String[] lines) throws IOException {
+        image = image.getCanonicalFile();
+        return parse(image, ContainerGame.stamp(image), lines);
+    }
+
+    private static Source parse(File image, ContainerGame.SourceStamp stamp, String[] lines) throws IOException {
         List<Entry> entries = new ArrayList<>(lines.length);
-        long size = image.isFile() ? image.length() : 0;
+        long size = stamp.bytes;
         for (String line : lines) {
             if (line == null || line.isEmpty()) continue;
             String[] field = line.split("\t", -1);
@@ -265,11 +281,11 @@ final class DiscImage {
             boolean openable = (flags & 2) != 0 && (method == 0 || method == 8);
             if (openable && method == 0 && csize != length) throw new IOException("来源索引长度不符：" + path);
             entries.add(new Entry(path, data, length, csize, method,
-                (flags & 1) != 0, openable, (flags & 4) != 0));
+                (flags & 1) != 0, openable, (flags & 4) != 0, (flags & 8) != 0));
         }
         if (entries.isEmpty()) return null;
         entries.sort(Comparator.comparing(entry -> entry.path, String.CASE_INSENSITIVE_ORDER));
-        return new Source(image, size, entries);
+        return new Source(image, stamp, entries);
     }
 
     private static boolean validPath(String path) {

@@ -167,6 +167,8 @@
     <string name="game_folder_unavailable">"游戏目录不可用"</string>
     <string name="encoding_unset">"文字编码尚未确定，请在游戏设置中选择。"</string>
     <string name="engine_start_error">"引擎启动失败，可在“关于”页导出日志。"</string>
+    <string name="core_android">"OpenBGI Android"</string>
+    <string name="core_upstream">"OpenBGI 1.0（上游）"</string>
     <string name="resume_game">"继续游戏"</string>
     <string name="stop_skip">"停止快进"</string>
     <string name="skip">"快进"</string>
@@ -311,4 +313,5 @@
     <string name="patch_check_width">"估算行宽为 %1$d 像素，超过声明的 %2$d 像素。请缩短译文或调整排版。"</string>
     <string name="patch_check_conflict">"文件路径冲突（%1$s）。每个路径只保留一个文件。"</string>
     <string name="patch_check_import">"无法读取或准备补丁（%1$s）。请检查压缩包和剩余空间。"</string>
+    <string name="compat_container_unreadable">来源容器中无法读取的条目有 %1$d 个。</string>
 </resources>

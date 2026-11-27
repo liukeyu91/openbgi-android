@@ -167,6 +167,8 @@
     <string name="game_folder_unavailable">"ゲームフォルダーにアクセスできません"</string>
     <string name="encoding_unset">"「ゲーム設定」で文字コードを選択してください。"</string>
     <string name="engine_start_error">"エンジンを起動できませんでした。「アプリ情報」からログをエクスポートできます。"</string>
+    <string name="core_android">"OpenBGI Android"</string>
+    <string name="core_upstream">"OpenBGI 1.0（アップストリーム）"</string>
     <string name="resume_game">"ゲームを再開"</string>
     <string name="stop_skip">"スキップ停止"</string>
     <string name="skip">"スキップ"</string>
@@ -294,4 +296,5 @@
     <string name="patch_check_pass">"合格"</string>
     <string name="patch_check_warning">"警告"</string>
     <string name="patch_check_reject">"パッチの適用不可"</string>
+    <string name="compat_container_unreadable">元のアーカイブに読み込めない項目が %1$d 件あります。</string>
 </resources>

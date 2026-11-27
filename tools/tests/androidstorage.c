@@ -31,9 +31,12 @@ static int OsPosix_MountDisc(const char* path){
     snprintf(mounted,sizeof mounted,"%s",path);
     return access(path,F_OK)==0;
 }
-int Engine_ProfileCount(void){return 0;}
-const EngineProfile_t* Engine_ProfileAt(int i){(void)i;return NULL;}
+static const EngineProfile_t profile={.name="1.616"};
+int Engine_ProfileCount(void){return 1;}
+const EngineProfile_t* Engine_ProfileAt(int i){return i==0?&profile:NULL;}
 #include "../../src/os/android/storage.c"
+#include "../../src/os/android/storage_paths.c"
+#include "../../src/os/android/storage_settings.c"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"androidstorage:%d: %s\n",__LINE__,#x);exit(1);}}while(0)
 static void put(const char* name,const char* value){FILE* f=fopen(name,"w");CHECK(f!=NULL);CHECK(fputs(value,f)>=0);CHECK(fclose(f)==0);}
 int main(void){
@@ -42,7 +45,12 @@ int main(void){
     CHECK(mkdir(host.internal,0700)==0 && mkdir(host.external,0700)==0);gAndroidHost=&host;
     snprintf(path,sizeof path,"%s/games",host.internal);CHECK(mkdir(path,0700)==0);
     snprintf(path,sizeof path,"%s/games/first",host.internal);CHECK(mkdir(path,0700)==0);
-    snprintf(path,sizeof path,"%s/active-game.txt",host.internal);put(path,"first");
+    char id[80];
+    CHECK(OsAndroid_ReadActiveGame(host.internal,id,sizeof id)==0);
+    snprintf(path,sizeof path,"%s/active-game.txt",host.internal);put(path,"first\nother");
+    CHECK(OsAndroid_ReadActiveGame(host.internal,id,sizeof id)==-1);
+    put(path,"first\n");
+    CHECK(OsAndroid_ReadActiveGame(host.internal,id,sizeof id)==1 && !strcmp(id,"first"));
     CHECK(OsAndroid_InitPaths());snprintf(path,sizeof path,"%s/games/first",host.internal);CHECK(!strcmp(chosen,path));
     char source[PATH_MAX];snprintf(source,sizeof source,"%s/original Game",root);CHECK(mkdir(source,0700)==0);
     snprintf(reference,sizeof reference,"%s/source-path.txt",gPosixConfigDir);put(reference,source);
@@ -51,7 +59,10 @@ int main(void){
     snprintf(path,sizeof path,"%s/games/first/.openbgi",host.internal);CHECK(!strcmp(gPosixConfigDir,path));
     snprintf(path,sizeof path,"%s/settings.ini",gPosixConfigDir);put(path,"encoding=gbk\nprofile=auto\n");OsAndroid_EngineOptions(options,sizeof options);
     CHECK(!strcmp(options,"--text-encoding=gbk"));
-    put(path,"encoding=big5\narchiveLanguage=tc\nprofile=auto\n");
+    put(path,"encoding=big5\narchiveLanguage=tc\nprofile=1.616\n");
+    OsAndroid_EngineOptions(options,sizeof options);
+    CHECK(!strcmp(options,"--text-encoding=big5 --engine=1.616 --archive-language=tc"));
+    put(path,"encoding=big5\narchiveLanguage=tc\nprofile=99.99\n");
     OsAndroid_EngineOptions(options,sizeof options);
     CHECK(!strcmp(options,"--text-encoding=big5 --archive-language=tc"));
     CHECK(unlink(path)==0);

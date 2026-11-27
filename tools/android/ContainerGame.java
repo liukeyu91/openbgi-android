@@ -4,6 +4,7 @@ package org.openbgi.port;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
 /**
@@ -73,14 +74,40 @@ final class ContainerGame {
         return file;
     }
 
-    /** The facts the library shows; written once when the container is added. */
+    static File requireSource(File entry) throws IOException {
+        File file = source(entry);
+        if (file == null) throw new IOException("来源记录无效，请移除条目后重新添加");
+        return validate(file);
+    }
+
+    static final class SourceStamp {
+        final long bytes, modified;
+        final String path, fileKey;
+        SourceStamp(long bytes, long modified, String path, String fileKey) {
+            this.bytes = bytes;
+            this.modified = modified;
+            this.path = path;
+            this.fileKey = fileKey;
+        }
+        boolean same(SourceStamp other) {
+            return other != null && bytes == other.bytes && modified == other.modified
+                && path.equals(other.path) && fileKey.equals(other.fileKey);
+        }
+    }
+
+    static SourceStamp stamp(File source) throws IOException {
+        BasicFileAttributes attributes = Files.readAttributes(source.toPath(), BasicFileAttributes.class);
+        return new SourceStamp(attributes.size(), attributes.lastModifiedTime().toMillis(),
+            source.getPath(), Objects.toString(attributes.fileKey(), ""));
+    }
+
     static final class Summary {
         final Kind kind;
         final boolean boot, fallback;
         final List<ArchiveLanguage> languages;
-        final long bytes;
-        Summary(Kind kind, boolean boot, boolean fallback, List<ArchiveLanguage> languages, long bytes) {
-            this.kind = kind; this.boot = boot; this.fallback = fallback; this.languages = languages; this.bytes = bytes;
+        final SourceStamp stamp;
+        Summary(Kind kind, boolean boot, boolean fallback, List<ArchiveLanguage> languages, SourceStamp stamp) {
+            this.kind = kind; this.boot = boot; this.fallback = fallback; this.languages = languages; this.stamp = stamp;
         }
     }
 
@@ -92,17 +119,21 @@ final class ContainerGame {
             Properties p = new Properties(); p.load(in);
             String format = p.getProperty("format");
             if (!FORMAT.equals(format) && !LEGACY_FORMAT.equals(format)) return null;
-            long bytes;
-            try { bytes = Long.parseLong(p.getProperty("bytes", "0")); } catch (NumberFormatException bad) { bytes = 0; }
+            SourceStamp stamp = null;
+            if (p.getProperty("path") != null && p.getProperty("fileKey") != null) {
+                stamp = new SourceStamp(Long.parseLong(p.getProperty("bytes", "-1")),
+                    Long.parseLong(p.getProperty("mtime", "-1")), p.getProperty("path"), p.getProperty("fileKey"));
+            }
             List<ArchiveLanguage> languages = new ArrayList<>();
             for (String id : p.getProperty("languages", "").split(","))
                 if (ArchiveLanguage.fromId(id.trim()) != null) languages.add(ArchiveLanguage.fromId(id.trim()));
             return new Summary(Kind.fromId(p.getProperty("kind", "image")), "1".equals(p.getProperty("boot")),
-                "1".equals(p.getProperty("default")), languages, bytes);
+                "1".equals(p.getProperty("default")), languages, stamp);
         } catch (IOException | IllegalArgumentException bad) { return null; }
     }
 
-    private static void writeSummary(File entry, Kind kind, DiscImage.Source source) throws IOException {
+    static void writeSummary(File entry, Kind kind, DiscImage.Source source) throws IOException {
+        SourceStamp stamp = source.stamp;
         Set<String> names = source.rootNames();
         StringBuilder languages = new StringBuilder();
         for (ArchiveLanguage language : ArchiveLanguage.availableNames(names))
@@ -110,8 +141,10 @@ final class ContainerGame {
         Properties p = new Properties();
         p.setProperty("format", FORMAT);
         p.setProperty("kind", kind.id);
-        p.setProperty("bytes", Long.toString(source.size));
-        p.setProperty("mtime", Long.toString(source.image.lastModified()));
+        p.setProperty("bytes", Long.toString(stamp.bytes));
+        p.setProperty("mtime", Long.toString(stamp.modified));
+        p.setProperty("path", stamp.path);
+        p.setProperty("fileKey", stamp.fileKey);
         p.setProperty("boot", source.hasBootFiles() ? "1" : "0");
         p.setProperty("default", names.contains("system.arc") || names.contains("ipl._bp") ? "1" : "0");
         p.setProperty("languages", languages.toString());
@@ -128,12 +161,15 @@ final class ContainerGame {
     /** Why a container cannot boot: the resources are missing, or they are
      *  listed but the engine cannot open them (encrypted, or compressed with a
      *  method the reader does not implement). */
-    private static String unbootable(Kind kind, DiscImage.Source source) {
+    static String unbootable(Kind kind, DiscImage.Source source) {
         String why = source.describeUnreadable(3);
         boolean listed = ArchiveLanguage.hasBootFiles(source.allRootNames());
         if (kind == Kind.ZIP) {
-            if (listed) return "压缩包里的启动资源无法读取：" + why
-                + "。请去掉口令，并用存储或 Deflate 方式重新打包";
+            if (listed) {
+                boolean encrypted = source.unreadable().stream().anyMatch(entry -> entry.encrypted);
+                return "压缩包里的启动资源无法读取：" + why + "。请用存储或 Deflate 方式重新打包"
+                    + (encrypted ? "，并关闭加密" : "");
+            }
             if (!why.isEmpty()) return "压缩包内没有可启动的游戏资源，其中 " + why
                 + " 无法读取，请确认打包完整或改用其他压缩包";
             return "压缩包内没有可启动的游戏资源，请选择完整的游戏压缩包";
@@ -151,6 +187,7 @@ final class ContainerGame {
         File file = validate(container);
         if (source == null) throw new IOException(kind == Kind.ZIP
             ? "无法识别压缩包格式，请选择 ZIP 文件" : "无法识别镜像格式，请选择 ISO 或 UDF 光盘镜像");
+        source.requireUnchanged(file);
         if (!source.hasBootFiles()) throw new IOException(unbootable(kind, source));
         Path target = entry.toPath(), staging = target.resolveSibling(".import-" + entry.getName());
         if (Files.exists(target)) throw new IOException("游戏条目已存在");
@@ -161,6 +198,7 @@ final class ContainerGame {
             Files.write(staging.resolve(SOURCE), file.getPath().getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW);
             writeSummary(staging.toFile(), kind, source);
             prepare.run(staging.toFile());
+            source.requireUnchanged(file);
             Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException | RuntimeException failure) {
             try { GameImport.remove(staging); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }

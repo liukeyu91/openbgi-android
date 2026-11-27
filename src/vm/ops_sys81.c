@@ -727,20 +727,28 @@ static int Opcode_Sys81_FileSeek(Thread_t* t) // 81 2B (1.573 on): status, handl
 	return 0;
 }
 
-/* Archive entry names: a NULL buffer queries the required byte count;
- * otherwise pack the original names and store their count. Observed in
- * KanojoStep's anmdef._bp (1.636). The original also pushes the output
- * pointer on success, zero on failure (including in Fureraba 1.616). */
-static int Opcode_Sys81_ArchiveNames(Thread_t* t) // 81 39: buf, outSizeOrCount, path -> outOrZero
+/* A NULL buffer queries bytes; filling reports the count. The 1.659.8
+ * original always pushes 1. The 1.680 original pushes 0 on success, 1 on
+ * failure. Both leave the output word alone on failure. */
+static int Opcode_Sys81_ArchiveNames(Thread_t* t) // 81 39: buf, outSizeOrCount, path -> result
 {
-    const char* path = (const char*)PopPtr(t);
-    uint32_t output = Thread_Pop(t);
-    uint32_t* result = (uint32_t*)ResolvePtr(output, t);
-    char* buffer = (char*)PopPtr(t);
-    char native[0x1000];
-    OS_PathNative(path, native, sizeof native);
-    Thread_Push(t, ArcRead_ListNames(native, buffer, result) ? output : 0);
-    return 0;
+	const char* path = (const char*)PopPtr(t);
+	uint32_t output = Thread_Pop(t);
+	void* result = ResolvePtr(output, t);
+	char* buffer = (char*)PopPtr(t);
+	int returnsStatus = gEngine->gen == GEN_1_680;
+	int returnsOne = gEngine->gen == GEN_1_659 && strcmp(gEngine->name, "1.659.8") == 0;
+	uint32_t sizeOrCount;
+	int ok = ArcRead_ListNames(path, buffer, &sizeOrCount);
+	if(result && (ok || (!returnsStatus && !returnsOne)))
+		memcpy(result, &sizeOrCount, sizeof sizeOrCount);
+	if(returnsStatus)
+		Thread_Push(t, ok ? 0 : 1);
+	else if(returnsOne)
+		Thread_Push(t, 1);
+	else
+		Thread_Push(t, ok ? output : 0);
+	return 0;
 }
 
 /* UTC SYSTEMTIME records: eight 16-bit fields, not FILETIME dwords. */
@@ -787,7 +795,7 @@ void Vm_Optable81Init(void)
 		{0x10, Opcode_Sys81_KeyRepeatNew, GEN_1_69_451, GEN_LAST},
 		{0x11, Opcode_Sys81_KeyboardState, GEN_1_69_472, GEN_LAST},
 		{0x1F, Opcode_Sys81_SetTweenKeyMask, GEN_1_69_451, GEN_LAST},
-		{0x39, Opcode_Sys81_ArchiveNames, GEN_FIRST, GEN_LAST},
+		{0x39, Opcode_Sys81_ArchiveNames, GEN_1_588, GEN_LAST},
 		{0x2C, Opcode_Sys81_GetFileTimes, GEN_FIRST, GEN_LAST},
 		{0x2D, Opcode_Sys81_SetFileTimes, GEN_FIRST, GEN_LAST},
 		{0xE0, Opcode_Sys81_RunProgramArgs, GEN_FIRST, GEN_LAST},

@@ -280,15 +280,16 @@ typedef struct ZipSpec
 
 /* A minimal archive writer: local headers, the central directory, and the
  * end records (the zip64 pair too, when asked). */
-static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int zip64Directory)
+static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int zip64Directory, off_t start)
 {
     FILE* f = fopen(path, "wb");
-    long* local = calloc(count, sizeof *local);
+    off_t* local = calloc(count, sizeof *local);
     uint8_t** owned = calloc(count, sizeof *owned);
     size_t* csize = calloc(count, sizeof *csize);
     uint32_t* crc = calloc(count, sizeof *crc);
-    long cdStart, cdSize;
+    off_t cdStart, cdSize;
     CHECK(f && local && owned && csize && crc);
+    CHECK(!fseeko(f, start, SEEK_SET));
     for(size_t i = 0; i < count; i++)
     {
         size_t usize = strlen(files[i].text), stored = usize;
@@ -308,7 +309,7 @@ static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int
             stored = z - 6;
         }
         csize[i] = stored;
-        local[i] = ftell(f);
+        local[i] = ftello(f);
         {
             uint8_t h[30] = {0};
             PutLe32(h, SIG_LOCAL);
@@ -324,7 +325,7 @@ static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int
             CHECK(fwrite(data, 1, stored, f) == stored);
         }
     }
-    cdStart = ftell(f);
+    cdStart = ftello(f);
     for(size_t i = 0; i < count; i++)
     {
         size_t nlen = strlen(files[i].name), elen = files[i].zip64 ? 28 : 0;
@@ -358,11 +359,11 @@ static void WriteZip(const char* path, const ZipSpec_t* files, size_t count, int
         CHECK(fwrite(files[i].name, 1, nlen, f) == nlen);
         CHECK(fwrite(x, 1, elen, f) == elen);
     }
-    cdSize = ftell(f) - cdStart;
+    cdSize = ftello(f) - cdStart;
     if(zip64Directory)
     {
         uint8_t e[56] = {0}, loc[20] = {0};
-        long end64 = ftell(f);
+        off_t end64 = ftello(f);
         PutLe32(e, SIG_END64);
         PutLe64At(e + 4, 44);
         PutLe16(e + 12, 45);
@@ -420,7 +421,7 @@ static void ReadZip(void)
     OsFind_t* find;
     OsFile_t* file;
     char buf[128] = {0};
-    WriteZip("fixture.zip", files, sizeof files / sizeof files[0], 0);
+    WriteZip("fixture.zip", files, sizeof files / sizeof files[0], 0, 0);
     CHECK(!stat("fixture.zip", &st));
     CHECK(OsPosix_MountDisc("fixture.zip"));
     /* The game root is the wrapper folder; macOS metadata and names that
@@ -479,8 +480,8 @@ static void ReadZip(void)
             if(entry && !strcasecmp(entry->path, "Game/SECRET.DAT"))
                 secret = entry;
         }
-        CHECK(packed && !packed->readable && packed->method == 12 && !packed->stored);
-        CHECK(secret && !secret->readable && secret->method == 0 && !secret->stored);
+        CHECK(packed && !packed->readable && packed->method == 12 && !packed->stored && !packed->encrypted);
+        CHECK(secret && !secret->readable && secret->method == 0 && !secret->stored && secret->encrypted);
         CHECK(!Disc_Open(packed, &handle) && !Disc_Open(secret, &handle));
         CHECK(!OS_FileOpenRead("C:\\packed.dat") && !OS_FileOpenRead("C:\\secret.dat"));
     }
@@ -498,20 +499,127 @@ static void ReadZip64(void)
 {
     static const ZipSpec_t files[] = {
         {"Game/IPL._BP", "z", 0, 0, 1, 0},
-        {"Game/SYSTEM.ARC", "s", 0, 0, 1, 0},
+        {"Game/SYSTEM.ARC", "s", 8, 0, 1, 0},
     };
-    WriteZip("fixture64.zip", files, sizeof files / sizeof files[0], 1);
+    off_t start = (off_t)(UINT64_C(1) << 32) + 1024;
+    WriteZip("fixture64.zip", files, sizeof files / sizeof files[0], 1, start);
     CHECK(OsPosix_MountDisc("fixture64.zip"));
     CHECK(Disc_Count() == 3 && !strcmp(Disc_ImagePath(), "fixture64.zip") && !strcmp(Disc_Root(), "Game/"));
+    const VolEntry_t* entry = Disc_Find("system.arc");
+    CHECK(entry && entry->data > UINT32_MAX);
     ExpectArchive("C:\\ipl._bp", 'z');
     ExpectArchive("C:\\system.arc", 's');
     CHECK(OsPosix_MountDisc(NULL) && !unlink("fixture64.zip"));
-    puts("PASS posixpaths: ZIP64 end records and per-entry zip64 extra fields");
+    puts("PASS posixpaths: ZIP64 directory and stored/deflated entries beyond 4 GiB");
+}
+
+static void ReadHighlyCompressedZip(void)
+{
+    char contents[4097], readback[4096];
+    memset(contents, 'a', sizeof contents - 1);
+    contents[sizeof contents - 1] = 0;
+    const ZipSpec_t files[] = {{"SYSTEM.ARC", contents, 8, 0, 0, 0}};
+    WriteZip("compressed.zip", files, 1, 0, 0);
+    struct stat st;
+    CHECK(!stat("compressed.zip", &st) && st.st_size < (off_t)sizeof readback);
+    CHECK(OsPosix_MountDisc("compressed.zip"));
+    OsFile_t* file = OS_FileOpenRead("C:\\system.arc");
+    CHECK(file && OS_FileRead(file, readback, sizeof readback) == sizeof readback);
+    CHECK(!memcmp(readback, contents, sizeof readback));
+    OS_FileClose(file);
+    CHECK(OsPosix_MountDisc(NULL) && !unlink("compressed.zip"));
+    puts("PASS posixpaths: a deflated resource larger than its entire ZIP");
+}
+
+/* A translated distribution need not ship the shared system.arc: the wrapper
+ * folder may hold only the localized pair. The root must still be found, or
+ * the launcher sees "Game/system.tc.arc" and calls the container unbootable. */
+static void ReadLocalizedZip(void)
+{
+    static const ZipSpec_t files[] = {
+        {"Game/System.Tc.Arc", "tc-script", 0, 0, 0, 0},
+        {"Game/sysprg.tc.arc", "tc-program", 0, 0, 0, 0},
+    };
+    const VolEntry_t *script, *program;
+    WriteZip("localized.zip", files, sizeof files / sizeof files[0], 0, 0);
+    CHECK(OsPosix_MountDisc("localized.zip"));
+    CHECK(!strcmp(Disc_Root(), "Game/"));
+    /* The wrapper itself plus the two files; the launcher only ever sees the
+     * two remaining paths once the root is stripped. */
+    CHECK(Disc_Count() == 3);
+    script = Disc_Find("SYSTEM.TC.ARC");
+    program = Disc_Find("SYSPRG.TC.ARC");
+    CHECK(script && script->readable && script->size == 9);
+    CHECK(program && program->readable && program->size == 10);
+    /* The logical name still resolves to the localized entry's bytes. */
+    CHECK(OsPosix_SetArchiveLanguage("tc"));
+    ExpectArchive("C:\\system.arc", 't');
+    ExpectArchive("C:\\sysprg.arc", 't');
+    CHECK(OsPosix_SetArchiveLanguage(""));
+    CHECK(OsPosix_MountDisc(NULL) && !unlink("localized.zip"));
+
+    /* One level deeper, and with an incomplete pair: the marker still names
+     * the root; whether the pair is complete is the launcher's call. */
+    {
+        static const ZipSpec_t nested[] = {
+            {"Outer/Game/SYSTEM.TC.ARC", "tc-script", 0, 0, 0, 0},
+            {"Outer/Game/SYSPRG.TC.ARC", "tc-program", 0, 0, 0, 0},
+        };
+        static const ZipSpec_t incomplete[] = {
+            {"Game/SYSTEM.EN.ARC", "en-script", 0, 0, 0, 0},
+        };
+        WriteZip("nested.zip", nested, sizeof nested / sizeof nested[0], 0, 0);
+        CHECK(OsPosix_MountDisc("nested.zip") && !strcmp(Disc_Root(), "Outer/Game/"));
+        CHECK(Disc_Find("SYSTEM.TC.ARC") && Disc_Find("SYSPRG.TC.ARC"));
+        CHECK(OsPosix_MountDisc(NULL) && !unlink("nested.zip"));
+        WriteZip("incomplete.zip", incomplete, 1, 0, 0);
+        CHECK(OsPosix_MountDisc("incomplete.zip") && !strcmp(Disc_Root(), "Game/"));
+        CHECK(OsPosix_MountDisc(NULL) && !unlink("incomplete.zip"));
+    }
+    puts("PASS posixpaths: a localized-only wrapper still marks the game root in a ZIP");
+}
+
+static void ReadLocalizedDisc(void)
+{
+    enum { Sector = 2048 };
+    uint8_t index[5 * Sector] = {0};
+    FILE* f = fopen("localized.iso", "wb");
+    CHECK(f);
+    index[0] = 1;memcpy(index + 1, "CD001\1", 6);
+    DiscRecord(index + 156, ".", 18, Sector, 1);
+    index[Sector] = 255;memcpy(index + Sector + 1, "CD001\1", 6);
+    DiscRecord(index + 2 * Sector, "GAME", 19, Sector, 1);
+    size_t pos = 3 * Sector;
+    pos += DiscRecord(index + pos, "SYSTEM.TC.ARC;1", 21, 9, 0);
+    DiscRecord(index + pos, "SYSPRG.TC.ARC;1", 22, 10, 0);
+    CHECK(!fseeko(f, 16 * Sector, SEEK_SET) && fwrite(index, 1, sizeof index, f) == sizeof index);
+    CHECK(!fseeko(f, (off_t)21 * Sector, SEEK_SET) && fwrite("tc-script", 1, 9, f) == 9);
+    CHECK(!fseeko(f, (off_t)22 * Sector, SEEK_SET) && fwrite("tc-program", 1, 10, f) == 10);
+    CHECK(!fclose(f));
+    CHECK(OsPosix_MountDisc("localized.iso"));
+    CHECK(!strcmp(Disc_Root(), "GAME/") && Disc_Count() == 3);
+    CHECK(Disc_Find("SYSTEM.TC.ARC") && Disc_Find("SYSPRG.TC.ARC"));
+    CHECK(OsPosix_SetArchiveLanguage("tc"));
+    ExpectArchive("C:\\system.arc", 't');
+    CHECK(OsPosix_SetArchiveLanguage(""));
+    CHECK(OsPosix_MountDisc(NULL) && !unlink("localized.iso"));
+    puts("PASS posixpaths: a localized-only wrapper still marks the game root in an ISO");
 }
 
 int main(void)
-{    char root[PATH_MAX],cwd[PATH_MAX],path[512],query[512];
-    const char* temp=getenv("TMPDIR");
+{
+    /* A container written by another generator (the UDF sample, say) can be
+     * asked for the root alone: BGI_DISC_ROOT=<path> prints it and stops. */
+    {
+        const char* probe = getenv("BGI_DISC_ROOT");
+        if(probe && *probe)
+        {
+            CHECK(OsPosix_MountDisc(probe));
+            puts(Disc_Root());
+            return 0;
+        }
+    }
+    char root[PATH_MAX],cwd[PATH_MAX],path[512],query[512];    const char* temp=getenv("TMPDIR");
     CHECK(snprintf(root,sizeof root,"%s/openbgi-paths-XXXXXX",temp?temp:"/tmp")<(int)sizeof root);
     CHECK(getcwd(cwd,sizeof cwd));CHECK(mkdtemp(root));CHECK(!chdir(root));
     snprintf(gPosixExeDir,sizeof gPosixExeDir,"%s",root);
@@ -541,6 +649,9 @@ int main(void)
     ReadDisc();
     ReadZip();
     ReadZip64();
+    ReadHighlyCompressedZip();
+    ReadLocalizedZip();
+    ReadLocalizedDisc();
 
     // Relative cache keys must not survive a change of working directory.
     Expect("root.txt","Root.TXT");CHECK(!chdir("Alternate"));Expect("other.txt","Other.TXT");

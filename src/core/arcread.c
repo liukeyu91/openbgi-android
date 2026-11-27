@@ -30,25 +30,33 @@ ArcRead_t* ArcRead_Open(const char* path)
 	return ArcRead_OpenFile(f, path);
 }
 
-/* read the index of the archive in `f` (called `path` in the messages):
- * the 16-byte header (magic, entry count), then one record per entry,
- * converted to ArcEntry_t with an absolute offset.  NULL with a message
- * on stderr - and the file closed - when it is not an archive or its
- * index is truncated. */
-ArcRead_t* ArcRead_OpenFile(FILE* f, const char* path)
+typedef size_t (*ArcIndexRead_t)(void* file, void* buffer, size_t size);
+
+static size_t ReadStdio(void* file, void* buffer, size_t size)
+{
+	return fread(buffer, 1, size, file);
+}
+
+static size_t ReadGameFile(void* file, void* buffer, size_t size)
+{
+	return size <= UINT32_MAX ? OS_FileRead(file, buffer, (uint32_t)size) : 0;
+}
+
+/* Read the same index for tool inputs and the game's filesystem. */
+static ArcRead_t* ReadIndex(void* file, ArcIndexRead_t read, const char* path)
 {
 	ArcRead_t* a;
 	uint8_t hdr[16];
 	uint32_t i, recSize, nameLen, base;
 	uint8_t* raw;
-	if(fread(hdr, 1, 16, f) != 16 || (memcmp(hdr, PACKFILE_MAGIC, 12) != 0 && memcmp(hdr, ARC20_MAGIC, 12) != 0))
+	if(read(file, hdr, sizeof hdr) != sizeof hdr || (memcmp(hdr, PACKFILE_MAGIC, 12) != 0 && memcmp(hdr, ARC20_MAGIC, 12) != 0))
 	{
 		fprintf(stderr, "%s: not a PackFile / ARC20 archive\n", path);
-		fclose(f);
 		return NULL;
 	}
 	a = (ArcRead_t*)calloc(1, sizeof *a);
-	a->f = f;
+	if(!a)
+		return NULL;
 	a->arc20 = memcmp(hdr, ARC20_MAGIC, 12) == 0;
 	a->count = hdr[12] | (hdr[13] << 8) | (hdr[14] << 16) | ((uint32_t)hdr[15] << 24);
 	recSize = a->arc20 ? 0x80 : 32; // record: name, offset, size (and padding)
@@ -56,7 +64,7 @@ ArcRead_t* ArcRead_OpenFile(FILE* f, const char* path)
 	base = 16 + a->count * recSize; // the stored offsets count from the end of the index
 	raw = (uint8_t*)malloc((size_t)a->count * recSize + 1);
 	a->entries = (ArcEntry_t*)calloc(a->count + 1, sizeof *a->entries);
-	if(!raw || !a->entries || fread(raw, 1, (size_t)a->count * recSize, f) != (size_t)a->count * recSize)
+	if(!raw || !a->entries || read(file, raw, (size_t)a->count * recSize) != (size_t)a->count * recSize)
 	{
 		fprintf(stderr, "%s: truncated index\n", path);
 		free(raw);
@@ -76,6 +84,16 @@ ArcRead_t* ArcRead_OpenFile(FILE* f, const char* path)
 	}
 	free(raw);
 	return a;
+}
+
+ArcRead_t* ArcRead_OpenFile(FILE* f, const char* path)
+{
+	ArcRead_t* archive = ReadIndex(f, ReadStdio, path);
+	if(archive)
+		archive->f = f;
+	else
+		fclose(f);
+	return archive;
 }
 
 // close the file and free the index; NULL is allowed
@@ -142,21 +160,27 @@ uint8_t* ArcRead_Load(const ArcRead_t* a, const ArcEntry_t* e, uint32_t* size, i
 /* Shared with the VM's 81 39 without exposing the tools' index type. */
 int ArcRead_ListNames(const char* path, char* buffer, uint32_t* sizeOrCount)
 {
-    ArcRead_t* arc;
-    FILE* file;
-    uint32_t i, bytes = 0;
-    int fill = buffer != NULL;
-    if(sizeOrCount) *sizeOrCount = 0;
-    file = OS_NativeOpen(path, "rb");
-    if(!file) return 0;
-    arc = ArcRead_OpenFile(file, path);
-    if(!arc) return 0;
-    for(i = 0; i < arc->count; ++i) {
-        size_t n = strlen(arc->entries[i].name) + 1;
-        if(buffer) { memcpy(buffer, arc->entries[i].name, n); buffer += n; }
-        bytes += (uint32_t)n;
-    }
-    if(sizeOrCount) *sizeOrCount = fill ? arc->count : bytes;
-    ArcRead_Close(arc);
-    return 1;
+	OsFile_t* file = path ? OS_FileOpenRead(path) : NULL;
+	ArcRead_t* archive;
+	uint32_t bytes = 0;
+	if(sizeOrCount)
+		*sizeOrCount = 0;
+	if(!file)
+		return 0;
+	archive = ReadIndex(file, ReadGameFile, path);
+	OS_FileClose(file);
+	if(!archive)
+		return 0;
+	for(uint32_t i = 0; i < archive->count; ++i)
+	{
+		const char* name = archive->entries[i].name;
+		size_t size = strlen(name) + 1;
+		if(buffer)
+			memcpy(buffer + bytes, name, size);
+		bytes += (uint32_t)size;
+	}
+	if(sizeOrCount)
+		*sizeOrCount = buffer ? archive->count : bytes;
+	ArcRead_Close(archive);
+	return 1;
 }

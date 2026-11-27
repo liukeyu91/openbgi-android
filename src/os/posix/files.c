@@ -464,14 +464,22 @@ OsFind_t* OS_FindFirst(const char* pattern, OsFindData_t* out)
 	if(!h) return NULL;
 
 	// split the Windows pattern into directory and file part before converting
-	file = OsCommon_FilePart(pattern);
+	if(OsPosix_Utf8Paths())
+	{
+		file = pattern;
+		for(const char* p = pattern; *p; ++p)
+			if(*p == '/' || *p == '\\' || *p == ':')
+				file = p + 1;
+	}
+	else
+		file = OsCommon_FilePart(pattern);
 	dirLen = (size_t)(file - pattern);
 	if(dirLen >= sizeof win)
 		dirLen = sizeof win - 1;
 	memcpy(win, pattern, dirLen);
 	win[dirLen] = 0;
 	OsPosix_Path(dirLen == 0 ? "." : win, h->paths[2], sizeof h->paths[2]);
-	OsPosix_SjisToUtf8(file, utfPat, sizeof utfPat);
+	OsPosix_PathToUtf8(file, utfPat, sizeof utfPat);
 	snprintf(h->pattern, sizeof h->pattern, "%s", utfPat);
 	size_t patternLen = strlen(h->pattern);
 	char logical[sizeof h->pattern];

@@ -15,6 +15,10 @@ final class RunReportTest {
         if(!ok)throw new AssertionError("Incorrect run summary");
     }
 
+    private static void check(boolean ok,String message) {
+        if(!ok)throw new AssertionError(message);
+    }
+
     public static void main(String[] args) throws IOException {
         Path root=Files.createTempDirectory("openbgi-run-report-");
         try {
@@ -38,6 +42,16 @@ final class RunReportTest {
             Files.delete(root.resolve("native-crash.txt"));
             put(root,"java-crash.txt","Session epoch ms: 42\n");
             check(RunReport.render(logs,session).contains("Error: Java exception\n"));
+
+            // A launch refused before the session began writes its own record:
+            // without it the bundle says nothing about the seven quick exits.
+            put(root,"start-failure.txt","Time: 41\nGame: Game\nReason: Forced UTF-8 needs the Android core\n");
+            check(!RunReport.render(logs,session).contains("Start failure"),
+                "A failure older than the session stays out of the report");
+            put(root,"start-failure.txt","Time: 43\nGame: Game\nReason: Forced UTF-8 needs the Android core\n");
+            check(RunReport.render(logs,session).contains("Start failure: Forced UTF-8 needs the Android core (43)\n"),
+                "A later start failure is reported");
+            Files.delete(root.resolve("start-failure.txt"));
         } finally { GameImport.remove(root); }
         System.out.println("Run report tests passed");
     }

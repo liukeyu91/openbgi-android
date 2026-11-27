@@ -1160,30 +1160,60 @@ static void TestFiles(void)
         CHECK(OS_DirRemove("bin/test_vm_dirs/MixedSub"));
         CHECK(OS_DirRemove("bin/test_vm_dirs"));
     }
-    {
-        uint8_t image[16 + 256] = {0};
-        uint32_t size;
-        memcpy(image, "BURIKO ARC20", 12); image[12] = 2;
-        memcpy(image + 16, "MixedName", 10); memcpy(image + 144, "Second", 7);
-        uint32_t query[] = {0, DataPtr(0x210), DataPtr(0x580)};
-        int mode, j;
-        strcpy((char*)d + 0x580, "bin/test_vm_names.arc");
-        CHECK(OS_WriteNativeFile("bin/test_vm_names.arc", image, sizeof image));
-        for(mode = 0; mode < 2; ++mode) {
-            Asm_t a; a.len = 0; query[0] = mode ? DataPtr(0x600) : 0;
-            memset(d + 0x600, 0xa5, 64);
-            PushI32(&a, 42);
-            for(j = 0; j < 3; ++j)PushI32(&a, query[j]);
-            A8(&a, 0x81); A8(&a, 0x39);
-            Ret(&a);
-            CHECK(Run(&a) == 4 && Depth() == 2);
-            CHECK(Thread_Pop(gT) == query[1] && Top() == 42);
-            memcpy(&size, d + 0x210, 4);
-            CHECK(size == (mode ? 2 : 17));
-            if(mode)CHECK(memcmp(d + 0x600, "MixedName\0Second\0", 17) == 0 && d[0x611] == 0xa5);
-        }
-        remove("bin/test_vm_names.arc");
-    }
+	{
+		const char* path = "bin/test_vm_names.arc";
+		const char names[] = "MixedName\0Second";
+		strcpy((char*)d + 0x580, path);
+		for(int i = 0; i < Engine_ProfileCount(); ++i)
+		{
+			uint32_t size;
+			const EngineProfile_t* profile = Engine_ProfileAt(i);
+			int returnsStatus = strcmp(profile->name, "1.680") == 0;
+			int returnsOne = strcmp(profile->name, "1.659.8") == 0;
+			CHECK(Engine_SelectProfile(profile->name));
+			Vm_TablesInit();
+			if(profile->gen < GEN_1_588)
+			{
+				CHECK(vm_optable_81[0x39] == NULL);
+				continue;
+			}
+			CHECK(vm_optable_81[0x39] && vm_optable_81[0x39] != Opcode_NotImplemented);
+			uint32_t query[] = {0, DataPtr(0x210), DataPtr(0x580)};
+			uint32_t success = query[1];
+			if(returnsStatus)
+				success = 0;
+			else if(returnsOne)
+				success = 1;
+			for(int arc20 = 0; arc20 < 2; ++arc20)
+			{
+				uint8_t image[16 + 2 * 128] = {0};
+				size_t stride = arc20 ? 128 : 32;
+				memcpy(image, arc20 ? "BURIKO ARC20" : "PackFile    ", 12);
+				image[12] = 2;
+				memcpy(image + 16, names, sizeof "MixedName");
+				memcpy(image + 16 + stride, "Second", sizeof "Second");
+				CHECK(OS_WriteNativeFile(path, image, 16 + 2 * stride));
+				query[0] = 0;
+				CHECK(Call(0x81, 0x39, query, 3) == success);
+				memcpy(&size, d + 0x210, sizeof size);
+				CHECK(size == sizeof names);
+
+				query[0] = DataPtr(0x600);
+				memset(d + 0x600, 0xa5, 64);
+				CHECK(Call(0x81, 0x39, query, 3) == success);
+				memcpy(&size, d + 0x210, sizeof size);
+				CHECK(size == 2);
+				CHECK(memcmp(d + 0x600, names, sizeof names) == 0 && d[0x600 + sizeof names] == 0xa5);
+			}
+			CHECK(remove(path) == 0);
+			CHECK(Call(0x81, 0x39, query, 3) == (uint32_t)(returnsStatus || returnsOne));
+			memcpy(&size, d + 0x210, sizeof size);
+			CHECK(size == (returnsStatus || returnsOne ? 2 : 0));
+			CHECK(memcmp(d + 0x600, names, sizeof names) == 0 && d[0x600 + sizeof names] == 0xa5);
+		}
+		CHECK(Engine_SelectProfile("1.636"));
+		Vm_TablesInit();
+	}
     {
         const uint32_t query[] = {0, 0, DataPtr(0x580), 0, 0};
         uint32_t fill[] = {DataPtr(0x600), 128, DataPtr(0x580), 0, 0};

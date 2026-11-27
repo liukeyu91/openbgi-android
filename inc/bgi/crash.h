@@ -6,6 +6,7 @@
 
 /* Android fatal-signal diagnostics. No game text or save data is recorded. */
 void OsAndroid_CrashInstall(const char* logDirectory);
+void OsAndroid_CrashSetCompareImages(const void* upstream, const void* bridge);
 void OsAndroid_CrashThread(void);
 void OsAndroid_CrashInstruction(uint32_t thread, uint32_t ip, uint32_t relative,
     uint32_t opcode, const char* module);

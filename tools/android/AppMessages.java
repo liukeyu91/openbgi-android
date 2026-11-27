@@ -127,6 +127,10 @@ final class AppMessages {
                 text.append('\n').append(context.getString(R.string.compat_more_locations, finding.occurrences - finding.locations.size()));
             }
         }
+        if (result.unreadableEntries > 0) {
+            text.append("\n\n").append(context.getString(R.string.compat_container_unreadable, result.unreadableEntries));
+            for (String path : result.unreadablePaths) text.append('\n').append(path);
+        }
         if (result.skipped > 0) text.append("\n\n").append(context.getString(R.string.compat_skipped, result.skipped));
         if (result.problems > 0) {
             text.append('\n').append(context.getString(R.string.compat_problems, result.problems));

@@ -33,6 +33,8 @@ final class ProgramCompatibility {
         ArchiveLanguage language;
         final SortedMap<Integer,Finding> findings=new TreeMap<>();
         final List<String> problemLocations=new ArrayList<>();
+        int unreadableEntries;
+        final List<String> unreadablePaths=new ArrayList<>();
         Status status(){
             if(!error.isEmpty() || profile.isEmpty())return Status.INCOMPLETE;
             if(!findings.isEmpty())return Status.FINDINGS;
@@ -59,11 +61,18 @@ final class ProgramCompatibility {
     private static boolean program(String name){return name.toLowerCase(Locale.ROOT).endsWith("._bp");}
     private static List<Entry> inventory(ResourceLayers layers,Result r)throws IOException {
         Map<String,Blob> all=new LinkedHashMap<>();Map<String,String> display=new LinkedHashMap<>();
+        Map<String,Long> unreadableScripts=new LinkedHashMap<>();
         if(layers.disc!=null){
             Map<String,Long> sizes=new LinkedHashMap<>();Map<String,DiscImage.Entry> named=new HashMap<>();
             for(DiscImage.Entry entry:layers.disc.entries){
-                if(!entry.file())continue;
+                cancelled();
                 String key=entry.path.toLowerCase(Locale.ROOT);
+                if(!entry.directory && !entry.readable){
+                    ++r.unreadableEntries;
+                    if(r.unreadablePaths.size()<3)r.unreadablePaths.add(entry.path);
+                    if(program(key) || key.endsWith(".arc"))unreadableScripts.put(key,entry.size);
+                }
+                if(!entry.file())continue;
                 sizes.put(key,entry.size);named.put(key,entry);
             }
             Map<String,String> chosen=new LinkedHashMap<>();
@@ -73,17 +82,19 @@ final class ProgramCompatibility {
                 if(entry==null)continue;
                 all.put(item.getKey(),Blob.image(layers.disc,entry));display.put(item.getKey(),item.getValue());
             }
-        }else{
-            for(File layer:layers.directories()){
-                Map<String,File> foundMap=new LinkedHashMap<>();
-                List<File> found=new ArrayList<>();files(layer,0,found,r);
-                ArchiveLanguage.addLayer(foundMap,layer,found,r.language);
-                for(Map.Entry<String,File> item:foundMap.entrySet()){
-                    all.put(item.getKey(),Blob.file(item.getValue()));
-                    display.put(item.getKey(),ArchiveLanguage.displayPath(layers.directories(),item.getValue()));
-                }
+        }
+        for(File layer:layers.directories()){
+            Map<String,File> foundMap=new LinkedHashMap<>();
+            List<File> found=new ArrayList<>();files(layer,0,found,r);
+            ArchiveLanguage.addLayer(foundMap,layer,found,r.language);
+            for(Map.Entry<String,File> item:foundMap.entrySet()){
+                all.put(item.getKey(),Blob.file(item.getValue()));
+                display.put(item.getKey(),ArchiveLanguage.displayPath(layer,null,item.getValue()));
             }
         }
+        Map<String,String> missed=new LinkedHashMap<>();
+        ArchiveLanguage.addEntries(missed,unreadableScripts,r.language);
+        if(!all.keySet().containsAll(missed.keySet()))r.limited=true;
         Map<String,Entry> loose=new TreeMap<>();List<Entry> entries=new ArrayList<>();
         for(Map.Entry<String,Blob> item:all.entrySet())if(program(item.getKey())){
             Blob blob=item.getValue();String source=display.get(item.getKey());
@@ -201,9 +212,15 @@ final class ProgramCompatibility {
         File patch=GamePatch.active(game),file=table(game,layers.base);
         File data=DirectGame.privateLayer(game);
         if(data==null)data=ContainerGame.data(game);
+        String sourceStamp="";
+        if(ContainerGame.linked(game)){
+            File source=ContainerGame.requireSource(game);
+            ContainerGame.SourceStamp stamp=layers.disc==null ? ContainerGame.stamp(source) : layers.disc.requireUnchanged(source);
+            sourceStamp="|"+stamp.path+"|"+stamp.modified+"|"+stamp.bytes+"|"+stamp.fileKey;
+        }
         return version+"|"+preference+"|"+file.lastModified()+"|"+file.length()+
             (language==null?"":"|"+language.id)+(patch==null?"":"|"+patch.getName())+
-            (data==null?"":"|"+new File(data,".openbgi/translation.properties").lastModified());
+            (data==null?"":"|"+new File(data,".openbgi/translation.properties").lastModified())+sourceStamp;
     }
     static void save(ResourceLayers layers,String preference,String version,Result result,String report)throws IOException {
         File game=layers.game;

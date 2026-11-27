@@ -481,37 +481,40 @@ public final class LauncherActivity extends Activity {
     }
     private void play(File dir) {
         if(importing)return;
-        if(DirectGame.linked(dir)&&!GameStorage.granted(this)){
+        if(engineRunning()){
+            if(read(new File(getFilesDir(),"active-game.txt"),"").equals(dir.getName()))launchGame(dir);
+            else toast(getString(R.string.exit_other_game));
+            return;
+        }
+        boolean container=ContainerGame.linked(dir);
+        if((container||DirectGame.linked(dir))&&!GameStorage.granted(this)){
             if(!GameStorage.directAvailable(this))toast(getString(R.string.guide_add_saf));
             else directAccess("play:"+dir.getName());
             return;
         }
         File resources;
+        boolean refreshContainer=false;
         try{
             resources=resourceDirectory(dir);
-            if(ContainerGame.linked(dir)){
-                // The container is checked from its stored summary; the engine mounts it at start.
-                File source=ContainerGame.source(dir);
-                boolean boot;
-                try(ResourceLayers layers=ResourceLayers.summary(dir,resources)){boot=layers.hasBootFiles();}
-                if(source==null||!source.isFile()||!boot){
+            if(container){
+                File source=ContainerGame.requireSource(dir);
+                ContainerGame.Summary known=ContainerGame.summary(dir);
+                refreshContainer=known==null||!ContainerGame.stamp(source).same(known.stamp);
+                if(!refreshContainer&&!known.boot){
                     toast(getString(ContainerGame.kind(dir)==ContainerGame.Kind.ZIP?R.string.zip_missing_files:R.string.image_missing_files));return;}
             }else if(!resources.isDirectory()||!ArchiveLanguage.hasBootFiles(GamePatch.resourceLayers(dir,resources))){
                 toast(DirectGame.linked(dir)?getString(R.string.game_folder_unreadable):getString(R.string.launch_files_missing));return;
             }
         }catch(IOException error){toast(error.getMessage());return;}
-        if(engineRunning() && !read(new File(getFilesDir(),"active-game.txt"),"").equals(dir.getName())) {
-            toast(getString(R.string.exit_other_game)); return;
-        }
-        // Do not change a running VM's settings or repeat the scan on resume.
-        if(engineRunning()){launchGame(dir);return;}
         try {
             GameSettings settings=TranslationRuntime.prepare(dir,resources);
-            try(ResourceLayers layers=ResourceLayers.summary(dir,resources)){
-                if(GameEncoding.applyArchiveLanguage(layers,settings))settings.save(dir);
-            }
-            if(!settings.needsEncodingDetection() && privateLayerReady(dir)) {
-                encodingPrepared(dir,settings);return;
+            if(!refreshContainer){
+                try(ResourceLayers layers=ResourceLayers.summary(dir,resources)){
+                    if(GameEncoding.applyArchiveLanguage(layers,settings))settings.save(dir);
+                }
+                if(!settings.needsEncodingDetection() && privateLayerReady(dir)) {
+                    encodingPrepared(dir,settings);return;
+                }
             }
         } catch(IOException error) { toast(getString(R.string.settings_read_failed)+error.getMessage());return; }
         final File input=resources;
@@ -541,10 +544,19 @@ public final class LauncherActivity extends Activity {
         dialog.show();Ui.style(dialog);
     }
     private void launchGame(File dir) {
+        if(GameActivity.COMPARE_PACKAGE.equals(getPackageName())) {
+            AlertDialog dialog=new AlertDialog.Builder(this).setTitle(getString(R.string.play_game))
+                .setItems(new String[]{getString(R.string.core_android),getString(R.string.core_upstream)},
+                    (d,which)->launchGame(dir,which==1)).create();
+            dialog.show();Ui.style(dialog);return;
+        }
+        launchGame(dir,false);
+    }
+    private void launchGame(File dir,boolean upstream) {
         try {
             write(new File(getFilesDir(),"active-game.txt"),dir.getName());
             try{write(new File(dir,".openbgi/last-played.txt"),Long.toString(System.currentTimeMillis()));}catch(IOException ignored){}
-            startActivity(new Intent(this,GameActivity.class));
+            startActivity(new Intent(this,GameActivity.class).putExtra(GameActivity.UPSTREAM,upstream));
         } catch(IOException error) { toast(error.getMessage()); }
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {

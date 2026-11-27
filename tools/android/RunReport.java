@@ -70,6 +70,17 @@ final class RunReport {
             }
         }
 
+        /* A launch can stop before the session starts - an unreadable game
+         * folder, a held lock, an encoding the chosen core cannot read - and
+         * then nothing else in the bundle says why. */
+        String startFailure="";
+        {
+            Map<String,String> failed=fields(new File(logs,"start-failure.txt"));
+            String at=failed.getOrDefault("Time","");
+            if(at.matches("[0-9]{1,16}") && Long.parseLong(at)>=Long.parseLong(epoch))
+                startFailure="Start failure: "+failed.getOrDefault("Reason",UNAVAILABLE)+" ("+at+")\n";
+        }
+
         return "Session epoch ms: "+epoch+"\n"+
             "Game: "+session.getOrDefault("Game title",UNAVAILABLE)+"\n"+
             "Session APK: "+session.getOrDefault("OpenBGI",UNAVAILABLE)+"\n"+
@@ -82,6 +93,7 @@ final class RunReport {
             "Extracted patch record SHA256: "+session.getOrDefault("Extracted patch record SHA256",UNAVAILABLE)+"\n"+
             "Last VM program: "+program+"\n"+
             "Error: "+error+"\n"+
+            startFailure+
             "Engine exit: "+run.getOrDefault("exit","not recorded")+"\n";
     }
 }

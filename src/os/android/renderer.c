@@ -2,11 +2,15 @@
  * GLES2 owns a persistent RGBA canvas texture; only changed rows are uploaded.
  * The window reference is independent of the UI's Surface reference.
  */
-#include "android_internal.h"
 #include "renderer.h"
-#include "viewport.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <android/native_window.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void OsAndroid_Log(const char* text);
 
 static struct {
     EGLDisplay display;
@@ -87,7 +91,7 @@ static int Open(ANativeWindow* window,unsigned generation)
 }
 
 int OsAndroid_Render(ANativeWindow* window,unsigned generation,const uint32_t* pixels,
-    int w,int h,AndroidDamage_t damage,int mode)
+    int w,int h,AndroidDamage_t damage,int mode,Viewport_t* presented)
 {
     EGLint sw,sh;Viewport_t v;GLint maxSize;
     /* bottom-left vertex samples the last canvas row: canvas memory is top-down. */
@@ -133,6 +137,7 @@ int OsAndroid_Render(ANativeWindow* window,unsigned generation,const uint32_t* p
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);glDrawArrays(GL_TRIANGLE_STRIP,0,4);
     gGlError=glGetError();
     if(gGlError!=GL_NO_ERROR || !eglSwapBuffers(gRender.display,gRender.surface))goto failed;
+    if(presented)*presented=v;
     ++gStats.frames;return 1;
 failed:
     {EGLint error=eglGetError();char log[160];if(gGlError==GL_NO_ERROR)gGlError=glGetError();

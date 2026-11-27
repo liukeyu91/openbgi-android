@@ -20,6 +20,21 @@ public final class CrashLogs extends Application {
         dir.mkdirs();
         return dir;
     }
+    /** A launch that stopped before the session began: the exported bundle has
+     *  no other trace, because the engine log is opened only once native code
+     *  runs. The reason is the same text the player saw as a toast. */
+    static void recordStartFailure(Context context, File game, String reason) {
+        if(reason == null || reason.isEmpty()) return;
+        try {
+            File file = new File(directory(context), "start-failure.txt");
+            String text = "Time: " + System.currentTimeMillis() + "\n"
+                + identity(context)
+                + "Game: " + (game == null ? "unknown" : game.getName()) + "\n"
+                + "Reason: " + reason.replace('\n', ' ') + "\n";
+            Files.write(file.toPath(), text.getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException | RuntimeException ignored) {}
+    }
     @Override public void onCreate() {
         super.onCreate();
         File dir = directory(this);
@@ -47,9 +62,9 @@ public final class CrashLogs extends Application {
             return "Package: "+context.getPackageName()+"\nOpenBGI: "+pkg.versionName+" ("+pkg.versionCode+")\n";
         } catch(Exception unavailable) { return "Package: "+context.getPackageName()+"\n"; }
     }
-    private static String nativeHash(Context context) {
+    private static String nativeHash(Context context,String library) {
         try(ZipFile apk=new ZipFile(context.getApplicationInfo().sourceDir)) {
-            ZipEntry entry=apk.getEntry("lib/arm64-v8a/libopenbgi.so");
+            ZipEntry entry=apk.getEntry("lib/arm64-v8a/"+library);
             if(entry==null)return "unavailable";
             MessageDigest hash=MessageDigest.getInstance("SHA-256");
             try(InputStream in=apk.getInputStream(entry)) {
@@ -76,7 +91,7 @@ public final class CrashLogs extends Application {
         } catch(IOException ignored) {}
         return game.getName();
     }
-    static long beginSession(Context context, File game, File storage, File data, GameSettings settings) {
+    static long beginSession(Context context, File game, File storage, File data, GameSettings settings, boolean upstream) {
         sessionEpoch=System.currentTimeMillis();
         File dir=directory(context);
         String overlayId="none", overlayHash="none", extracted="unavailable";
@@ -95,7 +110,9 @@ public final class CrashLogs extends Application {
             "\nEngine selection: "+settings.profile+"\nArchive language: "+(settings.archiveLanguage.isEmpty()?"default":settings.archiveLanguage)
             +"\nOverlay id: "+overlayId+"\nOverlay content SHA256: "+overlayHash+"\nExtracted patch record SHA256: "+extracted
             +"\nTranslation adapter: "+settings.translationProfile+"\nFont override: "+settings.fontFamily
-            +"\nScale mode: "+settings.scale+"\nNative SHA256: "+nativeHash(context)+"\n";
+            +"\nScale mode: "+settings.scale+"\nNative SHA256: "+nativeHash(context,"libopenbgi.so")+"\n";
+        if(upstream)info+="Upstream SHA256: "+nativeHash(context,"libopenbgi-arm64.so")
+            +"\nBridge SHA256: "+nativeHash(context,"libopenbgi_compare.so")+"\n";
         try {
             Path current=new File(dir,"session-current.txt").toPath();
             if(Files.exists(current))Files.move(current,new File(dir,"session-previous.txt").toPath(),StandardCopyOption.REPLACE_EXISTING);
@@ -166,7 +183,7 @@ public final class CrashLogs extends Application {
                 +"Previous session records may be older than the current APK. Session epoch/PID in each report identifies it.\n"
                 +"No save files or game resources are exported. Logs can contain error messages and file/device names.\n");
             String[] names={"native-crash.txt","native-crash-previous.txt","session-current.txt","session-previous.txt",
-                "java-crash.txt","java-crash-previous.txt","engine-current.txt","engine-previous.txt"};
+                "java-crash.txt","java-crash-previous.txt","engine-current.txt","engine-previous.txt","start-failure.txt"};
             for(String name:names) {
                 File file=new File(directory(context),name);
                 if(!file.isFile())continue;

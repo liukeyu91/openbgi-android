@@ -64,6 +64,15 @@ static int CompareEntries(const void* a, const void* b)
 	return strcasecmp(((const VolEntry_t*)a)->path, ((const VolEntry_t*)b)->path);
 }
 
+/* A name that marks the directory holding the game: the IPL, the shared
+ * script archive, or a localized one (system.tc.arc and its kin), which is
+ * all a translated distribution may ship. */
+static int RootMarker(const char* name)
+{
+	return !strcasecmp(name, "ipl._bp") || !strcasecmp(name, "system.arc") ||
+		OsPosix_IsLocalizedSystemArc(name);
+}
+
 static void FindGameRoot(const VolList_t* list, char* root)
 {
 	size_t bestDepth = VOL_NAME_MAX;
@@ -74,8 +83,7 @@ static void FindGameRoot(const VolList_t* list, char* root)
 		const char* name = strrchr(entry->path, '/');
 		name = name ? name + 1 : entry->path;
 		size_t prefix = (size_t)(name - entry->path);
-		if(entry->isDir || !entry->readable || !entry->size ||
-			(strcasecmp(name, "ipl._bp") && strcasecmp(name, "system.arc")))
+		if(entry->isDir || !entry->readable || !entry->size || !RootMarker(name))
 			continue;
 		size_t depth = 0;
 		for(size_t j = 0; j < prefix; j++)

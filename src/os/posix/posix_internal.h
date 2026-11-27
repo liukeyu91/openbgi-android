@@ -52,5 +52,9 @@ extern char gPosixRegFile[PATH_MAX];   // the registry emulation's file (registr
 
 void OsPosix_SjisInit(void);     // open the CP932 converters (sjis.c)
 void OsPosix_SjisShutdown(void); // close them
+void OsPosix_SetUtf8Paths(int utf8);
+int OsPosix_Utf8Paths(void);
+void OsPosix_PathToUtf8(const char* path, char* out, size_t n);
+int OsPosix_WriteNativePath(const char* native, char* out, size_t n, int createParents);
 
 #endif

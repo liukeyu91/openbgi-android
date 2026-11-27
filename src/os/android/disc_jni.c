@@ -9,7 +9,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "android_internal.h"
 #include "../posix/disc_internal.h"
 
 /* One line per entry: "relative/path<TAB>data<TAB>size<TAB>csize<TAB>method<TAB>flags".
@@ -17,7 +16,7 @@
  * sees the same layout a directory game would have; data is the first byte
  * of the stored bytes and csize their count (the same as size for a disc
  * image, smaller for a deflated ZIP entry, which method 8 marks); flags is
- * 1 = directory, 2 = readable, 4 = stored contiguously. */
+ * 1 = directory, 2 = readable, 4 = stored contiguously, 8 = encrypted. */
 JNIEXPORT jobjectArray JNICALL Java_org_openbgi_port_DiscImage_nativeEntries(
 	JNIEnv* env,jclass type,jstring image)
 {
@@ -55,7 +54,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_openbgi_port_DiscImage_nativeEntries(
 		if(!entry || entry->path==NULL)continue;
 		{
 			const char* relative=entry->path;
-			int flags=(entry->isDir?1:0)|(entry->readable?2:0)|(entry->stored?4:0);
+			int flags=(entry->isDir?1:0)|(entry->readable?2:0)|(entry->stored?4:0)|(entry->encrypted?8:0);
 			/* The game root itself is the directory the paths are relative to. */
 			if(rootLength && !strncmp(relative,root,rootLength))
 			{
