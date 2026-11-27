@@ -168,7 +168,7 @@
     <string name="encoding_unset">"Elige la codificación del texto en los ajustes del juego."</string>
     <string name="engine_start_error">"No se pudo iniciar el motor. Puedes exportar los registros desde Información."</string>
     <string name="core_android">"OpenBGI Android"</string>
-    <string name="core_upstream">"OpenBGI 1.0 (upstream)"</string>
+    <string name="core_upstream">"OpenBGI 1.0"</string>
     <string name="resume_game">"Reanudar juego"</string>
     <string name="stop_skip">"Detener avance rápido"</string>
     <string name="skip">"Avance rápido"</string>

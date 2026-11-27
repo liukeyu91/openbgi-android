@@ -474,11 +474,10 @@ static int Opcode_Gfx2_PreloadImage(Thread_t* t)
 {
 	const char* name = (const char*)PopPtr(t);
 	const char* arc = (const char*)PopPtr(t);
-	uint8_t* buf = (uint8_t*)BGI_Alloc(0x2000000);
-	uint32_t n = LoadFile(buf, arc, name);
-	int ok = n >= 0x10 && (BGI_IsCbg(buf) || ((const RawImageHeader_t*)buf)->bpp % 8 == 0);
-	BGI_Free(buf);
-	if(!ok)
+	RawImageHeader_t header;
+	// The loader sizes its decoded buffer; preload only needs the header.
+	if(LoadFileRangeDecoded(&header, arc, name, 0, sizeof header) != 0 ||
+		(!BGI_IsCbg(&header) && header.bpp % 8 != 0))
 		GFX_ERROR(t, MSG_NOT_BG_FILE, arc, name);
 	return 0;
 }

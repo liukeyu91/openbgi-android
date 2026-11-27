@@ -168,7 +168,7 @@
     <string name="encoding_unset">"Choose a text encoding in Game settings."</string>
     <string name="engine_start_error">"The engine failed to start. Export logs from About for details."</string>
     <string name="core_android">"OpenBGI Android"</string>
-    <string name="core_upstream">"OpenBGI 1.0 (upstream)"</string>
+    <string name="core_upstream">"OpenBGI 1.0"</string>
     <string name="resume_game">"Resume game"</string>
     <string name="stop_skip">"Stop fast-forward"</string>
     <string name="skip">"Fast-forward"</string>

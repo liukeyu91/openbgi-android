@@ -38,6 +38,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - run: docker build -t openbgi-build -f tools/ci/Dockerfile .
       - run: mkdir -p ../deps ../reproduction
       - name: Verify locked dependencies and compile ARM64 libraries

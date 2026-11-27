@@ -90,11 +90,12 @@ make android-native ANDROID_NDK_HOME="$ANDROID_NDK_HOME" \
     ANDROID_VORBIS_PREFIX="$CODEC_PREFIX" ANDROID_FFMPEG_PREFIX="$ANDROID_FFMPEG_PREFIX"
 ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" FREETYPE_SOURCE="$FREETYPE_SOURCE" \
     OGG_SOURCE="$OGG_SOURCE" VORBIS_SOURCE="$VORBIS_SOURCE" FFMPEG_SOURCE="$FFMPEG_SOURCE" \
-    sh tools/android/package-smoke.sh
+    sh tools/android/host-spike/package-compare.sh "$UPSTREAM_SOURCE" bin/android bin/android-full full
 ```
 
-全功能包输出至 `bin/android/openbgi.apk`。同一构建环境下运行 `ANDROID_STORAGE_VARIANT=saf sh tools/android/package-smoke.sh`，用同一把签名密钥生成 `bin/android/openbgi-saf.apk`。
-原有独立 UI Preview 仍可用 `sh tools/android/package-ui-preview.sh` 构建。
+从完整 Git 检出运行 `sh tools/android/prepare-upstream.sh`，可在 `upstream-core/` 还原 OpenBGI 1.0 核心的源码。双核心 Release 源码包已经包含该目录。将 `UPSTREAM_SOURCE` 指向它，并先按 `tools/ci/android-build.sh` 中的命令构建 `bin/android/libopenbgi-arm64.so`。
+全功能包输出至 `bin/android-full/openbgi.apk`。将打包命令最后两个参数改为 `bin/android-saf saf` 可生成 `bin/android-saf/openbgi-saf.apk`。
+独立 UI Preview 可用 `sh tools/android/package-ui-preview.sh` 构建，将 `ANDROID_COMPARE_LIB_DIR` 指向上述双核心包的 `arm64-v8a` 目录。
 正式打包必须显式提供工程外的持久签名密钥和密码环境变量，并通过已固定的证书 SHA-256 校验；脚本不会自动生成替代密钥。详见 [签名、CI 与可复现构建](../../docs/build-integrity.md)。
 
 ## 开发检查

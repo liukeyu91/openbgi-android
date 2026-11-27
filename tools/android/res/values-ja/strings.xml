@@ -168,7 +168,7 @@
     <string name="encoding_unset">"「ゲーム設定」で文字コードを選択してください。"</string>
     <string name="engine_start_error">"エンジンを起動できませんでした。「アプリ情報」からログをエクスポートできます。"</string>
     <string name="core_android">"OpenBGI Android"</string>
-    <string name="core_upstream">"OpenBGI 1.0（アップストリーム）"</string>
+    <string name="core_upstream">"OpenBGI 1.0"</string>
     <string name="resume_game">"ゲームを再開"</string>
     <string name="stop_skip">"スキップ停止"</string>
     <string name="skip">"スキップ"</string>

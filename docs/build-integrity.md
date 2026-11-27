@@ -13,8 +13,8 @@ Windows 可用 `tools/android/Invoke-AndroidPackage.ps1` 加载 `%USERPROFILE%\.
 ```sh
 export OPENBGI_KEYSTORE=/protected/outside-checkout/android.p12
 export OPENBGI_KEY_ALIAS=openbgi-smoke
-# 通过安全凭据管理器注入 OPENBGI_STORE_PASS；不要把密码写入命令历史。
-sh tools/android/package-smoke.sh
+# 通过凭据管理器注入 OPENBGI_STORE_PASS。
+sh tools/android/host-spike/package-compare.sh upstream-core bin/android bin/android-full full
 ```
 
 分叉项目若使用自己的身份，必须显式设置 `OPENBGI_EXPECTED_CERT_SHA256`，并理解它不能覆盖安装原包。原项目维护者不应使用该变量绕过固定证书检查。
@@ -32,7 +32,7 @@ docker run --rm -v "$PWD:/src:ro" -v "$PWD/../deps:/deps" openbgi-build sh tools
 docker run --rm -v "$PWD:/src:ro" -v "$PWD/../deps:/deps:ro" -v "$PWD/../reproduction:/reproduction" openbgi-build python3 tools/ci/reproduce.py /reproduction /deps
 ```
 
-重建程序复制同一提交到两个不同长度的路径，各自从空 obj/bin 构建。源提交时间作为 `SOURCE_DATE_EPOCH`，编译器映射源码绝对路径，ZIP 条目顺序、权限和时间戳统一。两次生成的 ELF、DEX 和主包/UI Preview 对齐后的**未签名 APK** 必须逐字节相同，结果写入 `reproducibility.json`。比较失败即 CI 失败。该保证限定于固定 Linux/amd64 工具链，不承诺任意编译器、平台或签名流程均相同。
+重建程序在两个不同长度的路径中构建同一提交及其 OpenBGI 1.0 核心。源提交时间作为 `SOURCE_DATE_EPOCH`，编译器映射源码绝对路径，ZIP 条目顺序、权限和时间戳统一。两次生成的原生库、DEX 和全功能包、SAF 包及 UI Preview 的**未签名 APK** 必须逐字节相同，结果写入 `reproducibility.json`。比较失败即 CI 失败。该检查使用固定 Linux/amd64 工具链。
 
 CI 产物明确命名 `openbgi-unsigned.apk`，不能直接用于覆盖安装正式包。正式发布要在保管密钥的环境运行签名打包并再次校验证书。没有在公共 CI 自动签发正式 APK。
 

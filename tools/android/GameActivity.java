@@ -32,7 +32,6 @@ import java.io.File;
 /** A single session in :engine. Android UI never calls into the VM directly. */
 public final class GameActivity extends Activity implements SurfaceHolder.Callback, InputManager.InputDeviceListener {
     static { System.loadLibrary("openbgi"); }
-    static final String COMPARE_PACKAGE = "org.openbgi.hostcompare";
     static final String UPSTREAM = "upstream";
     private boolean ready, resumed, focused, surfaceReady, framePosted;
     private SurfaceView surface;
@@ -121,7 +120,7 @@ public final class GameActivity extends Activity implements SurfaceHolder.Callba
             CrashLogs.recordStartFailure(this,game,getString(R.string.encoding_unset));
             Toast.makeText(this,getString(R.string.encoding_unset),Toast.LENGTH_LONG).show();engineFinished();return;
         }
-        boolean upstream=COMPARE_PACKAGE.equals(getPackageName()) && getIntent().getBooleanExtra(UPSTREAM,false);
+        boolean upstream=BuildFeatures.DUAL_CORE && getIntent().getBooleanExtra(UPSTREAM,false);
         long sessionEpoch=CrashLogs.beginSession(this,game,storage,data,settings,upstream);
         nativeFontFamily(settings.fontFamily);
         File external = getExternalFilesDir(null);

@@ -34,6 +34,24 @@ esac
 # Unsigned CI artifacts and signed release APKs are separate outputs.
 mode=${OPENBGI_SIGNING_MODE:-release}
 case "$mode" in release|unsigned) ;; *) echo "Unknown signing mode: $mode" >&2; exit 1;; esac
+compare=${ANDROID_COMPARE_LIB_DIR:-}
+dual_core=false
+if [ -n "$compare" ]; then
+    test -f "$compare/libopenbgi_compare.so"
+    test -f "$compare/libopenbgi-arm64.so"
+    dual_core=true
+fi
+if grep -Fq 'package="org.openbgi.hostcompare"' "$manifest"; then
+    test "$dual_core" = true && test "$storage" = full && test "$mode" = unsigned || {
+        echo "The comparison package requires both cores and its separate signing step." >&2
+        exit 1
+    }
+    apk_name=openbgi-host-compare
+fi
+if [ "$mode" = release ] && [ "$dual_core" != true ]; then
+    echo "Release APKs require both cores. Set ANDROID_COMPARE_LIB_DIR to the upstream core and bridge directory." >&2
+    exit 1
+fi
 epoch=${SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=%ct 2>/dev/null || true)}
 : "${epoch:?Set SOURCE_DATE_EPOCH when building without Git history}"
 test -f "$lib"
@@ -68,8 +86,9 @@ python3 "$root/tools/android/normalize-zip.py" "$stage/resources.zip" "$stage/re
 mkdir -p "$stage/classes"
 sh "$root/tools/android/generate-profiles.sh" "$stage/EngineProfiles.java"
 python3 "$root/tools/android/generate-patch-profiles.py" "$stage/PatchProfiles.java"
+printf 'package org.openbgi.port;\nfinal class BuildFeatures { static final boolean DUAL_CORE = %s; }\n' "$dual_core" > "$stage/BuildFeatures.java"
 javac --release 8 -encoding UTF-8 -classpath "$platform" -d "$stage/classes" \
-    "$stage/org/openbgi/port/R.java" "$root/tools/android/AppLanguage.java" "$root/tools/android/AppMessages.java" \
+    "$stage/org/openbgi/port/R.java" "$stage/BuildFeatures.java" "$root/tools/android/AppLanguage.java" "$root/tools/android/AppMessages.java" \
     "$root/tools/android/Ui.java" "$root/tools/android/LibraryCover.java" "$root/tools/android/SaveBackup.java" "$root/tools/android/SaveRestore.java" "$root/tools/android/GameDataLock.java" \
     "$root/tools/android/InitialTextRepair.java" "$root/tools/android/InitialTextRepairDialog.java" \
     "$root/tools/android/ArchiveTextSamples.java" "$root/tools/android/EncodingDetector.java" "$root/tools/android/EncodingPreview.java" "$root/tools/android/GameEncoding.java" "$root/tools/android/ArchiveLanguage.java" \
@@ -84,6 +103,9 @@ java -cp "$d8" com.android.tools.r8.D8 --release --min-api 28 --lib "$platform" 
 mkdir -p "$stage/lib/arm64-v8a" "$stage/assets/licenses"
 cp "$root/tools/android/build-info.txt" "$stage/assets/build-info.txt"
 cp "$lib" "$stage/lib/arm64-v8a/"
+if [ -n "$compare" ]; then
+    cp "$compare/libopenbgi_compare.so" "$compare/libopenbgi-arm64.so" "$stage/lib/arm64-v8a/"
+fi
 cp "$root/LICENSE" "$stage/assets/licenses/OpenBGI-GPLv2.txt"
 cp "$ft/docs/GPLv2.TXT" "$stage/assets/licenses/FreeType-GPLv2.txt"
 cp "$ogg/COPYING" "$stage/assets/licenses/libogg.txt"

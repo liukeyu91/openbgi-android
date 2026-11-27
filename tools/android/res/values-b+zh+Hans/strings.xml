@@ -168,7 +168,7 @@
     <string name="encoding_unset">"文字编码尚未确定，请在游戏设置中选择。"</string>
     <string name="engine_start_error">"引擎启动失败，可在“关于”页导出日志。"</string>
     <string name="core_android">"OpenBGI Android"</string>
-    <string name="core_upstream">"OpenBGI 1.0（上游）"</string>
+    <string name="core_upstream">"OpenBGI 1.0"</string>
     <string name="resume_game">"继续游戏"</string>
     <string name="stop_skip">"停止快进"</string>
     <string name="skip">"快进"</string>

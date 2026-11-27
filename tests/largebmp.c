@@ -12,6 +12,7 @@
 #include "bgi/wait.h"
 #include "bgi/os.h"
 #include "bgi/version.h"
+#include "bgi/vm.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -51,7 +52,7 @@ static uint8_t* LargeCbg2(uint32_t* size)
 	return data;
 }
 
-static void CompressedSync(void)
+static void CompressedSync(Thread_t* thread)
 {
 	uint32_t stored;uint8_t* compressed=LargeCbg2(&stored);
 	FILE* file=fopen("large.cbg","wb");CHECK(file!=NULL);
@@ -59,6 +60,11 @@ static void CompressedSync(void)
 	free(compressed);
 	CHECK(stored < 0x2000000u);
 	CHECK(GetLoadFileSize(NULL,"large.cbg")==40737616u);
+	Vm_TablesInit();
+	strcpy((char*)thread->data, "large.cbg");
+	Thread_Push(thread, 0);
+	Thread_Push(thread, gEngine->tagData << gEngine->tagShift);
+	CHECK(vm_optable_92[0x14](thread) == 0);
 	Loader_FreeCache();BmpMgr_FreeAll(gBmpMgr);
 	Loader_SetCacheSize(2u*40737616+128);
 	for(int cached=0;cached<2;cached++) {
@@ -134,7 +140,7 @@ int main(void)
 		CHECK(bmp.pixels[(size_t)(height - 1) * bmp.pitch + (width - 1) * 4 + 1] == 0x78);
 		wait->vt->destroy(wait);
 	}
-	CompressedSync();
+	CompressedSync(thread);
 	Loader_FreeCache();
 	BmpMgr_Delete(gBmpMgr);
 	gBmpMgr = NULL;

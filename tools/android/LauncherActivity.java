@@ -544,7 +544,7 @@ public final class LauncherActivity extends Activity {
         dialog.show();Ui.style(dialog);
     }
     private void launchGame(File dir) {
-        if(GameActivity.COMPARE_PACKAGE.equals(getPackageName())) {
+        if(BuildFeatures.DUAL_CORE) {
             AlertDialog dialog=new AlertDialog.Builder(this).setTitle(getString(R.string.play_game))
                 .setItems(new String[]{getString(R.string.core_android),getString(R.string.core_upstream)},
                     (d,which)->launchGame(dir,which==1)).create();

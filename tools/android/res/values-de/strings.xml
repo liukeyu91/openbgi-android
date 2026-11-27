@@ -168,7 +168,7 @@
     <string name="encoding_unset">"Wähle eine Textkodierung in den Spieleinstellungen."</string>
     <string name="engine_start_error">"Die Engine konnte nicht gestartet werden. Unter Info kannst du Protokolle exportieren."</string>
     <string name="core_android">"OpenBGI Android"</string>
-    <string name="core_upstream">"OpenBGI 1.0 (Upstream)"</string>
+    <string name="core_upstream">"OpenBGI 1.0"</string>
     <string name="resume_game">"Spiel fortsetzen"</string>
     <string name="stop_skip">"Vorspulen stoppen"</string>
     <string name="skip">"Vorspulen"</string>

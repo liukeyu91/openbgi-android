@@ -13,7 +13,8 @@ Requires Android 9 or later on an ARM64 device. The app provides the engine; you
 - Choose Simplified Chinese, Traditional Chinese, English, Japanese, Korean, Spanish, French, or German in About → App language. The interface follows the system language by default.
 - Import and export save ZIPs, including global progress.
 - Check script instructions after import and save the results.
-- Detect text encoding automatically, with manual SJIS, GBK, and UTF-8 selection.
+- Detect text encoding automatically. Supported encodings include CP932 (Windows-31J, shown as SJIS), GBK, Big5, and UTF-8.
+- Dual-core APKs let you choose OpenBGI Android or OpenBGI 1.0 when launching a game. Engine version support varies by core.
 - Touch controls, screen shortcuts, keyboard support, and basic controller mappings.
 - In-game text input, system dialogs, and runtime log export.
 - Built-in FFmpeg playback for standard movie formats, with audio/video synchronization, tap to skip, and background pause.
@@ -34,7 +35,7 @@ For MakingHD imports affected by the equal-size compression bug, update to **0.1
 
 The Android port is still under development. Compatibility needs to be verified per title. Static instruction checks and successful resource extraction do not establish full-game compatibility. Streamed BF_Movie formats remain unsupported; see the [movie implementation notes](docs/android-movie.md) (Chinese) for details.
 
-See the [1.0.1-android release notes](docs/android-1.0.1.md) and [known limitations](docs/known-issues.md) for changes and test coverage.
+See the [1.0.2-android release notes](docs/android-1.0.2.md) and [known limitations](docs/known-issues.md) for changes and test coverage.
 
 ## AI collaboration
 
@@ -59,7 +60,7 @@ OpenBGI is an open-source reimplementation, in C99, of Ethornell's
 reverse-engineered function by function from the `tayutama.exe` build
 (ver 1.69, build 444.2, with the "Wave Master" sound library) and
 extended to run the scripts of the engine's other builds, from ver 1.58
-to ver 1.669 (`docs/versions.md`).  Every function keeps the original's
+to ver 1.680 (`docs/versions.md`).  Every function keeps the original's
 results for the same inputs, including its result codes and quirks.  The
 Windows specifics sit behind an OS layer (`inc/bgi/os.h`) with a Win32
 back end, a Linux back end (X11, FreeType, ALSA) and a WebAssembly back
@@ -106,6 +107,7 @@ The games we have been working on, with the engine build each one needs
 | Yumahorome | `Yumahorome` | 1.662 | Boots, but crashes in prolouge |
 | Arcana Alchemia | `ArcanaAlchemia` | 1.667 | Testing in progress |
 | Haruka Ao no Hanayome ni | `HarukaAonoHanayomeni` | 1.669 | Testing in progress |
+| Lovepical Poppy | `LovepicalPoppy` | 1.680 | Boots to the title screen |
 
 ### Definitions
 

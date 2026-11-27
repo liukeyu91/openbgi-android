@@ -13,7 +13,8 @@ OpenBGI 是 BGI / Ethornell 引擎的 C99 重写。本仓库提供 Android 移�
 - 界面支持简体中文、繁体中文、英语、日语、韩语、西班牙语、法语和德语。在“关于”→“应用语言”中切换，默认跟随系统。
 - 存档 ZIP 导入与导出，包含全局进度。
 - 导入后检查程序指令，并保存检查结果。
-- 文字编码自动检测，以及 SJIS、GBK、UTF-8 手动选择。
+- 文字编码自动检测，支持 CP932（Windows-31J，界面显示为 SJIS）、GBK、Big5 和 UTF-8。
+- 双核心 APK 启动游戏时可选 OpenBGI Android 或 OpenBGI 1.0。支持的引擎版本随核心而异。
 - 触摸操作、屏幕快捷键、键盘和基本手柄映射。
 - 游戏内文字输入、系统对话框和运行日志导出。
 - 内置 FFmpeg 播放常规影片，支持音画同步、点击跳过和后台暂停。
@@ -30,7 +31,7 @@ OpenBGI 是 BGI / Ethornell 引擎的 C99 重写。本仓库提供 Android 移�
 导入时会自动展开已识别的汉化资源包，并应用已知游戏的编码与引擎设置。已有游戏可在卡片菜单选择“处理汉化补丁”。
 
 Android 版仍在开发中，不同作品的兼容性需要分别验证。
-`1.0.1-android` 的变更和测试范围见[版本说明](docs/android-1.0.1.md)和[已知限制](docs/known-issues.md)。
+`1.0.2-android` 的变更和测试范围见[版本说明](docs/android-1.0.2.md)和[已知限制](docs/known-issues.md)。
 
 ## AI 协作
 
@@ -52,7 +53,7 @@ OpenBGI is an open-source reimplementation, in C99, of Ethornell's
 reverse-engineered function by function from the `tayutama.exe` build
 (ver 1.69, build 444.2, with the "Wave Master" sound library) and
 extended to run the scripts of the engine's other builds, from ver 1.58
-to ver 1.669 (`docs/versions.md`).  Every function keeps the original's
+to ver 1.680 (`docs/versions.md`).  Every function keeps the original's
 results for the same inputs, including its result codes and quirks.  The
 Windows specifics sit behind an OS layer (`inc/bgi/os.h`) with a Win32
 back end, a Linux back end (X11, FreeType, ALSA) and a WebAssembly back
@@ -99,6 +100,7 @@ The games we have been working on, with the engine build each one needs
 | Yumahorome | `Yumahorome` | 1.662 | Boots, but crashes in prolouge |
 | Arcana Alchemia | `ArcanaAlchemia` | 1.667 | Testing in progress |
 | Haruka Ao no Hanayome ni | `HarukaAonoHanayomeni` | 1.669 | Testing in progress |
+| Lovepical Poppy | `LovepicalPoppy` | 1.680 | Boots to the title screen |
 
 ### Definitions
 

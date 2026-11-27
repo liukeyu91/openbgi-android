@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.openbgi.hostspike" android:versionCode="1" android:versionName="0.1">
+    package="org.openbgi.hostspike" android:versionCode="5" android:versionName="0.5">
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
-    <application android:label="OpenBGI Host Spike" android:hasCode="false" android:allowBackup="false"
+    <application android:label="OpenBGI Host Spike" android:allowBackup="false"
         android:extractNativeLibs="false" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
-        <activity android:name="android.app.NativeActivity" android:exported="true"
+        <activity android:name=".HostActivity" android:exported="true"
             android:screenOrientation="landscape" android:configChanges="orientation|keyboardHidden|screenSize">
             <meta-data android:name="android.app.lib_name" android:value="openbgi_host_spike" />
             <intent-filter>
